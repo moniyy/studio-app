@@ -1,0 +1,15 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Node / tooling (not used by the app, just in case)
+node_modules/
+npm-debug.log*
+
+# Local notes, secrets
+*.log
+.env
+.claude/

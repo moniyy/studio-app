@@ -1,0 +1,724 @@
+{
+  "name": "Aria Lash Studio",
+  "tagline": "Lashes & brows that wake up ready",
+  "city": "Atlanta, GA",
+  "address": "1080 Peachtree St NE, Suite 4B, Atlanta, GA 30309",
+  "parking": "Free 2-hour parking in the Peachtree Square garage — take a ticket, we validate at checkout. Street parking on 12th St.",
+  "timezone": "America/New_York",
+  "avatar": "https://images.pexels.com/photos/5128228/pexels-photo-5128228.jpeg?auto=compress&cs=tinysrgb&w=400&h=400&fit=crop&crop=top",
+  "heroPhoto": "https://images.pexels.com/photos/5128219/pexels-photo-5128219.jpeg?auto=compress&cs=tinysrgb&w=900",
+  "heroVideo": "",
+  "brandAccent": "#C9796B",
+  "splashStyle": "clean",
+  "splashEmoji": "Sparkles",
+  "bookingUrl": "https://example.com/book-aria-lash-studio",
+  "instagram": "arialash.demo",
+  "phone": "+1 (404) 555-0142",
+  "nextAvailable": "Today, 3:30 PM",
+  "slots": [
+    "Today 3:30 PM",
+    "Today 5:00 PM",
+    "Tomorrow 11:00 AM",
+    "Tomorrow 2:30 PM",
+    "Fri 10:00 AM",
+    "Fri 1:00 PM",
+    "Sat 12:30 PM",
+    "Sat 3:00 PM",
+    "Mon 9:00 AM",
+    "Mon 1:30 PM",
+    "Tue 11:00 AM",
+    "Tue 4:00 PM"
+  ],
+  "rating": 4.9,
+  "reviewCount": 128,
+  "stats": [
+    {
+      "value": 6,
+      "suffix": "+",
+      "label": "years"
+    },
+    {
+      "value": 2400,
+      "suffix": "+",
+      "label": "sets done"
+    },
+    {
+      "value": 4.9,
+      "decimals": 1,
+      "suffix": " ★",
+      "label": "rating"
+    }
+  ],
+  "deposit": 30,
+  "prep": [
+    "Come with clean lashes — no mascara or eye makeup",
+    "Skip caffeine 2 hours before so you can relax",
+    "Take out contact lenses and bring your glasses"
+  ],
+  "loyalty": {
+    "total": 6,
+    "filled": 3,
+    "reward": "6th fill 50% off",
+    "terms": "Get a stamp at every lash or brow visit. On your 6th visit your fill is 50% off. Stamps never expire."
+  },
+  "referral": {
+    "title": "Give $10, get $10",
+    "text": "Send a friend your link — you both get $10 off after her first visit.",
+    "shareText": "Lashes that wake up ready ✨ Book with Aria and we both get $10 off:"
+  },
+  "notice": "New: fall availability is open ✨",
+  "notifications": [
+    {
+      "id": "fall-2026",
+      "title": "Fall availability is open",
+      "text": "October and November books are live — weekend spots go first ✨",
+      "time": "2h ago",
+      "icon": "calendar"
+    },
+    {
+      "id": "wet-set",
+      "title": "New: Wet set look",
+      "text": "Glossy, spiky lashes are here. Ask for the Wet set at your next full set or fill.",
+      "time": "Yesterday",
+      "icon": "sparkles"
+    },
+    {
+      "id": "holiday-hours",
+      "title": "Holiday hours",
+      "text": "Closed Nov 27–28 for Thanksgiving. Extra Saturday openings the week before.",
+      "time": "Sep 24",
+      "icon": "bell"
+    }
+  ],
+  "stories": [
+    {
+      "title": "New sets",
+      "cover": "https://images.pexels.com/photos/5128235/pexels-photo-5128235.jpeg?auto=compress&cs=tinysrgb&w=300&h=300&fit=crop",
+      "slides": [
+        {
+          "photo": "https://images.pexels.com/photos/5128235/pexels-photo-5128235.jpeg?auto=compress&cs=tinysrgb&w=900",
+          "caption": "Soft hybrid set, fresh this morning ✨"
+        },
+        {
+          "photo": "https://images.pexels.com/photos/5128220/pexels-photo-5128220.jpeg?auto=compress&cs=tinysrgb&w=900",
+          "caption": "Classic set — natural, mascara-like finish"
+        },
+        {
+          "photo": "https://images.pexels.com/photos/5128234/pexels-photo-5128234.jpeg?auto=compress&cs=tinysrgb&w=900",
+          "caption": "Volume that still feels weightless"
+        }
+      ]
+    },
+    {
+      "title": "Before & After",
+      "cover": "https://images.pexels.com/photos/5128267/pexels-photo-5128267.jpeg?auto=compress&cs=tinysrgb&w=300&h=300&fit=crop",
+      "slides": [
+        {
+          "photo": "https://images.pexels.com/photos/5128232/pexels-photo-5128232.jpeg?auto=compress&cs=tinysrgb&w=900",
+          "caption": "Before: natural lashes, pads on 🤍"
+        },
+        {
+          "photo": "https://images.pexels.com/photos/5128267/pexels-photo-5128267.jpeg?auto=compress&cs=tinysrgb&w=900",
+          "caption": "After: wispy hybrid set, 2h 15m"
+        },
+        {
+          "photo": "https://images.pexels.com/photos/5128271/pexels-photo-5128271.jpeg?auto=compress&cs=tinysrgb&w=900",
+          "caption": "Brushed out and ready for the week"
+        }
+      ]
+    },
+    {
+      "title": "Aftercare",
+      "cover": "https://images.pexels.com/photos/5128084/pexels-photo-5128084.jpeg?auto=compress&cs=tinysrgb&w=300&h=300&fit=crop",
+      "slides": [
+        {
+          "photo": "https://images.pexels.com/photos/5128084/pexels-photo-5128084.jpeg?auto=compress&cs=tinysrgb&w=900",
+          "caption": "Brush every morning with a clean spoolie"
+        },
+        {
+          "photo": "https://images.pexels.com/photos/5128079/pexels-photo-5128079.jpeg?auto=compress&cs=tinysrgb&w=900",
+          "caption": "Keep them dry for the first 24 hours"
+        },
+        {
+          "photo": "https://images.pexels.com/photos/5128080/pexels-photo-5128080.jpeg?auto=compress&cs=tinysrgb&w=900",
+          "caption": "Oil-free cleanser only — your set will thank you"
+        }
+      ]
+    },
+    {
+      "title": "Studio",
+      "cover": "https://images.pexels.com/photos/5128231/pexels-photo-5128231.jpeg?auto=compress&cs=tinysrgb&w=300&h=300&fit=crop",
+      "slides": [
+        {
+          "photo": "https://images.pexels.com/photos/5128219/pexels-photo-5128219.jpeg?auto=compress&cs=tinysrgb&w=900",
+          "caption": "Welcome to the studio in Midtown 🌿"
+        },
+        {
+          "photo": "https://images.pexels.com/photos/5128231/pexels-photo-5128231.jpeg?auto=compress&cs=tinysrgb&w=900",
+          "caption": "Cozy lash bed, soft music, nap encouraged"
+        },
+        {
+          "photo": "https://images.pexels.com/photos/5128273/pexels-photo-5128273.jpeg?auto=compress&cs=tinysrgb&w=900",
+          "caption": "See you soon 💕"
+        }
+      ]
+    },
+    {
+      "title": "Offers",
+      "cover": "https://images.pexels.com/photos/5128274/pexels-photo-5128274.jpeg?auto=compress&cs=tinysrgb&w=300&h=300&fit=crop",
+      "slides": [
+        {
+          "photo": "https://images.pexels.com/photos/5128274/pexels-photo-5128274.jpeg?auto=compress&cs=tinysrgb&w=900",
+          "caption": "New clients: 15% off any full set"
+        },
+        {
+          "photo": "https://images.pexels.com/photos/5128259/pexels-photo-5128259.jpeg?auto=compress&cs=tinysrgb&w=900",
+          "caption": "Refer a friend — you both get 0 off"
+        }
+      ]
+    }
+  ],
+  "reviews": [
+    {
+      "name": "Jasmine R.",
+      "rating": 5,
+      "service": "Hybrid Full Set",
+      "text": "Literally fell asleep on the bed and woke up with the prettiest wispy set. Three weeks in and they still look fresh."
+    },
+    {
+      "name": "Taylor M.",
+      "rating": 5,
+      "service": "Classic Full Set",
+      "text": "First time getting extensions and Aria walked me through everything. So natural — my coworkers thought they were mine."
+    },
+    {
+      "name": "Brianna K.",
+      "rating": 5,
+      "service": "Brow Lamination & Tint",
+      "text": "My brows have never looked this full. Clean studio, on time, and the aftercare card was super helpful."
+    },
+    {
+      "name": "Nicole W.",
+      "rating": 4,
+      "service": "Volume Full Set",
+      "text": "Gorgeous, fluffy volume and zero irritation on my sensitive eyes. Booking my fill before I even left."
+    },
+    {
+      "name": "Ashley P.",
+      "rating": 5,
+      "service": "Lash Lift & Tint",
+      "text": "Best lift in Atlanta, no question. It lasted almost two months and I stopped wearing mascara."
+    }
+  ],
+  "promo": {
+    "badge": "NEW CLIENT −15%",
+    "title": "Your first set, a little sweeter",
+    "text": "Take 15% off any full set on your first visit.",
+    "image": "https://cdn.jsdelivr.net/gh/microsoft/fluentui-emoji@main/assets/Sparkles/3D/sparkles_3d.png"
+  },
+  "services": [
+    {
+      "id": "classic-full",
+      "category": "Lashes",
+      "title": "Classic Full Set",
+      "price": 120,
+      "duration": "2h",
+      "description": "One extension on every natural lash for a soft, mascara-like finish. The most natural look — perfect if this is your first set.",
+      "photo": "https://images.pexels.com/photos/5128235/pexels-photo-5128235.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "icon": "eye",
+      "includes": [
+        "Consultation & lash mapping",
+        "One extension per natural lash",
+        "Premium mink-effect lashes",
+        "Aftercare kit with spoolie"
+      ]
+    },
+    {
+      "id": "hybrid-full",
+      "category": "Lashes",
+      "title": "Hybrid Full Set",
+      "price": 150,
+      "duration": "2h 15m",
+      "description": "A mix of classic lashes and handmade fans. Textured and wispy, with more fullness than classic but still everyday-soft.",
+      "photo": "https://images.pexels.com/photos/5128220/pexels-photo-5128220.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "icon": "sparkles",
+      "includes": [
+        "Consultation & lash mapping",
+        "Mix of classic lashes and handmade fans",
+        "Textured, wispy styling",
+        "Aftercare kit with spoolie"
+      ]
+    },
+    {
+      "id": "volume-full",
+      "category": "Lashes",
+      "title": "Volume Full Set",
+      "price": 180,
+      "duration": "2h 30m",
+      "description": "Ultra-light handmade fans on every lash for a full, fluffy, dramatic look. Great for sparse lashes or when you want the wow.",
+      "photo": "https://images.pexels.com/photos/5128234/pexels-photo-5128234.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "icon": "gem-stone",
+      "includes": [
+        "Consultation & lash mapping",
+        "Handmade 3D–6D fans",
+        "Full, fluffy styling",
+        "Aftercare kit & lash shampoo"
+      ]
+    },
+    {
+      "id": "lash-lift",
+      "category": "Lashes",
+      "title": "Lash Lift & Tint",
+      "price": 85,
+      "duration": "1h",
+      "description": "Your own lashes, lifted from the root and tinted darker. No extensions, zero upkeep, lasts 6–8 weeks.",
+      "photo": "https://images.pexels.com/photos/5128267/pexels-photo-5128267.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "icon": "lipstick",
+      "includes": [
+        "Lift with keratin treatment",
+        "Custom lash tint",
+        "Nourishing serum finish"
+      ]
+    },
+    {
+      "id": "brow-lamination",
+      "category": "Brows",
+      "title": "Brow Lamination & Tint",
+      "price": 75,
+      "duration": "50 min",
+      "description": "Brow hairs are smoothed and set in place for a fuller, brushed-up shape, then tinted to match. Lasts about 6 weeks.",
+      "photo": "https://images.pexels.com/photos/5128259/pexels-photo-5128259.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "icon": "sparkles",
+      "includes": [
+        "Brow mapping",
+        "Lamination & setting",
+        "Custom tint",
+        "Trim and tidy"
+      ]
+    },
+    {
+      "id": "brow-shape",
+      "category": "Brows",
+      "title": "Brow Shaping & Tint",
+      "price": 45,
+      "duration": "30 min",
+      "description": "Mapping, wax and tweeze for a clean shape that suits your face, finished with a custom tint.",
+      "photo": "https://images.pexels.com/photos/5128275/pexels-photo-5128275.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "icon": "lipstick",
+      "includes": [
+        "Brow mapping",
+        "Wax & tweeze",
+        "Custom tint"
+      ]
+    },
+    {
+      "id": "fill-2wk",
+      "category": "Fills",
+      "title": "2-Week Fill",
+      "price": 65,
+      "duration": "1h",
+      "description": "A refresh for sets that are up to 2 weeks old. Outgrown lashes are removed and gaps are filled back in.",
+      "photo": "https://images.pexels.com/photos/5128230/pexels-photo-5128230.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "icon": "calendar",
+      "includes": [
+        "Gentle cleanse",
+        "Outgrown lashes removed",
+        "Gaps filled to full density"
+      ]
+    },
+    {
+      "id": "fill-3wk",
+      "category": "Fills",
+      "title": "3-Week Fill",
+      "price": 80,
+      "duration": "1h 15m",
+      "description": "For sets that are 15–21 days old. You need at least 40% of your lashes left — less than that is booked as a full set.",
+      "photo": "https://images.pexels.com/photos/5128225/pexels-photo-5128225.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "icon": "bell",
+      "includes": [
+        "Gentle cleanse",
+        "Outgrown lashes removed",
+        "Gaps filled to full density",
+        "Retention check"
+      ]
+    }
+  ],
+  "gallery": [
+    {
+      "id": "soft-cat-eye",
+      "photo": "https://images.pexels.com/photos/5128235/pexels-photo-5128235.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "tag": "Classic",
+      "title": "Soft Cat Eye",
+      "serviceId": "classic-full",
+      "popular": true,
+      "before": "https://images.pexels.com/photos/5128236/pexels-photo-5128236.jpeg?auto=compress&cs=tinysrgb&w=900"
+    },
+    {
+      "id": "wispy-kim",
+      "photo": "https://images.pexels.com/photos/5128220/pexels-photo-5128220.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "tag": "Hybrid",
+      "title": "Wispy Kim K",
+      "serviceId": "hybrid-full",
+      "popular": true,
+      "before": "https://images.pexels.com/photos/5128232/pexels-photo-5128232.jpeg?auto=compress&cs=tinysrgb&w=900"
+    },
+    {
+      "id": "russian-volume",
+      "photo": "https://images.pexels.com/photos/5128234/pexels-photo-5128234.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "tag": "Volume",
+      "title": "Russian Volume",
+      "serviceId": "volume-full",
+      "popular": true
+    },
+    {
+      "id": "natural-doll",
+      "photo": "https://images.pexels.com/photos/5128267/pexels-photo-5128267.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "tag": "Classic",
+      "title": "Natural Doll",
+      "serviceId": "classic-full",
+      "isNew": true
+    },
+    {
+      "id": "laminated-brows",
+      "photo": "https://images.pexels.com/photos/5128259/pexels-photo-5128259.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "tag": "Brows",
+      "title": "Laminated Brows",
+      "serviceId": "brow-lamination",
+      "before": "https://images.pexels.com/photos/5128274/pexels-photo-5128274.jpeg?auto=compress&cs=tinysrgb&w=900"
+    },
+    {
+      "id": "wet-set",
+      "photo": "https://images.pexels.com/photos/5128224/pexels-photo-5128224.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "tag": "Hybrid",
+      "title": "Wet Set",
+      "serviceId": "hybrid-full",
+      "isNew": true
+    },
+    {
+      "id": "fluffy-mega",
+      "photo": "https://images.pexels.com/photos/5128271/pexels-photo-5128271.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "tag": "Volume",
+      "title": "Fluffy Mega Volume",
+      "serviceId": "volume-full"
+    },
+    {
+      "id": "clean-girl",
+      "photo": "https://images.pexels.com/photos/5128230/pexels-photo-5128230.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "tag": "Classic",
+      "title": "Clean Girl Classic",
+      "serviceId": "classic-full"
+    },
+    {
+      "id": "soft-arch",
+      "photo": "https://images.pexels.com/photos/5128275/pexels-photo-5128275.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "tag": "Brows",
+      "title": "Soft Arch",
+      "serviceId": "brow-shape",
+      "isNew": true
+    },
+    {
+      "id": "textured-hybrid",
+      "photo": "https://images.pexels.com/photos/5128233/pexels-photo-5128233.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "tag": "Hybrid",
+      "title": "Textured Hybrid",
+      "serviceId": "hybrid-full"
+    },
+    {
+      "id": "open-eye",
+      "photo": "https://images.pexels.com/photos/5128225/pexels-photo-5128225.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "tag": "Volume",
+      "title": "Open Eye Volume",
+      "serviceId": "volume-full"
+    },
+    {
+      "id": "brushed-up",
+      "photo": "https://images.pexels.com/photos/5128273/pexels-photo-5128273.jpeg?auto=compress&cs=tinysrgb&w=900",
+      "tag": "Brows",
+      "title": "Brushed-Up Brows",
+      "serviceId": "brow-lamination"
+    }
+  ],
+  "beforeAfter": {
+    "before": "https://images.pexels.com/photos/5128232/pexels-photo-5128232.jpeg?auto=compress&cs=tinysrgb&w=900",
+    "after": "https://images.pexels.com/photos/5128271/pexels-photo-5128271.jpeg?auto=compress&cs=tinysrgb&w=900"
+  },
+  "policies": [
+    {
+      "title": "Deposit",
+      "text": "A $30 deposit secures your spot and goes toward your service. It is non-refundable, but it moves with you if you reschedule in time."
+    },
+    {
+      "title": "Late arrivals",
+      "text": "Running late? Send a quick text. After 15 minutes we may need to shorten your service or reschedule so the next client isn't kept waiting."
+    },
+    {
+      "title": "Cancellations",
+      "text": "Please cancel or reschedule at least 24 hours ahead. Later cancellations and no-shows lose the deposit."
+    },
+    {
+      "title": "Fills",
+      "text": "A fill needs at least 40% of your lashes remaining. Sets from another artist are booked as a new full set."
+    }
+  ],
+  "aftercare": [
+    {
+      "step": "Keep them dry for 24 hours",
+      "text": "No water, steam, sauna or sweaty workouts while the adhesive cures."
+    },
+    {
+      "step": "Cleanse every day",
+      "text": "Wash gently with an oil-free lash shampoo and a soft brush. Clean lashes last longer."
+    },
+    {
+      "step": "Brush each morning",
+      "text": "Use a clean spoolie to fluff them back into place once they're dry."
+    },
+    {
+      "step": "Skip oils and mascara",
+      "text": "Oil-based removers, creams and waterproof mascara break down the bond."
+    },
+    {
+      "step": "Hands off",
+      "text": "Don't rub, pick or pull. If a lash is bothering you, message us instead."
+    },
+    {
+      "step": "Book your fill",
+      "text": "Come back every 2–3 weeks to keep your set looking full."
+    }
+  ],
+  "faq": [
+    {
+      "q": "How long do lash extensions last?",
+      "a": "With good aftercare a set lasts 4–6 weeks ✨ Most clients come in for a fill every 2–3 weeks to keep it full.",
+      "keywords": [
+        "last",
+        "fall out",
+        "shed",
+        "shedding",
+        "retention"
+      ]
+    },
+    {
+      "q": "Is it safe for sensitive eyes?",
+      "a": "Yes 💕 We use a low-fume, medical-grade adhesive and can do a free patch test 48 hours before your appointment if you're sensitive.",
+      "keywords": [
+        "sensitive",
+        "allergy",
+        "allergic",
+        "safe",
+        "irritation",
+        "patch test",
+        "glue",
+        "adhesive",
+        "hurt",
+        "pain"
+      ]
+    },
+    {
+      "q": "How should I prepare?",
+      "a": "Come with clean, makeup-free eyes, skip caffeine right before, and take out contact lenses. That's it — you get to nap while we work 😴",
+      "keywords": [
+        "prepare",
+        "before my appointment",
+        "come with",
+        "makeup",
+        "caffeine",
+        "contacts",
+        "contact lenses"
+      ]
+    },
+    {
+      "q": "Can I wear mascara or eyeliner?",
+      "a": "You won't need mascara 😉 If you want liner, keep it oil-free and avoid waterproof formulas — they break down the lash bond.",
+      "keywords": [
+        "mascara",
+        "eyeliner",
+        "liner",
+        "curler",
+        "makeup remover"
+      ]
+    },
+    {
+      "q": "Can I shower, swim or work out?",
+      "a": "After the first 24 hours — yes to all of it 💦 Just rinse your lashes after the pool or the gym and brush them once they're dry.",
+      "keywords": [
+        "shower",
+        "swim",
+        "swimming",
+        "pool",
+        "gym",
+        "workout",
+        "work out",
+        "sweat",
+        "beach"
+      ]
+    },
+    {
+      "q": "Where are you located? Is there parking?",
+      "a": "We're in Midtown Atlanta 📍 Free 2-hour parking in the Peachtree Square garage — we validate at checkout.",
+      "keywords": [
+        "where",
+        "located",
+        "location",
+        "address",
+        "parking",
+        "park",
+        "directions"
+      ]
+    },
+    {
+      "q": "How can I pay?",
+      "a": "Cards, Apple Pay, Zelle and cash all work 💳 The deposit is paid online when you book, the rest at your appointment.",
+      "keywords": [
+        "pay",
+        "payment",
+        "cash",
+        "card",
+        "apple pay",
+        "zelle",
+        "venmo",
+        "tip"
+      ]
+    },
+    {
+      "q": "Can I bring someone with me?",
+      "a": "The studio is a cozy one-on-one space, so please come solo — no guests or little ones during the service 💕",
+      "keywords": [
+        "guest",
+        "kid",
+        "child",
+        "children",
+        "baby",
+        "friend",
+        "bring someone"
+      ]
+    },
+    {
+      "q": "Do you fill lashes from another artist?",
+      "a": "We don't fill over another artist's work — your first visit is booked as a full set so the retention is up to our standard ✨",
+      "keywords": [
+        "another artist",
+        "another salon",
+        "someone else",
+        "other lash tech",
+        "removal",
+        "remove"
+      ]
+    }
+  ],
+  "hours": {
+    "mon": "9-19",
+    "tue": "9-19",
+    "wed": "9-19",
+    "thu": "9-19",
+    "fri": "9-19",
+    "sat": "10-17",
+    "sun": "closed"
+  },
+  "extras": {
+    "courseTitle": "Classic Lash Course",
+    "courseText": "A 2-day hands-on training for beginners. Kit and certificate included.",
+    "courseUrl": "https://example.com/aria-lash-course"
+  },
+  "ownerDemo": {
+    "opens": 312,
+    "questions": 87,
+    "bookTaps": 41,
+    "hoursSaved": 3.5,
+    "daily": [
+      38,
+      45,
+      52,
+      41,
+      60,
+      49,
+      27
+    ],
+    "topQuestions": [
+      {
+        "q": "How much is a full set?",
+        "count": 23
+      },
+      {
+        "q": "When are you free?",
+        "count": 18
+      },
+      {
+        "q": "Do you take deposits?",
+        "count": 14
+      },
+      {
+        "q": "How long do lashes last?",
+        "count": 11
+      },
+      {
+        "q": "Aftercare tips",
+        "count": 9
+      }
+    ],
+    "topServices": [
+      {
+        "id": "hybrid-full",
+        "views": 96
+      },
+      {
+        "id": "classic-full",
+        "views": 81
+      },
+      {
+        "id": "lash-lift",
+        "views": 54
+      }
+    ],
+    "looks": {
+      "soft-cat-eye": {
+        "views": 214,
+        "bookings": 18
+      },
+      "wispy-kim": {
+        "views": 198,
+        "bookings": 15
+      },
+      "russian-volume": {
+        "views": 176,
+        "bookings": 12
+      },
+      "natural-doll": {
+        "views": 121,
+        "bookings": 7
+      },
+      "laminated-brows": {
+        "views": 143,
+        "bookings": 9
+      },
+      "wet-set": {
+        "views": 167,
+        "bookings": 6
+      },
+      "fluffy-mega": {
+        "views": 98,
+        "bookings": 5
+      },
+      "clean-girl": {
+        "views": 88,
+        "bookings": 6
+      },
+      "soft-arch": {
+        "views": 74,
+        "bookings": 4
+      },
+      "textured-hybrid": {
+        "views": 69,
+        "bookings": 3
+      },
+      "open-eye": {
+        "views": 81,
+        "bookings": 4
+      },
+      "brushed-up": {
+        "views": 57,
+        "bookings": 2
+      }
+    }
+  }
+}
