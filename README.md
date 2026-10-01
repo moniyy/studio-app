@@ -11,7 +11,10 @@
    (только буквы, цифры, `-` и `_`).
 2. Поменяйте в новом файле данные мастера: `name`, `tagline`, `city`, `avatar`, `heroPhoto`, `brandAccent`,
    `bookingUrl` (ссылка на Acuity / GlossGenius / Booksy), `instagram`, `phone`, `services`, `gallery`, `hours` и остальное.
-   - `"style"`: `"maison"` — премиальный стиль (засечки, тонкие линии, champagne), `"soft"` — мягкий стиль с 3D-иконками.
+   - `"style"` — стиль по умолчанию: `"noir"` (как приложение из App Store: Inter, нейтральный чёрный, списки iOS),
+     `"maison"` (засечки, тонкие линии, champagne) или `"soft"` (мягкий, с 3D-иконками).
+     Клиентка может сменить стиль сама: More → Appearance → Style (выбор запоминается).
+     Для показа можно открыть ссылку с `&style=noir` / `&style=maison` / `&style=soft`.
    - `"bookingMode"` — куда ведёт кнопка в конце записи:
      `"link"` — открывает `bookingUrl`;
      `"instagram"` — открывает директ (`ig.me/m/<instagram>`) и копирует готовое сообщение;
@@ -44,6 +47,7 @@ node tools/make-icon.js --master bella-nails # для мастера → img/bel
 | --- | --- |
 | `?m=slug` | какой мастер (файл `masters/slug.json`) |
 | `&splash=clean` / `&splash=photo` | вариант заставки (важнее поля `splashStyle` в JSON) |
+| `&style=noir` / `&style=maison` / `&style=soft` | стиль приложения (запоминается как выбор клиентки; параметр затем убирается из адреса) |
 | `&reset=1` | показать заставку и Welcome заново, как при первом запуске |
 | `&owner=1` | режим владельца для показа мастеру (все цифры — демо-данные) |
 | `&look=<id>` | сразу открыть образ из галереи |

@@ -71,8 +71,8 @@ function hexToRgb(hex) {
   return [n >> 16, (n >> 8) & 255, n & 255];
 }
 
-/* 1024×1024 night sky: gradient #14121C → #241E33, accent glow, tiny stars */
-function backgroundSvg(accent, maskable) {
+/* 1024×1024 night sky: gradient #14121C → #241E33 (neutral black for "noir"), accent glow, tiny stars */
+function backgroundSvg(accent, maskable, bg) {
   const [r, g, b] = hexToRgb(accent);
   const glow = maskable ? 300 : 360;
   // tiny stars kept near the corners so they never sit behind the artwork
@@ -85,8 +85,8 @@ function backgroundSvg(accent, maskable) {
     <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
       <defs>
         <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stop-color="#14121C"/>
-          <stop offset="1" stop-color="#241E33"/>
+          <stop offset="0" stop-color="${bg[0]}"/>
+          <stop offset="1" stop-color="${bg[1]}"/>
         </linearGradient>
         <radialGradient id="glow" cx="50%" cy="50%" r="50%">
           <stop offset="0" stop-color="rgb(${r},${g},${b})" stop-opacity=".55"/>
@@ -104,7 +104,7 @@ function backgroundSvg(accent, maskable) {
     </svg>`);
 }
 
-async function renderIcon(emojiPng, accent, maskable) {
+async function renderIcon(emojiPng, accent, maskable, bg) {
   const S = 1024;
   const art = Math.round(S * (maskable ? 0.5 : 0.6));
   const emoji = await sharp(emojiPng).resize(art, art, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
@@ -118,12 +118,12 @@ async function renderIcon(emojiPng, accent, maskable) {
     .toBuffer();
   const left = Math.round((S - art) / 2);
   const top = Math.round((S - art) / 2) - Math.round(S * 0.01);
-  return sharp(backgroundSvg(accent, maskable))
+  return sharp(backgroundSvg(accent, maskable, bg))
     .composite([
       { input: shadow, left, top: top + Math.round(S * 0.03) },
       { input: emoji, left, top }
     ])
-    .flatten({ background: '#14121C' }) // no transparency anywhere
+    .flatten({ background: bg[0] }) // no transparency anywhere
     .png()
     .toBuffer();
 }
@@ -135,12 +135,13 @@ async function main() {
   const master = fs.existsSync(jsonPath) ? JSON.parse(fs.readFileSync(jsonPath, 'utf8')) : {};
   const accent = a.accent || master.brandAccent || '#C9796B';
   const emojiName = a.emoji || master.splashEmoji || 'Sparkles';
+  const bg = master.style === 'noir' ? ['#0A0A0B', '#1D1D20'] : ['#14121C', '#241E33'];
   const outDir = path.resolve(ROOT, a.out || (slug === 'demo' ? 'img' : path.join('img', slug)));
   fs.mkdirSync(outDir, { recursive: true });
 
   const emojiPng = a.src ? fs.readFileSync(path.resolve(a.src)) : await fluentEmoji(emojiName);
-  const regular = await renderIcon(emojiPng, accent, false);
-  const maskable = await renderIcon(emojiPng, accent, true);
+  const regular = await renderIcon(emojiPng, accent, false, bg);
+  const maskable = await renderIcon(emojiPng, accent, true, bg);
 
   const jobs = [
     ['apple-touch-icon.png', regular, 180],

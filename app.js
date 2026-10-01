@@ -17,9 +17,14 @@
   const SLUG = /^[a-z0-9][a-z0-9_-]{0,60}$/.test(rawSlug) ? rawSlug : 'demo';
   const KEY = 'studio-app:' + SLUG;
 
-  /* Visual style per master: "soft" (original look) or "maison" (premium).
-     Cached so the right palette is applied before the first paint. */
-  let STYLE = (() => { try { return JSON.parse(localStorage.getItem(KEY + ':style')) === 'maison' ? 'maison' : 'soft'; } catch (e) { return 'soft'; } })();
+  /* Visual style: "soft" (original), "maison" (serif, champagne) or "noir"
+     (App Store-like). Order: ?style= in the address → the client's own pick
+     (More → Appearance) → the master's JSON. The last one used is cached so
+     the right palette is applied before the first paint. */
+  const STYLES = ['soft', 'maison', 'noir'];
+  const STYLE_PARAM = STYLES.includes(params.get('style')) ? params.get('style') : null;
+  const readStyle = k => { try { const v = JSON.parse(localStorage.getItem(KEY + ':' + k)); return STYLES.includes(v) ? v : null; } catch (e) { return null; } };
+  let STYLE = STYLE_PARAM || readStyle('styleUser') || readStyle('style') || 'soft';
 
   const ACCENTS_SOFT = [
     { id: 'studio',   name: 'Studio',   color: null },
@@ -37,14 +42,24 @@
     { id: 'sage',      name: 'Sage',      color: { dark: '#A9BBA1', light: '#66795F' } },
     { id: 'onyx',      name: 'Onyx',      color: { dark: '#EAE2D8', light: '#2A211C' } }
   ];
-  const accentList = () => (STYLE === 'maison' ? ACCENTS_MAISON : ACCENTS_SOFT);
+  // Noir: clean accents; the light theme gets a deeper shade so it reads on white
+  const ACCENTS_NOIR = [
+    { id: 'blush',     name: 'Blush',     color: { dark: '#F4A6B8', light: '#C2416C' } },
+    { id: 'pearl',     name: 'Pearl',     color: { dark: '#FFFFFF', light: '#0A0A0B' } },
+    { id: 'rosegold',  name: 'Rose Gold', color: { dark: '#E8B4A0', light: '#9E5A42' } },
+    { id: 'lilac',     name: 'Lilac',     color: { dark: '#C9B6F2', light: '#7A58CF' } },
+    { id: 'sky',       name: 'Sky',       color: { dark: '#9CC9F5', light: '#236FBF' } },
+    { id: 'champagne', name: 'Champagne', color: { dark: '#EBD9B4', light: '#8A6D33' } }
+  ];
+  const accentList = () => (STYLE === 'maison' ? ACCENTS_MAISON : STYLE === 'noir' ? ACCENTS_NOIR : ACCENTS_SOFT);
   const THEMES = ['light', 'dark', 'system'];
   const TEXT_SIZES = { small: 1, default: 1.1, large: 1.2 };
   const DEFAULTS = { theme: 'system', accent: null, textSize: 'default', reminders: false }; // accent null → first of the style's list
   const FALLBACK_ACCENT = '#C9796B';
   const THEME_BG_SOFT = { light: '#F7F5F2', dark: '#0E0E11' };
   const THEME_BG_MAISON = { light: '#F7F3EE', dark: '#0F0D0C' };
-  const themeBg = () => (STYLE === 'maison' ? THEME_BG_MAISON : THEME_BG_SOFT);
+  const THEME_BG_NOIR = { light: '#F2F2F7', dark: '#0A0A0B' };
+  const themeBg = () => (STYLE === 'maison' ? THEME_BG_MAISON : STYLE === 'noir' ? THEME_BG_NOIR : THEME_BG_SOFT);
   const THEME_BG = THEME_BG_SOFT;
 
   const root = document.documentElement;
@@ -75,17 +90,38 @@
       history.replaceState(history.state, '', location.pathname + (q ? '?' + q : '') + location.hash);
     } catch (e) { /* file:// */ }
   }
+  // ?style=noir counts as the client's pick; the param then leaves the address
+  if (STYLE_PARAM) {
+    store.set('styleUser', STYLE_PARAM);
+    params.delete('style');
+    try {
+      const q = params.toString();
+      history.replaceState(history.state, '', location.pathname + (q ? '?' + q : '') + location.hash);
+    } catch (e) { /* file:// */ }
+  }
 
   function sanitizeSettings(s) {
     s = Object.assign({}, DEFAULTS, s && typeof s === 'object' ? s : {});
     if (!THEMES.includes(s.theme)) s.theme = DEFAULTS.theme;
     if (!accentList().some(a => a.id === s.accent)) s.accent = accentList()[0].id;
+    s.accentBy = s.accentBy && typeof s.accentBy === 'object' ? s.accentBy : {}; // accent remembered per style
     if (!(s.textSize in TEXT_SIZES)) s.textSize = DEFAULTS.textSize;
     s.reminders = !!s.reminders;
     return s;
   }
 
   let settings = sanitizeSettings(store.get('settings'));
+
+  /* Switch the style variables (accent is remembered per style) */
+  function adoptStyle(next) {
+    if (!STYLES.includes(next) || next === STYLE) return;
+    const by = Object.assign({}, settings.accentBy, { [STYLE]: settings.accent });
+    STYLE = next;
+    settings = sanitizeSettings(Object.assign({}, settings, { accentBy: by, accent: by[next] || null }));
+    store.set('settings', settings);
+    store.set('style', STYLE);
+    applyMotion();
+  }
   let brandAccent = validHex(store.get('brand')) || FALLBACK_ACCENT;
   let splashActive = true;
 
@@ -104,6 +140,8 @@
     const n = parseInt(hex.slice(1), 16);
     const lin = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
     const L = 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+    // noir: whichever of white / near-black reads better
+    if (STYLE === 'noir') return 1.05 / (L + 0.05) >= (L + 0.05) / 0.0530 ? '#FFFFFF' : '#0A0A0B';
     // maison asks a little more of white text (champagne gets dark text)
     return 1.05 / (L + 0.05) >= (STYLE === 'maison' ? 4 : 3) ? '#FFFFFF' : (STYLE === 'maison' ? '#1A1512' : '#16161A');
   }
@@ -129,7 +167,9 @@
     if (meta) meta.content = splashActive && SPLASH_PARAM === 'photo' ? '#000000' : themeBg()[theme];
     // accent swatches follow the theme (maison shades differ per theme)
     if (typeof document !== 'undefined') document.querySelectorAll('.swatch[data-accent]').forEach(el => {
-      el.style.setProperty('--c', accentFor(accentList().find(a => a.id === el.dataset.accent)));
+      const c = accentFor(accentList().find(a => a.id === el.dataset.accent));
+      el.style.setProperty('--c', c);
+      el.style.setProperty('--on', onAccentColor(c));
     });
   }
 
@@ -152,12 +192,12 @@
   const G = () => (window.gsap && !reducedMQ.matches ? window.gsap : null);
   const IS_IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-  // springy in "soft", calm ease-out in "maison"
+  // springy in "soft", calm ease-out in "maison", iOS-like (tiny overshoot) in "noir"
   let SPRING = 'back.out(1.4)';
   let ELASTIC = 'elastic.out(1,0.8)';
   function applyMotion() {
-    SPRING = STYLE === 'maison' ? 'power3.out' : 'back.out(1.4)';
-    ELASTIC = STYLE === 'maison' ? 'power2.out' : 'elastic.out(1,0.8)';
+    SPRING = { maison: 'power3.out', noir: 'back.out(1.15)' }[STYLE] || 'back.out(1.4)';
+    ELASTIC = { maison: 'power2.out', noir: 'back.out(1.35)' }[STYLE] || 'elastic.out(1,0.8)';
   }
   applyMotion();
 
@@ -212,9 +252,9 @@
     lipstick: '<path d="m14 4 6 6M4 20l5.5-1.5L20 8l-4-4L5.5 14.5z"/>',
     'nail-polish': '<path d="M9 9h6v11a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1zM10 9V3h4v6"/>'
   };
-  /* An illustration slot: 3D emoji in "soft", thin line art in "maison" */
+  /* An illustration slot: 3D emoji in "soft", thin line art in "maison" / "noir" */
   function art(name, cls, imgAttrs) {
-    if (STYLE !== 'maison') return `<img${cls ? ` class="${cls}"` : ''} src="${esc(icon3d(name))}" alt=""${imgAttrs || ''}>`;
+    if (STYLE === 'soft') return `<img${cls ? ` class="${cls}"` : ''} src="${esc(icon3d(name))}" alt=""${imgAttrs || ''}>`;
     const key = String(name || '').toLowerCase().replace(/[\s_]+/g, '-').replace(/^gem$/, 'gem-stone').replace(/^speech$/, 'speech-balloon');
     return `<span class="line-art${cls ? ' ' + cls : ''}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${LINE_ART[key] || LINE_ART.sparkles}</svg></span>`;
   }
@@ -294,7 +334,7 @@
       : d.bookingUrl ? 'link' : d.instagram ? 'instagram' : d.phone ? 'sms' : 'demo';
     d.heroVideo = typeof d.heroVideo === 'string' ? d.heroVideo.trim() : '';
     d.splashStyle = d.splashStyle === 'photo' ? 'photo' : 'clean';
-    d.style = d.style === 'maison' ? 'maison' : 'soft';
+    d.style = STYLES.includes(d.style) ? d.style : 'soft';
     d.splashEmoji = typeof d.splashEmoji === 'string' ? d.splashEmoji.trim() : '';
     d.prep = arr(d.prep).map(String).filter(Boolean);
     d.address = typeof d.address === 'string' ? d.address.trim() : '';
@@ -484,11 +524,15 @@
     showNow(offScreen);
     if (!onScreen.length) return null;
     g.killTweensOf(onScreen);
+    // maison: fade + 12px, slow; noir: 18px, a short spring with a hint of overshoot
+    const yMax = { maison: 12, noir: 18 }[STYLE];
+    const y = o.y == null ? (yMax || 30) : (yMax ? Math.min(yMax, o.y) : o.y);
     return ensure(g.fromTo(onScreen,
-      { opacity: 0, y: o.y == null ? (STYLE === 'maison' ? 12 : 30) : (STYLE === 'maison' ? Math.min(12, o.y) : o.y), scale: STYLE === 'maison' ? 1 : (o.scale == null ? 0.98 : o.scale) },
+      { opacity: 0, y, scale: STYLE === 'soft' ? (o.scale == null ? 0.98 : o.scale) : 1 },
       {
         opacity: 1, y: 0, scale: 1,
-        duration: STYLE === 'maison' ? Math.max(0.6, o.duration || 0.6) : (o.duration || 0.8), ease: STYLE === 'maison' ? 'power2.out' : (o.ease || SPRING),
+        duration: STYLE === 'maison' ? Math.max(0.6, o.duration || 0.6) : STYLE === 'noir' ? Math.min(0.7, o.duration || 0.6) : (o.duration || 0.8),
+        ease: STYLE === 'maison' ? 'power2.out' : STYLE === 'noir' ? 'back.out(1.1)' : (o.ease || SPRING),
         stagger: o.stagger == null ? 0.05 : o.stagger, delay: o.delay || 0,
         clearProps: 'opacity,transform'
       }));
@@ -828,7 +872,7 @@
       ? `<video class="hero__img" src="${esc(safeUrl(data.heroVideo))}" ${data.heroPhoto ? `poster="${esc(safeUrl(data.heroPhoto))}"` : ''} autoplay muted loop playsinline preload="metadata"></video>`
       : data.heroPhoto ? `<img class="hero__img" src="${esc(safeUrl(data.heroPhoto))}" alt="">` : '';
 
-    const maison = STYLE === 'maison';
+    const maison = STYLE !== 'soft'; // maison and noir share the photo hero + monogram
     const firstSlot = data.slots[0] || data.nextAvailable || '';
     const eyebrow = data.eyebrow || `${isNails() ? 'Nail' : 'Lash'} artistry · ${String(data.city || '').split(',')[0]}`;
     views.home.innerHTML = navShell({
@@ -972,7 +1016,7 @@
                 <div class="svc-card" role="button" tabindex="0" data-open-service="${esc(s.id)}">
                   <span class="svc-card__photo">
                     <img src="${esc(sized(safeUrl(s.photo), 400))}" alt="" loading="lazy">
-                    ${STYLE === 'maison' ? '' : `<span class="svc-card__icon"><img src="${esc(icon3d(s.icon))}" alt="" loading="lazy"></span>`}
+                    ${STYLE !== 'soft' ? '' : `<span class="svc-card__icon"><img src="${esc(icon3d(s.icon))}" alt="" loading="lazy"></span>`}
                     ${favButton('svc:' + s.id, 'fav--photo')}
                   </span>
                   <span class="svc-card__body">
@@ -1040,8 +1084,8 @@
         <div class="chipbar" id="svc-chips" role="tablist" data-stagger>
           ${categories().map(c => `<button class="chipbar__chip" role="tab" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
         </div>
-        <div class="svc-list${STYLE === 'maison' ? ' svc-list--menu' : ''}" id="svc-list">
-          ${STYLE === 'maison' ? menuHTML() : data.services.map(s => `
+        <div class="svc-list${{ maison: ' svc-list--menu', noir: ' svc-list--grouped' }[STYLE] || ''}" id="svc-list">
+          ${STYLE === 'maison' ? menuHTML() : STYLE === 'noir' ? groupedHTML() : data.services.map(s => `
             <div class="card svc2" role="button" tabindex="0" data-stagger data-svc="${esc(s.id)}" data-open-service="${esc(s.id)}">
               <span class="svc2__media">
                 <img class="svc2__photo" src="${esc(sized(safeUrl(s.photo), 300))}" alt="" loading="lazy">
@@ -1085,6 +1129,24 @@
       </section>`).join('');
   }
 
+  /* Noir: iOS "inset grouped" — a rounded group per category, thumbnail,
+     name + duration, price and a chevron; tap → the details sheet */
+  function groupedHTML() {
+    return categories().slice(1).map(c => `
+      <section class="ngroup" data-menu-sec data-stagger>
+        <h3 class="group-label">${esc(c)}</h3>
+        <div class="list">
+          ${data.services.filter(s => s.category === c).map(s => `
+            <div class="svc2 nrow" role="button" tabindex="0" data-svc="${esc(s.id)}" data-open-service="${esc(s.id)}">
+              <img class="nrow__thumb" src="${esc(sized(safeUrl(s.photo), 160))}" alt="" loading="lazy">
+              <span class="nrow__text"><b>${esc(s.title)}</b>${s.duration ? `<small>${esc(s.duration)}</small>` : ''}</span>
+              <span class="nrow__price num">${esc(price(s.price))}</span>
+              <span class="row__chev">${I.chevR}</span>
+            </div>`).join('')}
+        </div>
+      </section>`).join('');
+  }
+
   function serviceMatches(s) {
     const q = state.query.trim().toLowerCase();
     return !!s && (state.category === 'All' || s.category === state.category) &&
@@ -1122,15 +1184,18 @@
     };
     if (!g) { cards.forEach(c => { c.hidden = !want(c); }); syncEmpty(); return; }
 
-    g.killTweensOf(cards);
-    g.set(cards, { clearProps: 'opacity,transform' });
+    // a filter tap during the tab's entrance finishes that entrance at once
+    const staged = cards.concat($('[data-stagger]', views.services));
+    g.killTweensOf(staged);
+    g.set(staged, { clearProps: 'opacity,transform' });
+    clearTimeout(failsafeTimers.get(views.services)); // nothing left hidden for it to rescue
     const first = new Map();
     cards.forEach(c => { if (!c.hidden) first.set(c, c.getBoundingClientRect()); });
     const leaving = cards.filter(c => !c.hidden && !want(c));
 
     const flip = () => {
       if (token !== filterToken) return;
-      g.set(leaving, { clearProps: 'opacity,transform' });
+      if (leaving.length) g.set(leaving, { clearProps: 'opacity,transform' });
       cards.forEach(c => { c.hidden = !want(c); });
       syncEmpty();
       const entering = [];
@@ -1276,7 +1341,7 @@
         <div class="look__media" style="aspect-ratio:${lookAR(l).toFixed(4)}">
           <img class="look__lqip" src="${esc(sized(safeUrl(l.photo), 40))}" alt="" aria-hidden="true">
           <img class="look__img" src="${esc(sized(safeUrl(l.photo), 500))}" alt="" loading="lazy" decoding="async">
-          ${l.isNew || l.popular ? `<span class="look__badges">${l.isNew ? '<b class="lbadge lbadge--new">New</b>' : ''}${l.popular ? `<b class="lbadge lbadge--hot">${STYLE === 'maison' ? '' : '🔥 '}Most booked</b>` : ''}</span>` : ''}
+          ${l.isNew || l.popular ? `<span class="look__badges">${l.isNew ? '<b class="lbadge lbadge--new">New</b>' : ''}${l.popular ? `<b class="lbadge lbadge--hot">${STYLE === 'soft' ? '🔥 ' : ''}Most booked</b>` : ''}</span>` : ''}
           ${favButton('look:' + l.id, 'fav--photo fav--sm')}
           ${st ? `<span class="look__stats num">👁 ${st.views} · 📅 ${st.bookings} bookings</span>` : ''}
           <span class="look__plaque"><b>${esc(l.title)}</b>${s ? `<span class="num">&nbsp;· ${esc(price(s.price))}</span>` : ''}</span>
@@ -1524,11 +1589,15 @@
           <div class="row row--stack">
             <div class="row__head"><span class="row__icon" style="--ic:${IOS.indigo}">${I.contrast}</span><span class="row__label">Appearance</span></div>
             ${segmented('theme', THEMES, ['Light', 'Dark', 'System'])}
+            <div class="style-pick">
+              <span class="style-pick__label">Style</span>
+              ${segmented('style', STYLES, STYLES.map(st => `<i class="sdot sdot--${st}" aria-hidden="true"></i>${st.charAt(0).toUpperCase() + st.slice(1)}`))}
+            </div>
           </div>
           <div class="row row--stack">
             <div class="row__head"><span class="row__icon" style="--ic:${IOS.pink}">${I.palette}</span><span class="row__label">Accent color</span><span class="row__value" id="accent-name"></span></div>
             <div class="swatches" role="radiogroup" aria-label="Accent color">
-              ${accentList().map(a => `<button class="swatch" role="radio" data-accent="${a.id}" aria-label="${a.name}" aria-checked="false" style="--c:${accentFor(a)}">${I.check}</button>`).join('')}
+              ${accentList().map(a => `<button class="swatch" role="radio" data-accent="${a.id}" aria-label="${a.name}" aria-checked="false" style="--c:${accentFor(a)};--on:${onAccentColor(accentFor(a))}">${I.check}</button>`).join('')}
             </div>
           </div>
           <div class="row row--stack">
@@ -1560,7 +1629,7 @@
   function syncSettingsUI() {
     if (!views.more || !views.more.firstChild) return;
     $$('.segmented', views.more).forEach(seg => {
-      const val = seg.dataset.seg === 'theme' ? settings.theme : settings.textSize;
+      const val = { theme: settings.theme, style: STYLE }[seg.dataset.seg] || settings.textSize;
       $$('button', seg).forEach((b, i) => {
         const on = b.dataset.value === val;
         b.setAttribute('aria-checked', on);
@@ -1901,6 +1970,62 @@
     vt.finished.then(done, done);
   }
 
+
+  /* Style switch (More → Appearance): crossfade, then every tab is
+     re-rendered in the new style; tab, scroll and filters stay put */
+  function setStyle(next, opts) {
+    if (!STYLES.includes(next) || next === STYLE) return;
+    if (!opts || opts.remember !== false) store.set('styleUser', next);
+    const run = () => {
+      adoptStyle(next);
+      applySettings();
+      rerenderForStyle();
+    };
+    haptic();
+    if (document.startViewTransition && !reducedMQ.matches) {
+      root.classList.add('vt-style');
+      try {
+        const vt = document.startViewTransition(run);
+        const done = () => root.classList.remove('vt-style');
+        vt.finished.then(done, done);
+        return;
+      } catch (e) { root.classList.remove('vt-style'); }
+    }
+    const g = G();
+    if (!g) { run(); return; }
+    // no View Transitions: fade out, swap, fade back in
+    ensure(g.to($('#views'), {
+      opacity: 0, duration: 0.16, ease: 'power1.in',
+      onComplete: () => { run(); ensure(g.to($('#views'), { opacity: 1, duration: 0.3, ease: 'power1.out', clearProps: 'opacity' })); }
+    }));
+  }
+
+  function rerenderForStyle() {
+    const tabs = ['home', 'services', 'gallery', 'more'];
+    const tops = {};
+    tabs.forEach(k => { const sc = scrollerOf(views[k]); tops[k] = sc ? sc.scrollTop : 0; });
+    renderHome();
+    renderServices();
+    renderGallery();
+    renderMore();
+    // Ask keeps its conversation: only the header illustration changes
+    const askArt = $('.assistant__art', views.ask);
+    if (askArt) askArt.outerHTML = art('speech-balloon', 'assistant__art');
+    const input = $('#svc-search');
+    if (input && state.query) { input.value = state.query; $('#svc-clear').hidden = false; }
+    applyServiceFilter(false);
+    tabs.forEach(k => {
+      const sc = scrollerOf(views[k]);
+      if (!sc) return;
+      sc.addEventListener('scroll', onScroll, { passive: true });
+      sc.scrollTop = tops[k];
+    });
+    bindHomePull(scrollerOf(views.home));
+    bindOwnerPress();
+    syncBookAgain();
+    refreshStatus();
+    Object.values(views).forEach(v => updateNav(v));
+  }
 
   /* ---------------------------------------------------------
      9. Bottom sheets (iOS style)
@@ -4319,6 +4444,7 @@
         return;
       }
 
+      if ((el = t.closest('.segmented[data-seg="style"] button'))) { setStyle(el.dataset.value); return; }
       if ((el = t.closest('.segmented[data-seg="theme"] button'))) { setThemeAnimated(el.dataset.value, e.clientX || innerWidth / 2, e.clientY || innerHeight / 2); return; }
       if ((el = t.closest('.segmented button'))) { setSetting(el.parentElement.dataset.seg, el.dataset.value); return; }
       if ((el = t.closest('[data-accent]'))) { setSetting('accent', el.dataset.accent); popIn(el, { from: 0.8 }); return; }
@@ -4328,6 +4454,9 @@
         return;
       }
       if ((el = t.closest('#reset'))) {
+        // the style goes back to the master's own too
+        store.remove('styleUser');
+        if (data.style !== STYLE) setStyle(data.style, { remember: false });
         settings = sanitizeSettings({});
         store.remove('settings');
         applySettings();
@@ -4581,7 +4710,7 @@
           <span class="loyalty__face loyalty__front">
             <span class="loyalty__head">
               <span><b>Loyalty card</b><small class="num">${filled} of ${total} visits</small></span>
-              <span class="loyalty__mark">${esc(STYLE === 'maison' ? initials() : String(data.name).charAt(0))}</span>
+              <span class="loyalty__mark">${esc(STYLE !== 'soft' ? initials() : String(data.name).charAt(0))}</span>
             </span>
             <span class="loyalty__stamps">
               ${Array.from({ length: total }, (_, i) => `<i class="stamp${i < filled ? ' is-on' : ''}${i === total - 1 ? ' is-reward' : ''}" style="--i:${i}">${i < filled ? LASH : i === total - 1 ? GIFT : ''}</i>`).join('')}
@@ -4692,7 +4821,7 @@
     let raf = 0;
     const apply = () => {
       raf = 0;
-      const card = STYLE === 'maison' && $('.loyalty__card', views.home);
+      const card = STYLE !== 'soft' && $('.loyalty__card', views.home);
       if (card) card.style.setProperty('--sheen', target.toFixed(3));
     };
     const set = v => { target = clamp(v, 0, 1); if (!raf) raf = requestAnimationFrame(apply); };
@@ -6008,10 +6137,7 @@
 
     brandAccent = data.brandAccent;
     store.set('brand', brandAccent);
-    if (data.style !== STYLE) {
-      STYLE = data.style;
-      settings = sanitizeSettings(settings);
-    }
+    adoptStyle(readStyle('styleUser') || data.style);
     store.set('style', STYLE);
     applyMotion();
     applySettings();
