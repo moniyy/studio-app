@@ -17,6 +17,7 @@
     sched: null, cache: {}, pending: [], clients: null, q: '',
     known: null, self: new Set(), live: false, unsub: null, poll: 0,
     badges: { today: 0, calendar: 0, requests: 0 }, queue: [], audio: null,
+    showCx: (() => { try { return localStorage.getItem('studio-app:cab:showCancelled') !== '0'; } catch (e) { return true; } })(),
     email: '', busy: false, hrs: null, hrsDirty: false
   };
 
@@ -62,7 +63,8 @@
      ========================================================= */
   async function open(kit, opts) {
     K = kit;
-    if (root) return;
+    if (root) { if (opts && opts.booking && S.studio) openBooking(opts.booking); return; }
+    S.target = (opts && opts.booking) || null;
     K.closeNotice && K.closeNotice();
     if (!(opts && opts.quiet)) K.haptic();
     root = document.createElement('div');
@@ -87,7 +89,7 @@
     document.addEventListener('input', onInput);
     document.addEventListener('change', onChange);
     root.addEventListener('submit', e => { if (e.target.id === 'cab-signin') { e.preventDefault(); signIn(); } });
-    root.addEventListener('pointerdown', unlockAudio, { once: true });
+    ['pointerdown', 'touchend', 'keydown'].forEach(t => document.addEventListener(t, unlockAudio, true));
     K.pushOverlay(() => close(true));
     const g = K.G();
     if (g) K.ensure(g.fromTo(root, { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.45, ease: 'power3.out', clearProps: 'transform,opacity' }));
@@ -191,6 +193,7 @@
     await syncChanges(true);
     startLive();
     go(S.tab, true);
+    if (S.target) { const id = S.target; S.target = null; setTimeout(() => openBooking(id), 450); }
   }
 
   /* =========================================================
@@ -253,10 +256,14 @@
     const svc = b.service_name;
     const o = spot(b.start_at).off;
     const when = `${o === 0 ? 'Today' : o === 1 ? 'Tomorrow' : K.dayLabel(o, false)} ${K.fmtClock(spot(b.start_at).min)}`;
+    if (kind === 'cancel' && b.late_cancel) kind = 'late';
+    const win = (S.studio && S.studio.cancel_window_hours) || 24;
+    const at = o === 0 ? K.fmtClock(spot(b.start_at).min) : when;
     const text = {
       new: `New booking: ${b.client_name} · ${svc} · ${when}`,
       request: `New request: ${b.client_name} · ${svc} · ${when}`,
-      cancel: `Cancelled: ${b.client_name} · ${svc} · ${when}${b.late_cancel ? ' · late' : ''}`,
+      cancel: `Cancelled: ${b.client_name} · ${svc} · ${at}`,
+      late: `Late cancel: ${b.client_name} · ${svc} · ${at} — less than ${win}h notice`,
       move: `Moved: ${b.client_name} · ${svc} → ${when}`
     }[kind];
     S.queue.push({ kind, text, id: b.id });
@@ -265,8 +272,10 @@
       if (S.tab !== t) S.badges[t]++;
     }
     paintBadges();
-    try { if (navigator.vibrate && (!navigator.userActivation || navigator.userActivation.hasBeenActive)) navigator.vibrate(kind === 'cancel' ? [40, 60, 40] : [25, 40, 25]); } catch (e) { /* no vibration */ }
-    chime(kind === 'cancel');
+    if (typeof navigator.vibrate === 'function' && (!navigator.userActivation || navigator.userActivation.hasBeenActive)) {
+      try { navigator.vibrate(kind === 'cancel' || kind === 'late' ? [40, 60, 40] : [25, 40, 25]); } catch (e) { /* not allowed */ }
+    }
+    chime(kind === 'cancel' || kind === 'late');
     showBanner();
   }
 
@@ -277,24 +286,41 @@
     const n = S.queue.shift();
     const el = $('#cab-banner');
     el.className = `cab__banner cab__banner--${n.kind} is-on`;
-    el.innerHTML = `<button data-cab-b="${esc(n.id)}"><i>${icon(n.kind === 'cancel' ? '<path d="M6 6l12 12M18 6 6 18"/>' : n.kind === 'move' ? '<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/>' : '<path d="M12 5v14M5 12h14"/>')}</i><span>${esc(n.text)}</span></button>`;
+    el.innerHTML = `<button data-cab-b="${esc(n.id)}"><i>${icon(n.kind === 'cancel' || n.kind === 'late' ? '<path d="M6 6l12 12M18 6 6 18"/>' : n.kind === 'move' ? '<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/>' : '<path d="M12 5v14M5 12h14"/>')}</i><span>${esc(n.text)}</span></button>`;
     setTimeout(() => {
       el.classList.remove('is-on');
       setTimeout(() => { bannerBusy = false; showBanner(); }, 400);
     }, 4200);
   }
 
+  // Sound is allowed only after the user has tapped: create / resume the context
+  // inside that tap and play one silent sample (what iOS Safari needs)
   function unlockAudio() {
     try {
       const C = window.AudioContext || window.webkitAudioContext;
-      if (C && !S.audio) S.audio = new C();
-      if (S.audio && S.audio.state === 'suspended') S.audio.resume();
-    } catch (e) { S.audio = null; }
+      if (!C) return;
+      if (!S.audio) S.audio = new C();
+      if (S.audio.state !== 'running') S.audio.resume();
+      const buf = S.audio.createBuffer(1, 1, 22050);
+      const src = S.audio.createBufferSource();
+      src.buffer = buf;
+      src.connect(S.audio.destination);
+      src.start(0);
+    } catch (e) { S.audio = null; return; }
+    if (S.audio && S.audio.state === 'running') {
+      ['pointerdown', 'touchend', 'keydown'].forEach(t => document.removeEventListener(t, unlockAudio, true));
+    }
   }
+  // iOS suspends ("interrupts") audio in the background — wait for the next tap
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && S.audio && S.audio.state !== 'running') {
+      ['pointerdown', 'touchend', 'keydown'].forEach(t => document.addEventListener(t, unlockAudio, true));
+    }
+  });
   // a soft two-note chime (falling for a cancellation)
   function chime(down) {
     const a = S.audio;
-    if (!a || a.state !== 'running') return;
+    if (!a || a.state !== 'running') return; // not unlocked yet: stay quiet, no errors
     const notes = down ? [784, 587] : [659, 988];
     notes.forEach((f, i) => {
       const o = a.createOscillator();
@@ -384,9 +410,10 @@
         <div><b class="num">${counted.length}</b><small>${counted.length === 1 ? 'Client' : 'Clients'}</small></div>
         <div><b class="num">${freeMin >= 60 ? Math.floor(freeMin / 60) + 'h' + (freeMin % 60 ? ' ' + (freeMin % 60) + 'm' : '') : freeMin + 'm'}</b><small>Free</small></div>
       </div>
+      <div id="cab-push"></div>
       ${next ? nextClientHTML(next) : `<div class="card cab-next cab-next--none"><b>${live.length ? 'All done for today' : 'No clients today'}</b><span>${free.length ? 'Free windows are below — tap one to book a client.' : 'Enjoy the quiet.'}</span></div>`}
       ${S.pending.length ? `<button class="cab-req card" data-cab-tab="requests">${icon('<path d="M4 6.5h16v11H4z"/><path d="m4 7 8 6 8-6"/>')}<span><b>${S.pending.length} request${S.pending.length > 1 ? 's' : ''} waiting</b><small>Approve or decline</small></span>${K.I.chevR}</button>` : ''}
-      <div class="group-label">Timeline</div>
+      ${tlHead('Timeline')}
       ${timelineHTML(0, list)}
       ${free.length ? `
       <div class="group-label">Free windows</div>
@@ -439,7 +466,25 @@
   function timelineHTML(off, list) {
     const dow = K.studioDate(off).dow;
     const hours = (S.sched.hours || []).filter(h => h.weekday === dow).map(h => ({ s: minOf(h.start), e: minOf(h.end) }));
-    const items = list.filter(b => !b.status.startsWith('cancelled')).map(b => ({ b, s: spot(b.start_at).min, e: Math.max(spot(b.start_at).min + 15, spot(b.end_at).off > spot(b.start_at).off ? 24 * 60 : spot(b.end_at).min) }));
+    const span = b => ({ b, s: spot(b.start_at).min, e: Math.max(spot(b.start_at).min + 15, spot(b.end_at).off > spot(b.start_at).off ? 24 * 60 : spot(b.end_at).min) });
+    const items = list.filter(b => !b.status.startsWith('cancelled')).map(span);
+    // cancelled ones stay visible (faded); if a new booking took the time, they step aside
+    const cx = S.showCx ? list.filter(b => b.status.startsWith('cancelled')).map(span)
+      .map(c => Object.assign(c, { side: items.some(i => i.s < c.e && c.s < i.e) })) : [];
+    // cancelled ones that overlap each other share their area in lanes
+    cx.sort((a, z) => a.s - z.s);
+    for (let i = 0, cluster = [], end = -1; i <= cx.length; i++) {
+      const c = cx[i];
+      if (!c || c.s >= end) {
+        const lanes = [];
+        cluster.forEach(x => { let l = lanes.findIndex(e => e <= x.s); if (l < 0) { l = lanes.length; lanes.push(0); } lanes[l] = x.e; x.lane = l; });
+        cluster.forEach(x => { x.lanes = lanes.length; });
+        cluster = [];
+        end = -1;
+      }
+      if (c) { cluster.push(c); end = Math.max(end, c.e); }
+    }
+    const cxPos = c => { const base = c.side ? 50 : 0; const w = (100 - base) / (c.lanes || 1); const l = base + w * (c.lane || 0); return `left:calc(${l.toFixed(2)}% + 4px);right:calc(${(100 - l - w).toFixed(2)}% + 4px);`; };
     const offs = timeOffOn(off);
     let from = Math.min(9 * 60, ...hours.map(h => h.s), ...items.map(i => i.s));
     let to = Math.max(18 * 60, ...hours.map(h => h.e), ...items.map(i => i.e));
@@ -449,7 +494,6 @@
     const lines = [];
     for (let m = from; m <= to; m += 60) lines.push(`<div class="tl__h" style="top:${y(m)}px"><span>${m < 24 * 60 ? K.fmtTime(m) : ''}</span></div>`);
     const nowMin = off === 0 ? K.studioSpot(Date.now()).min : -1;
-    const cancelled = list.filter(b => b.status.startsWith('cancelled'));
     return `
       <div class="tl" style="height:${((to - from) * PX).toFixed(0)}px" data-tl="${off}" data-from="${from}">
         ${hours.map(h => `<i class="tl__open" style="top:${y(h.s)}px;height:${((h.e - h.s) * PX).toFixed(1)}px"></i>`).join('')}
@@ -459,16 +503,21 @@
           <button class="tl__b tl__b--${b.status}${e - s < 40 ? ' is-short' : ''}" data-cab-b="${esc(b.id)}" style="top:${y(s)}px;height:${Math.max(26, (e - s) * PX - 3).toFixed(1)}px">
             <b>${esc(b.client_name || 'Client')}</b><span>${esc(b.service_name)}</span><small class="num">${timeRange(b)}</small>
           </button>`).join('')}
+        ${cx.map(c => { const { b, s, e } = c; return `
+          <button class="tl__b tl__b--cx${e - s < 40 ? ' is-short' : ''}${c.side || c.lanes > 1 ? ' is-narrow' : ''}" data-cab-b="${esc(b.id)}" style="${cxPos(c)}top:${y(s)}px;height:${Math.max(26, (e - s) * PX - 3).toFixed(1)}px">
+            <b>${esc(b.client_name || 'Client')}</b>
+            <span class="tl__tags"><em class="tl__tag">${b.status === 'cancelled_client' ? 'Cancelled by client' : 'Cancelled by you'}</em>${b.late_cancel ? '<em class="tl__tag tl__tag--late">Late cancel</em>' : ''}</span>
+            <small class="num"><s>${timeRange(b)}</s></small>
+          </button>`; }).join('')}
         ${nowMin >= from && nowMin <= to ? `<i class="tl__now" style="top:${y(nowMin)}px"></i>` : ''}
       </div>
-      ${!items.length && !hours.length ? '<p class="cab-muted">Closed this day.</p>' : ''}
-      ${cancelled.length ? `
-      <div class="group-label">Cancelled</div>
-      <div class="list">${cancelled.map(b => `
-        <button class="row row--link" data-cab-b="${esc(b.id)}">
-          <span class="row__label">${esc(b.client_name || 'Client')}<span class="row__sub num">${esc(b.service_name)} · ${K.fmtClock(spot(b.start_at).min)}${b.late_cancel ? ' · late' : ''}</span></span>
-          <span class="bstat bstat--${b.status}">${b.status === 'cancelled_client' ? 'Client' : 'You'}</span>
-        </button>`).join('')}</div>` : ''}`;
+      ${!items.length && !hours.length ? '<p class="cab-muted">Closed this day.</p>' : ''}`;
+  }
+
+  // section title + the "Show cancelled" switch
+  function tlHead(title) {
+    return `<div class="cab-tlhead"><span class="group-label">${title}</span>
+      <label class="cab-cx">Show cancelled<button class="switch" role="switch" aria-checked="${S.showCx}" data-cab-showcx aria-label="Show cancelled bookings"></button></label></div>`;
   }
 
   /* ---------- CALENDAR ---------- */
@@ -501,7 +550,11 @@
         <button class="cab__ic" data-cab-shift="1" aria-label="Next day">${K.I.chevR}</button>
         ${S.day !== 0 ? '<button class="cab-today" data-cab-today>Today</button>' : ''}
       </div>
-      <div class="cab-day" data-swipe>${timelineHTML(S.day, list)}</div>`;
+      ${tlHead('Day')}
+      <div class="cab-day" data-swipe>${timelineHTML(S.day, list)}</div>
+      ${(() => { const free = S.day >= 0 ? freeWindows(S.day, list) : []; return free.length ? `
+      <div class="group-label">Free windows</div>
+      <div class="cab-free">${free.map(w => `<button class="chip" data-cab-new-at="${S.day}:${w.s}">${K.fmtClock(w.s)} – ${K.fmtClock(w.e)}</button>`).join('')}</div>` : ''; })()}`;
   }
 
   function weekHTML(start, list) {
@@ -513,16 +566,16 @@
     for (let i = 0; i < 7; i++) {
       const off = start + i;
       const d = K.studioDate(off);
-      const day = list.filter(b => spot(b.start_at).off === off && !b.status.startsWith('cancelled'));
+      const day = list.filter(b => spot(b.start_at).off === off && (S.showCx || !b.status.startsWith('cancelled')));
       const open = (S.sched.hours || []).filter(h => h.weekday === d.dow);
       cols.push(`
         <div class="wk__col${off === 0 ? ' is-today' : ''}">
           <button class="wk__d" data-cab-goday="${off}"><small>${K.DAY_SHORT[d.dow].charAt(0)}</small><b class="num">${d.day}</b></button>
           <div class="wk__body">
             ${open.map(h => `<i class="wk__open" style="top:${pct(minOf(h.start), from, to)}%;height:${pct(minOf(h.end), from, to) - pct(minOf(h.start), from, to)}%"></i>`).join('')}
-            ${day.map(b => { const s = spot(b.start_at).min; const e = Math.max(s + 20, spot(b.end_at).min); return `<button class="wk__b tl__b--${b.status}" data-cab-b="${esc(b.id)}" style="top:${pct(s, from, to)}%;height:${pct(e, from, to) - pct(s, from, to)}%" aria-label="${esc(b.client_name)} ${esc(whenLine(b))}"><span>${esc(String(b.client_name || '').split(' ')[0])}</span></button>`; }).join('')}
+            ${day.map(b => { const s = spot(b.start_at).min; const e = Math.max(s + 20, spot(b.end_at).min); return `<button class="wk__b tl__b--${b.status}${b.status.startsWith('cancelled') ? ' tl__b--cx' : ''}" data-cab-b="${esc(b.id)}" style="top:${pct(s, from, to)}%;height:${pct(e, from, to) - pct(s, from, to)}%" aria-label="${esc(b.client_name)} ${esc(whenLine(b))}"><span>${esc(String(b.client_name || '').split(' ')[0])}</span></button>`; }).join('')}
           </div>
-          <span class="wk__n num">${day.length || ''}</span>
+          <span class="wk__n num">${day.filter(b => !b.status.startsWith('cancelled')).length || ''}</span>
         </div>`);
     }
     const marks = [9, 12, 15, 18].map(h => `<span style="top:${pct(h * 60, from, to)}%">${h > 12 ? h - 12 : h}${h >= 12 ? 'p' : 'a'}</span>`).join('');
@@ -663,7 +716,7 @@
       box.innerHTML = `
         <header class="ob__head"><span class="eyebrow">Client</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
         <h2>${esc(c.name)}</h2>
-        <p class="ob__sub num">${esc(phoneText(c.phone))}${c.email ? ' · ' + esc(c.email) : ''}</p>
+        <p class="ob__sub num">${esc(phoneText(c.phone))}${c.email ? ' · ' + esc(c.email) : ''}${spent ? ' · ' + money(spent) + ' spent' : ''}</p>
         <div class="ob__actions">
           <a class="btn btn--soft" href="${esc(telHref(c.phone))}">${K.I.phone}Call</a>
           <a class="btn btn--soft" href="${esc(smsHref(c.phone))}">${icon('<path d="M20.5 11.8a8.3 8.3 0 0 1-12.2 7.3L3.5 20.5l1.4-4.6a8.3 8.3 0 1 1 15.6-4.1z"/>')}Text</a>
@@ -671,9 +724,9 @@
         </div>
         <div class="cl-stats">
           <div><b class="num">${done.length}</b><small>Visits</small></div>
-          <div><b class="num">${money(spent)}</b><small>Spent</small></div>
-          <div><b class="num">${h.filter(b => b.status === 'cancelled_client').length}</b><small>Cancels${h.some(b => b.late_cancel) ? ` · ${h.filter(b => b.late_cancel).length} late` : ''}</small></div>
-          <div><b class="num">${h.filter(b => b.status === 'no_show').length}</b><small>No-shows</small></div>
+          <div><b class="num">${h.filter(b => b.status === 'cancelled_client').length}</b><small>Cancellations</small></div>
+          <div class="${h.some(b => b.late_cancel) ? 'is-bad' : ''}"><b class="num">${h.filter(b => b.late_cancel).length}</b><small>Late cancels</small></div>
+          <div class="${h.some(b => b.status === 'no_show') ? 'is-bad' : ''}"><b class="num">${h.filter(b => b.status === 'no_show').length}</b><small>No-shows</small></div>
         </div>
         <label class="field"><span>Your notes</span><textarea id="cl-notes" rows="4" maxlength="2000" placeholder="Lash map, allergies, preferences…">${esc(c.notes)}</textarea></label>
         <button class="btn btn--soft btn--block" data-cl-save="${esc(c.id)}">Save notes</button>
@@ -681,7 +734,7 @@
         <div class="list">${h.length ? h.map(b => `
           <button class="row row--link" data-cab-b="${esc(b.id)}">
             <span class="row__label">${esc(b.service_name)}<span class="row__sub num">${esc(whenLine(b))}${b.price != null ? ' · ' + money(b.price) : ''}</span></span>
-            <span class="bstat bstat--${b.status}">${esc(statusLabel(b.status))}</span>
+            <span class="cl-tags">${b.late_cancel ? '<em class="tl__tag tl__tag--late">Late</em>' : ''}<span class="bstat bstat--${b.status}">${esc(statusLabel(b.status))}</span></span>
           </button>`).join('') : '<div class="row"><span class="row__label">No visits yet</span></div>'}</div>`;
       K.springIn(K.$$('.ob > *', K.Sheet.el()), { stagger: 0.03, y: 10, duration: 0.45 });
     } catch (e) { K.toast(err(e), 'x'); }
@@ -841,6 +894,163 @@
       K.toast('Saved', 'ok');
       K.onDataChanged();
     } catch (e) { K.toast(err(e), 'x'); refreshView(); }
+  }
+
+  /* =========================================================
+     Push notifications (Web Push) — this device
+     States: install (iPhone in Safari) · off · on · blocked · unsupported
+     Permission is asked only when she taps "Turn on notifications".
+     ========================================================= */
+  const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const pushApi = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  const b64uToU8 = s => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return Uint8Array.from(atob(s), c => c.charCodeAt(0)); };
+  const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+  function deviceLabel() {
+    const ua = navigator.userAgent;
+    const dev = /iPhone/.test(ua) ? 'iPhone' : /iPad|Macintosh.*Mobile/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? 'iPad'
+      : /Android/.test(ua) ? 'Android' : /Mac OS X/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : 'This device';
+    const br = /Edg\//.test(ua) ? 'Edge' : /CriOS|Chrome\//.test(ua) ? 'Chrome' : /Firefox|FxiOS/.test(ua) ? 'Firefox' : /Safari/.test(ua) ? 'Safari' : '';
+    return dev + (isStandalone() ? ' · app' : br ? ' · ' + br : '');
+  }
+
+  async function pushState() {
+    if (!K.Backend.vapidPublicKey) return { state: 'nokey' };
+    if (K.IS_IOS && !isStandalone()) return { state: 'install' };
+    if (!pushApi()) return { state: 'unsupported' };
+    if (Notification.permission === 'denied') return { state: 'blocked' };
+    const reg = await withTimeout(navigator.serviceWorker.ready, 5000);
+    const sub = await reg.pushManager.getSubscription();
+    if (sub && Notification.permission === 'granted') return { state: 'on', sub };
+    return { state: 'off' };
+  }
+
+  async function paintPush() {
+    const box = $('#cab-push');
+    if (!box) return;
+    let st;
+    try { st = await pushState(); } catch (e) { st = { state: 'unsupported' }; }
+    S.push = st;
+    if (st.state === 'on') saveSub(st.sub, true); // keep the server copy fresh
+    const b2 = $('#cab-push');
+    if (b2) b2.innerHTML = pushCardHTML(st);
+  }
+
+  const BELL = '<path d="M6 9.5a6 6 0 1 1 12 0c0 5 2 6.5 2 6.5H4s2-1.5 2-6.5z"/><path d="M10 19.5a2 2 0 0 0 4 0"/>';
+  function pushCardHTML(st) {
+    const appName = esc(K.data.name);
+    switch (st.state) {
+      case 'nokey': return '';
+      case 'on': return `
+        <div class="card push push--on">
+          <div class="push__row"><i class="push__dot"></i><span><b>Notifications on</b><small>${esc(deviceLabel())} · new bookings, requests, cancellations</small></span></div>
+          <div class="push__actions">
+            <button class="btn btn--soft btn--sm" data-push-test>${icon(BELL)}Send test notification</button>
+            <button class="cab-link" data-push-off>Turn off</button>
+          </div>
+        </div>`;
+      case 'install': return `
+        <div class="card push">
+          <div class="push__head"><span class="push__ic">${icon(BELL)}</span><b>Get notified about bookings</b></div>
+          <p>On iPhone, notifications work in the installed app. <b>Add the app to your Home Screen first</b>, then open it from there and turn them on here.</p>
+          <div class="a2hs" aria-hidden="true">
+            <div class="a2hs__screen">
+              <div class="a2hs__sheet"><span class="a2hs__item">${icon('<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/>')}Add to Home Screen</span></div>
+              <div class="a2hs__bar"><i></i><span class="a2hs__share">${icon('<path d="M12 15V3.5M8 7.5l4-4 4 4"/><path d="M6 11v8.5h12V11"/>')}</span><i></i><i></i></div>
+              <span class="a2hs__finger"></span>
+            </div>
+          </div>
+          <ol class="a2hs__steps">
+            <li>Tap <b>Share</b> ${icon('<path d="M12 15V3.5M8 7.5l4-4 4 4"/><path d="M6 11v8.5h12V11"/>')} in Safari</li>
+            <li>Choose <b>Add to Home Screen</b></li>
+            <li>Open <b>${appName}</b> from your Home Screen</li>
+          </ol>
+        </div>`;
+      case 'blocked': return `
+        <div class="card push push--blocked">
+          <div class="push__head"><span class="push__ic">${icon(BELL)}</span><b>Notifications are blocked</b></div>
+          <p>${K.IS_IOS
+            ? `Open <b>Settings → Notifications → ${appName}</b> and turn on <b>Allow Notifications</b>, then come back here.`
+            : /Android/.test(navigator.userAgent)
+              ? 'Tap <b>⋮ → Settings → Site settings → Notifications</b> and allow this site — or tap the lock icon next to the address.'
+              : 'Click the <b>lock icon</b> next to the address → <b>Notifications → Allow</b>, then reload the page.'}</p>
+          <button class="btn btn--soft btn--sm" data-push-recheck>I’ve turned them on</button>
+        </div>`;
+      case 'unsupported': return `
+        <div class="card push push--muted">
+          <div class="push__head"><span class="push__ic">${icon(BELL)}</span><b>Notifications aren’t available here</b></div>
+          <p>Use the installed app on iPhone (iOS 16.4 or newer), or Chrome, Edge or Safari on Android and computers.</p>
+        </div>`;
+      default: return `
+        <div class="card push">
+          <div class="push__head"><span class="push__ic">${icon(BELL)}</span><b>Get notified about bookings</b></div>
+          <p>New bookings, requests and cancellations — the moment they happen, even when the app is closed.</p>
+          <button class="btn btn--primary btn--block" data-push-on>Turn on notifications</button>
+        </div>`;
+    }
+  }
+
+  async function saveSub(sub, quiet) {
+    try {
+      await K.Backend.owner.pushSubscribe(S.studio.id, sub.toJSON(), deviceLabel());
+      return true;
+    } catch (e) {
+      if (!quiet) K.toast(err(e), 'x');
+      return false;
+    }
+  }
+
+  // called straight from the tap: the permission prompt needs that gesture
+  async function pushOn(btn) {
+    if (!pushApi()) { paintPush(); return; }
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') {
+      if (perm === 'denied') K.toast('Notifications are blocked', 'x');
+      paintPush();
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.innerHTML = K.spinner(); }
+    try {
+      const reg = await withTimeout(navigator.serviceWorker.ready, 8000);
+      const key = b64uToU8(K.Backend.vapidPublicKey);
+      let sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        // made with another server key? start over
+        const old = sub.options && sub.options.applicationServerKey && new Uint8Array(sub.options.applicationServerKey);
+        if (old && (old.length !== key.length || old.some((v, i) => v !== key[i]))) { await sub.unsubscribe(); sub = null; }
+      }
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      if (await saveSub(sub)) {
+        K.haptic([10, 30, 10]);
+        K.toast('Notifications on', 'ok');
+      }
+    } catch (e) {
+      // permission is granted but the browser can't subscribe: private window, push off in the browser…
+      K.toast(Notification.permission === 'denied' ? 'Notifications are blocked' : 'This browser can’t turn them on here — not in a private window?', 'x');
+    }
+    paintPush();
+  }
+
+  async function pushOff() {
+    try {
+      const reg = await withTimeout(navigator.serviceWorker.ready, 5000);
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        const endpoint = sub.endpoint;
+        await sub.unsubscribe();
+        await K.Backend.owner.pushUnsubscribe(endpoint).catch(() => null);
+      }
+      K.toast('Notifications off on this device', 'ok');
+    } catch (e) { K.toast(err(e), 'x'); }
+    paintPush();
+  }
+
+  async function pushTest(btn) {
+    if (btn) { btn.disabled = true; btn.innerHTML = K.spinner(); }
+    try {
+      const r = await K.Backend.owner.sendTestPush(S.studio.id);
+      K.toast(r && r.sent ? `Test sent to ${r.sent} device${r.sent > 1 ? 's' : ''}` : 'No device got it — turn notifications off and on again', r && r.sent ? 'bell' : 'x');
+    } catch (e) { K.toast(err(e), 'x'); }
+    paintPush();
   }
 
   /* =========================================================
@@ -1159,6 +1369,17 @@
     }
     if ((el = t.closest('[data-cl-save]'))) { saveNotes(el.dataset.clSave); return; }
     // calendar
+    if ((el = t.closest('[data-push-on]'))) { if (!el.disabled) pushOn(el); return; }
+    if ((el = t.closest('[data-push-off]'))) { pushOff(); return; }
+    if ((el = t.closest('[data-push-test]'))) { if (!el.disabled) pushTest(el); return; }
+    if ((el = t.closest('[data-push-recheck]'))) { paintPush(); return; }
+    if ((el = t.closest('[data-cab-showcx]'))) {
+      S.showCx = !S.showCx;
+      try { localStorage.setItem('studio-app:cab:showCancelled', S.showCx ? '1' : '0'); } catch (x) { /* private mode */ }
+      K.haptic();
+      refreshView();
+      return;
+    }
     if ((el = t.closest('[data-cab-cal]'))) { S.cal = el.dataset.cabCal; refreshView(true); K.haptic(); return; }
     if ((el = t.closest('[data-cab-shift]'))) { shiftDay(+el.dataset.cabShift); return; }
     if ((el = t.closest('[data-cab-today]'))) { S.day = 0; refreshView(true); return; }
@@ -1301,6 +1522,7 @@
   }
 
   function afterRender(tab) {
+    if (tab === 'today') paintPush();
     if (tab === 'requests') bindSwipes();
     if (tab === 'calendar') bindDaySwipe();
     if (tab === 'today' || (tab === 'calendar' && S.cal === 'day')) {

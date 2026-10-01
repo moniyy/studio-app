@@ -133,6 +133,19 @@
     addTimeOff: (mid, start, end, reason) => rpc('owner_add_time_off', { p_master_id: mid, p_start_at: start, p_end_at: end, p_reason: reason || '' }),
     deleteTimeOff: id => rpc('owner_delete_time_off', { p_id: id }),
 
+    /* Web Push: this device's subscription, and a test message to all her devices */
+    pushSubscribe: (mid, sub, label) => rpc('owner_push_subscribe', {
+      p_master_id: mid, p_endpoint: sub.endpoint, p_p256dh: sub.keys.p256dh, p_auth: sub.keys.auth, p_label: label || ''
+    }),
+    pushUnsubscribe: endpoint => rpc('owner_push_unsubscribe', { p_endpoint: endpoint }),
+    pushDevices: mid => rpc('owner_push_devices', { p_master_id: mid }),
+    async sendTestPush(mid) {
+      const sb = await client();
+      const { data, error } = await sb.functions.invoke('send-push', { body: { master_id: mid } });
+      if (error) throw toError(error);
+      return data;
+    },
+
     /* Realtime: calls onChange({type, record, old}) for this master's bookings.
        onStatus('live' | 'down') tells the dashboard whether to poll instead. */
     async subscribe(mid, onChange, onStatus) {
@@ -148,5 +161,5 @@
     }
   };
 
-  window.StudioBackend = Object.assign({ configured, client, BackendError, auth, owner }, publicApi);
+  window.StudioBackend = Object.assign({ configured, client, BackendError, auth, owner, vapidPublicKey: cfg.vapidPublicKey || '' }, publicApi);
 })();

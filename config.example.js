@@ -12,5 +12,7 @@
    and "external" booking links need no backend at all. */
 window.STUDIO_CONFIG = {
   supabaseUrl: 'https://YOUR-PROJECT-REF.supabase.co',
-  supabaseAnonKey: 'YOUR-ANON-KEY'
+  supabaseAnonKey: 'YOUR-ANON-KEY',
+  // push notifications for the master: the PUBLIC VAPID key (README → Push)
+  vapidPublicKey: 'YOUR-VAPID-PUBLIC-KEY'
 };

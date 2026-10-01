@@ -269,6 +269,26 @@
     return `<span class="line-art${cls ? ' ' + cls : ''}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${LINE_ART[key] || LINE_ART.sparkles}</svg></span>`;
   }
 
+  /* Services without a photo: a thin line icon (lashes / brows / nails) on a
+     soft surface — as an <img>, so every thumbnail size and radius just works */
+  const PH_ART = {
+    lash: '<path d="M30 46c6 7 13 10 20 10s14-3 20-10"/><path d="M35 51.5l-3.5 5M42 54.5l-1.5 6M50 55.5v6.5M58 54.5l1.5 6M65 51.5l3.5 5"/>',
+    brow: '<path d="M29 47c7-9 15-12 23-11 6 .7 11 3.2 15 7"/><path d="M34 56c5-3 10-4.2 16-4.2s11 1.2 16 4.2"/>',
+    nail: '<path d="M42 43h16v22a3 3 0 0 1-3 3H45a3 3 0 0 1-3-3z"/><path d="M45.5 43V31h9v12M42 52h16"/>',
+    spark: '<path d="M46 52.5l-2.8 9.8-2.8-9.8-10.2-3.2 10.2-3.2 2.8-9.8 2.8 9.8 10.2 3.2z"/><path d="M62 33v8M58 37h8M64 56v6M61 59h6"/>'
+  };
+  const svcKind = x => {
+    const t = (((x && x.category) || '') + ' ' + ((x && (x.title || x.service_name)) || '')).toLowerCase();
+    return /brow/.test(t) ? 'brow' : /nail|mani|pedi|gel|acryl|polish/.test(t) ? 'nail' : /lash|lift|fill|volume|hybrid|classic/.test(t) ? 'lash' : 'spark';
+  };
+  const phSrc = kind => 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">' +
+    '<rect width="100" height="100" fill="#8E8E93" fill-opacity=".13"/>' +
+    '<g fill="none" stroke="#8E8E93" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' + (PH_ART[kind] || PH_ART.spark) + '</g></svg>');
+  // src for a service picture (or the placeholder); pair with data-ph so a broken photo falls back too
+  const photoSrc = (x, w) => { const p = x && (x.photo || x.service_photo); return p ? sized(safeUrl(p), w) : phSrc(svcKind(x)); };
+  const phAttr = x => ` data-ph="${svcKind(x)}"`;
+
   /* Line icons */
   const svg = (d, extra) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"' + (extra || '') + '>' + d + '</svg>';
   const I = {
@@ -1042,7 +1062,7 @@
               ${data.services.map(s => `
                 <div class="svc-card" role="button" tabindex="0" data-open-service="${esc(s.id)}">
                   <span class="svc-card__photo">
-                    <img src="${esc(sized(safeUrl(s.photo), 400))}" alt="" loading="lazy">
+                    <img src="${esc(photoSrc(s, 400))}"${phAttr(s)} alt="" loading="lazy">
                     ${STYLE !== 'soft' ? '' : `<span class="svc-card__icon"><img src="${esc(icon3d(s.icon))}" alt="" loading="lazy"></span>`}
                     ${favButton('svc:' + s.id, 'fav--photo')}
                   </span>
@@ -1115,7 +1135,7 @@
           ${STYLE === 'maison' ? menuHTML() : STYLE === 'noir' ? groupedHTML() : data.services.map(s => `
             <div class="card svc2" role="button" tabindex="0" data-stagger data-svc="${esc(s.id)}" data-open-service="${esc(s.id)}">
               <span class="svc2__media">
-                <img class="svc2__photo" src="${esc(sized(safeUrl(s.photo), 300))}" alt="" loading="lazy">
+                <img class="svc2__photo" src="${esc(photoSrc(s, 300))}"${phAttr(s)} alt="" loading="lazy">
                 ${favButton('svc:' + s.id, 'fav--photo fav--sm')}
               </span>
               <span class="svc2__info">
@@ -1165,7 +1185,7 @@
         <div class="list">
           ${data.services.filter(s => s.category === c).map(s => `
             <div class="svc2 nrow" role="button" tabindex="0" data-svc="${esc(s.id)}" data-open-service="${esc(s.id)}">
-              <img class="nrow__thumb" src="${esc(sized(safeUrl(s.photo), 160))}" alt="" loading="lazy">
+              <img class="nrow__thumb" src="${esc(photoSrc(s, 160))}"${phAttr(s)} alt="" loading="lazy">
               <span class="nrow__text"><b>${esc(s.title)}</b>${s.duration ? `<small>${esc(s.duration)}</small>` : ''}</span>
               <span class="nrow__price num">${esc(price(s.price))}</span>
               <span class="row__chev">${I.chevR}</span>
@@ -2256,7 +2276,7 @@
     return `
       <div class="sheet__scroll" data-sheet-scroll>
         <div class="sd-photo">
-          <img src="${esc(sized(safeUrl(s.photo), 900))}" alt="">
+          <img src="${esc(photoSrc(s, 900))}"${phAttr(s)} alt="">
           <button class="sheet__x sheet__x--float" data-sheet-close aria-label="Close">${I.x}</button>
           ${favButton('svc:' + s.id, 'fav--photo fav--lg')}
         </div>
@@ -2447,14 +2467,20 @@
     renderBkService();
   }
 
+  // "Everything Aria offers — prices from $45." (the lowest numeric price)
+  function pricesFrom() {
+    const nums = data.services.map(x => +x.price).filter(n => isFinite(n) && n > 0);
+    return `Everything ${firstName()} offers${nums.length ? ' — prices from ' + price(Math.min(...nums)) : ''}.`;
+  }
+
   function renderBkService() {
     $('#bk-p0').innerHTML = `
       <h2 class="bk-title">Choose a service</h2>
-      <p class="bk-sub">Everything ${esc(firstName())} offers, with prices up front.</p>
+      <p class="bk-sub">${esc(pricesFrom())}</p>
       <div class="pick-list">
         ${data.services.map(s => `
           <button class="pick${s.id === bk.service ? ' is-selected' : ''}" data-bk-svc="${esc(s.id)}">
-            <img src="${esc(sized(safeUrl(s.photo), 200))}" alt="" loading="lazy">
+            <img src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="" loading="lazy">
             <span class="pick__text"><b>${esc(s.title)}</b><small>${esc(s.duration || '')}</small></span>
             <span class="pick__price">${esc(price(s.price))}</span>
             <span class="pick__check">${I.check}</span>
@@ -2475,7 +2501,7 @@
       ${builtin && bkx.notice ? `<div class="bk-notice">${I.clock}<span>${esc(bkx.notice)}</span></div>` : ''}
       ${s && !moving ? `
       <button class="bk-chosen" data-bk-step="0">
-        <img src="${esc(sized(safeUrl(s.photo), 200))}" alt="">
+        <img src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">
         <span><b>${esc(s.title)}</b><small>${esc([s.duration, price(s.price)].filter(Boolean).join(' · '))}</small></span>
         <em>Change</em>
       </button>` : ''}
@@ -2604,7 +2630,7 @@
       ${lookRefHTML()}
       <div class="card bk-sum">
         <div class="bk-sum__svc">
-          <img src="${esc(sized(safeUrl(s.photo), 200))}" alt="">
+          <img src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">
           <span><b>${esc(s.title)}</b><small>${esc(s.category)}</small></span>
         </div>
         <div class="bk-row"><span>Date</span><b>${esc(dayLabel(bk.off, true))}</b></div>
@@ -3111,7 +3137,7 @@
       ${lookRefHTML()}
       <div class="card bk-sum">
         <div class="bk-sum__svc">
-          <img src="${esc(sized(safeUrl(s.photo), 200))}" alt="">
+          <img src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">
           <span><b>${esc(s.title)}</b><small>${esc(s.category)}</small></span>
         </div>
         <div class="bk-row"><span>Date</span><b>${esc(dayLabel(bk.off, true))}</b></div>
@@ -3234,7 +3260,7 @@
         </div>
         <div class="card bk-sum">
           <div class="bk-sum__svc">
-            <img src="${esc(sized(safeUrl(b.service_photo || (s && s.photo)), 200))}" alt="">
+            <img src="${esc(b.service_photo ? sized(safeUrl(b.service_photo), 200) : photoSrc(s || { title: b.service_name }, 200))}"${phAttr(s || { title: b.service_name })} alt="">
             <span><b>${esc(b.service_name || (s && s.title) || '')}</b><small>${statusText(b.status)}</small></span>
           </div>
           <div class="bk-row"><span>Date</span><b>${esc(dayLabel(studioSpot(b.start_at).off, true))}</b></div>
@@ -3321,7 +3347,7 @@
       <div class="mybk card" data-manage="${esc(b.token)}" role="button" tabindex="0">
         <div class="mybk__top"><span class="eyebrow">Your appointment</span><span class="bstat bstat--${b.status}">${b.status === 'pending' ? 'Pending' : 'Confirmed'}</span></div>
         <div class="mybk__main">
-          <img src="${esc(sized(safeUrl(b.service_photo), 200))}" alt="">
+          <img src="${esc(photoSrc(b, 200))}"${phAttr(b)} alt="">
           <span><b>${esc(b.service_name)}</b><span class="num">${esc(whenText(b.start_at))}</span><small class="mybk__count" data-countdown="${esc(b.start_at)}">${countdown(b.start_at)}</small></span>
         </div>
         <div class="mybk__actions">
@@ -3378,7 +3404,7 @@
         <button class="sheet__x" data-sheet-close aria-label="Close">${I.x}</button>
       </header>
       <div class="mg__hero">
-        <img src="${esc(sized(safeUrl(b.service_photo), 300))}" alt="">
+        <img src="${esc(photoSrc(b, 300))}"${phAttr(b)} alt="">
         <div>
           <h2>${esc(b.service_name)}</h2>
           <p class="num">${esc(dayLabel(spot.off, true))} · ${fmtClock(spot.min)}</p>
@@ -3469,7 +3495,7 @@
     const past = list.filter(x => !up.includes(x));
     const row = b => `
       <button class="row row--link mybk-row" data-manage="${esc(b.token)}">
-        <img src="${esc(sized(safeUrl(b.service_photo), 120))}" alt="">
+        <img src="${esc(photoSrc(b, 120))}"${phAttr(b)} alt="">
         <span class="row__label">${esc(b.service_name)}<span class="row__sub num">${esc(whenText(b.start_at))}</span></span>
         <span class="bstat bstat--${b.status}">${esc(b.status === 'confirmed' ? 'Confirmed' : b.status === 'pending' ? 'Pending' : statusText(b.status))}</span>
         <span class="row__chev">${I.chevR}</span>
@@ -4058,7 +4084,7 @@
     el.className = 'chat-card';
     const svcRow = s => `
       <button class="cc-row" data-open-service="${esc(s.id)}">
-        <img class="cc-photo" src="${esc(sized(safeUrl(s.photo), 200))}" alt="">
+        <img class="cc-photo" src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">
         <span class="cc-row__text"><b>${esc(s.title)}</b><small>${esc(s.duration || '')}</small></span>
         <span class="cc-price">${esc(price(s.price))}</span>
       </button>`;
@@ -4069,7 +4095,7 @@
       el.classList.add('chat-card--svc');
       el.innerHTML = `
         <div class="cc-svc" data-open-service="${esc(s.id)}">
-          <img class="cc-photo cc-photo--lg" src="${esc(sized(safeUrl(s.photo), 500))}" alt="">
+          <img class="cc-photo cc-photo--lg" src="${esc(photoSrc(s, 500))}"${phAttr(s)} alt="">
           <div class="cc-svc__body">
             <span class="svc2__cat">${esc(s.category)}</span>
             <b>${esc(s.title)}</b>
@@ -5077,7 +5103,10 @@
 
     // Broken images fade out instead of showing an icon
     document.addEventListener('error', e => {
-      if (e.target && e.target.tagName === 'IMG') e.target.classList.add('is-broken');
+      if (e.target && e.target.tagName === 'IMG') {
+        if (e.target.dataset.ph && !e.target.src.startsWith('data:')) { e.target.src = phSrc(e.target.dataset.ph); return; }
+        e.target.classList.add('is-broken');
+      }
     }, true);
 
     tabbar.addEventListener('click', e => {
@@ -5439,7 +5468,7 @@
     }
     box.innerHTML = svcs.map(s => `
         <div class="row row--link" role="button" tabindex="0" data-open-service="${esc(s.id)}">
-          <img class="row__thumb" src="${esc(sized(safeUrl(s.photo), 200))}" alt="">
+          <img class="row__thumb" src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">
           <span class="row__label">${esc(s.title)}<span class="row__sub">${esc(s.duration || '')}</span></span>
           <span class="row__value">${esc(price(s.price))}</span>
           <span class="row__chev">${I.chevR}</span>
@@ -5793,7 +5822,7 @@
     if (!s) return '';
     return `
       <div class="again card">
-        <img class="again__photo" src="${esc(sized(safeUrl(s.photo), 200))}" alt="">
+        <img class="again__photo" src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">
         <span class="again__text"><span class="eyebrow">Book again</span><b>${esc(s.title)} · <span class="num">${esc(price(s.price))}</span></b></span>
         <button class="btn btn--primary btn--sm" data-book data-book-service="${esc(s.id)}">Book</button>
       </div>`;
@@ -5991,7 +6020,7 @@
           <div class="owner__h"><b>Most viewed services</b><span class="demo-tag">Demo data</span></div>
           ${top.map(t => `
             <div class="owner__svc">
-              <img src="${esc(sized(safeUrl(t.s.photo), 200))}" alt="">
+              <img src="${esc(photoSrc(t.s, 200))}"${phAttr(t.s)} alt="">
               <div class="owner__svc-body">
                 <div class="owner__svc-top"><b>${esc(t.s.title)}</b><span class="num">${t.views} views</span></div>
                 <div class="owner__track"><i style="--p:${(t.views / maxViews).toFixed(3)}"></i></div>
@@ -6672,7 +6701,15 @@
     app.classList.remove('is-splash', 'is-splash-photo');
     go('home', { force: true, silent: true });
     const first = !short && !store.get('onboarded') && !LOOK_PARAM; // a shared look link skips the Welcome
-    if (params.get('owner') === '1') setTimeout(() => openCabinet(), first ? 200 : 900);
+    if (params.get('owner') === '1') {
+      // a tapped notification → straight to that booking
+      const booking = /^[0-9a-f-]{36}$/i.test(params.get('booking') || '') ? params.get('booking') : null;
+      if (params.has('booking')) {
+        params.delete('booking');
+        try { history.replaceState(history.state, '', location.pathname + '?' + params.toString() + location.hash); } catch (e) { /* file:// */ }
+      }
+      setTimeout(() => openCabinet({ booking }), first ? 200 : 900);
+    }
     else if (ownerMode) setOwnerMode(true);
     if (LOOK_PARAM) setTimeout(openLookFromLink, 650);
     return first;
@@ -7004,6 +7041,17 @@
       refreshMine();
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') { refreshMine(); refreshOpenings(); }
+      });
+    }
+
+    // the service worker relays taps on notifications while the app is open
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', e => {
+        const d = e.data || {};
+        if (d.type !== 'open-booking' || !d.url) return;
+        const u = new URL(d.url, location.href);
+        if ((u.searchParams.get('m') || 'demo') !== SLUG || !data) { location.href = u.href; return; }
+        openCabinet({ booking: d.booking || u.searchParams.get('booking') });
       });
     }
 

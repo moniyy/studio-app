@@ -3,7 +3,7 @@
      (so edits on GitHub Pages show up right away).
    - Photos, 3D icons, fonts, QR lib: cache first. */
 
-const VERSION = 'studio-app-v14';
+const VERSION = 'studio-app-v15';
 const SHELL_CACHE = VERSION + '-shell';
 const MEDIA_CACHE = VERSION + '-media';
 const MEDIA_LIMIT = 120;
@@ -21,7 +21,8 @@ const SHELL = [
   './img/icon-192.png',
   './img/icon-512.png',
   './img/icon-maskable-512.png',
-  './img/apple-touch-icon.png'
+  './img/apple-touch-icon.png',
+  './img/badge-96.png'
 ];
 
 const MEDIA_HOSTS = [
@@ -97,3 +98,37 @@ async function trim(cache) {
   const keys = await cache.keys();
   for (let i = 0; i < keys.length - MEDIA_LIMIT; i++) await cache.delete(keys[i]);
 }
+
+/* ---------- Push notifications for the master ----------
+   Payload (JSON, from the send-push Edge Function):
+   { title, body, url: "./?m=<slug>&owner=1&booking=<id>", tag, booking } */
+self.addEventListener('push', event => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch (e) { d = { body: event.data ? event.data.text() : '' }; }
+  event.waitUntil(self.registration.showNotification(d.title || 'Studio', {
+    body: d.body || '',
+    icon: './img/icon-192.png',
+    badge: './img/badge-96.png',
+    tag: d.tag || undefined,
+    renotify: !!d.tag,
+    timestamp: Date.now(),
+    data: { url: d.url || './?owner=1', booking: d.booking || null }
+  }));
+});
+
+// Tap → the dashboard opens right on that booking (an open window is reused)
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const data = event.notification.data || {};
+  const url = new URL(data.url || './', self.registration.scope).href;
+  event.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const win = wins.find(w => w.url.startsWith(self.registration.scope));
+    if (win) {
+      await win.focus();
+      win.postMessage({ type: 'open-booking', url, booking: data.booking });
+      return;
+    }
+    await self.clients.openWindow(url);
+  })());
+});
