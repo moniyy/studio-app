@@ -82,7 +82,8 @@ npx supabase db push --include-seed         # создаёт таблицы, з�
 - **На GitHub Pages:** **Settings → Secrets and variables → Actions → New repository secret**:
   `SUPABASE_URL` и `SUPABASE_ANON_KEY` (или `gh secret set SUPABASE_URL` / `gh secret set SUPABASE_ANON_KEY`).
   Сайт собирает workflow `.github/workflows/pages.yml` и сам кладёт `config.js` с этими значениями.
-  (В **Settings → Pages** источник должен быть **GitHub Actions**.)
+  Включение (один раз): `gh auth refresh -h github.com -s workflow` → перенести `tools/pages.yml` в
+  `.github/workflows/pages.yml` → push → **Settings → Pages → Source: GitHub Actions**.
 
 ## Как устроена запись
 
