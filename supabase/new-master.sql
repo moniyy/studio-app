@@ -1,8 +1,10 @@
 -- =========================================================
 -- A new studio with real online booking.
 -- Paste into Supabase → SQL Editor, change the values, Run.
--- Then: the master opens https://moniyy.github.io/studio-app/?m=bella-nails&owner=1,
--- signs in with owner_email and manages hours and bookings herself.
+-- Then: create her account (Authentication → Users → Add user → Create new user,
+-- Auto Confirm User) and run the update at the bottom of this file. She opens
+-- https://moniyy.github.io/studio-app/?m=bella-nails&owner=1, signs in with that
+-- email + password and manages hours and bookings herself.
 -- (Photos, texts, gallery, policies… can live in masters/bella-nails.json —
 --  add "bookingEngine": "builtin" there — or in "settings" below.)
 -- =========================================================
@@ -12,7 +14,7 @@ with m as (
   values (
     'bella-nails',                 -- the link: ?m=bella-nails (a–z, 0–9, - and _)
     'Bella Nails',
-    'bella@example.com',           -- she signs in with this email
+    'bella@example.com',           -- her email (for your records; access is by owner_id below)
     'America/Chicago',             -- her time zone (America/New_York, America/Los_Angeles, …)
     'noir',                        -- noir | maison | soft
     '#F4A6B8',
@@ -48,3 +50,7 @@ select m.id, d, t.s, t.e
   from m, generate_series(1, 5) d, (values (time '10:00', time '14:00'), (time '15:00', time '19:00')) t(s, e)
 union all
 select m.id, 6, time '10:00', time '16:00' from m;
+
+-- 2) After her account exists, link it to the studio:
+-- update public.masters set owner_id = (select id from auth.users where email = 'bella@example.com')
+--  where slug = 'bella-nails';

@@ -17,7 +17,7 @@
     sched: null, cache: {}, pending: [], clients: null, q: '',
     known: null, self: new Set(), live: false, unsub: null, poll: 0,
     badges: { today: 0, calendar: 0, requests: 0 }, queue: [], audio: null,
-    authStep: 'email', email: '', busy: false, hrs: null, hrsDirty: false
+    email: '', busy: false, hrs: null, hrsDirty: false
   };
 
   const TABS = [
@@ -86,6 +86,7 @@
     document.addEventListener('click', onClick);
     document.addEventListener('input', onInput);
     document.addEventListener('change', onChange);
+    root.addEventListener('submit', e => { if (e.target.id === 'cab-signin') { e.preventDefault(); signIn(); } });
     root.addEventListener('pointerdown', unlockAudio, { once: true });
     K.pushOverlay(() => close(true));
     const g = K.G();
@@ -120,65 +121,46 @@
   }
 
   /* =========================================================
-     Sign in
+     Sign in — email + password (emails come in part 2 with own SMTP)
      ========================================================= */
   function renderAuth(msg) {
     $('#cab-tabs').hidden = true;
     $('[data-cab-new]').hidden = true;
     $('[data-cab-menu]').hidden = true;
-    const sent = S.authStep === 'code';
     $('#cab-main').innerHTML = `
-      <div class="cab-auth">
+      <form class="cab-auth" id="cab-signin" autocomplete="on" novalidate>
         <span class="cab-auth__mono">${esc(K.initials())}</span>
-        <h1>${sent ? 'Check your email' : 'Studio dashboard'}</h1>
-        <p>${sent
-          ? `We sent a sign-in link and a 6-digit code to <b>${esc(S.email)}</b>. Open the link on this phone — or type the code here (best in the installed app).`
-          : `Sign in with the email ${esc(K.data.name)} was set up with. No password — we email you a link.`}</p>
-        ${sent ? `
-        <label class="field"><span>6-digit code</span>
-          <input id="cab-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" class="cab-code"></label>
-        <button class="btn btn--primary btn--block" data-cab-verify${S.busy ? ' disabled' : ''}>${S.busy ? K.spinner() : 'Sign in'}</button>
-        <button class="cab-link" data-cab-resend>Use another email</button>` : `
+        <h1>Studio dashboard</h1>
+        <p>Sign in to see bookings, clients and your hours for ${esc(K.data.name)}.</p>
         <label class="field"><span>Email</span>
-          <input id="cab-email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" placeholder="you@studio.com" value="${esc(S.email)}"></label>
-        <button class="btn btn--primary btn--block" data-cab-send${S.busy ? ' disabled' : ''}>${S.busy ? K.spinner() : 'Email me a sign-in link'}</button>`}
-        ${msg ? `<p class="cab-auth__err">${esc(msg)}</p>` : ''}
-        ${K.data.ownerDemo ? '<button class="cab-link" data-cab-demo>See the dashboard with demo data</button>' : ''}
-      </div>`;
-    const f = $(sent ? '#cab-code' : '#cab-email');
+          <input id="cab-email" name="email" type="email" inputmode="email" autocomplete="username" autocapitalize="off" spellcheck="false" enterkeyhint="next" placeholder="you@studio.com" value="${esc(S.email)}"></label>
+        <label class="field"><span>Password</span>
+          <span class="pw"><input id="cab-pass" name="password" type="password" autocomplete="current-password" enterkeyhint="go" placeholder="Your password">
+          <button type="button" class="pw__eye" data-pw-eye aria-label="Show password">${icon('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>')}</button></span></label>
+        <button type="submit" class="btn btn--primary btn--block" data-cab-signin${S.busy ? ' disabled' : ''}>${S.busy ? K.spinner() : 'Sign in'}</button>
+        ${msg ? `<p class="cab-auth__err" role="alert">${esc(msg)}</p>` : ''}
+        ${K.data.ownerDemo ? '<button type="button" class="cab-link" data-cab-demo>See the dashboard with demo data</button>' : ''}
+      </form>`;
+    const f = $(S.email ? '#cab-pass' : '#cab-email');
     if (f && !K.IS_IOS) setTimeout(() => f.focus(), 350);
   }
 
-  async function sendLink() {
+  async function signIn() {
     const email = String(($('#cab-email') || {}).value || '').trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { renderAuth('Enter your email address'); return; }
+    const pass = String(($('#cab-pass') || {}).value || '');
     S.email = email;
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { renderAuth('Enter your email address'); return; }
+    if (!pass) { renderAuth('Enter your password'); return; }
     S.busy = true;
     renderAuth();
     try {
-      const back = `${location.origin}${location.pathname}?m=${encodeURIComponent(K.SLUG)}&owner=1`;
-      await K.Backend.auth.sendLink(email, back);
-      S.authStep = 'code';
+      S.session = await K.Backend.auth.signIn(email, pass);
       S.busy = false;
-      renderAuth();
-    } catch (e) {
-      S.busy = false;
-      renderAuth(/rate|seconds/i.test(e.message) ? 'Please wait a minute before asking for another email.' : err(e));
-    }
-  }
-
-  async function verify() {
-    const code = String(($('#cab-code') || {}).value || '').replace(/\D/g, '');
-    if (code.length !== 6) { renderAuth('Enter the 6-digit code from the email'); return; }
-    S.busy = true;
-    renderAuth();
-    try {
-      S.session = await K.Backend.auth.verifyCode(S.email, code);
-      S.busy = false;
+      K.haptic([10, 30, 10]);
       await enter();
     } catch (e) {
       S.busy = false;
-      renderAuth(err(e));
+      renderAuth(e.code === 'bad_login' ? 'Wrong email or password' : err(e));
     }
   }
 
@@ -186,7 +168,6 @@
   async function enter() {
     renderLoading();
     try {
-      await K.Backend.owner.claim().catch(() => []);
       const list = await K.Backend.owner.studios();
       S.studio = (list || []).find(m => m.slug === K.SLUG) || null;
     } catch (e) {
@@ -1146,9 +1127,14 @@
 
     if ((el = t.closest('[data-cab-close]'))) { close(); return; }
     if ((el = t.closest('[data-cab-tab]'))) { go(el.dataset.cabTab); return; }
-    if ((el = t.closest('[data-cab-send]'))) { sendLink(); return; }
-    if ((el = t.closest('[data-cab-verify]'))) { verify(); return; }
-    if ((el = t.closest('[data-cab-resend]'))) { S.authStep = 'email'; renderAuth(); return; }
+    if ((el = t.closest('[data-pw-eye]'))) {
+      const inp = el.parentElement.querySelector('input');
+      inp.type = inp.type === 'password' ? 'text' : 'password';
+      el.classList.toggle('is-on', inp.type === 'text');
+      el.setAttribute('aria-label', inp.type === 'text' ? 'Hide password' : 'Show password');
+      return;
+    }
+    if ((el = t.closest('[data-pw-save]'))) { changePassword(); return; }
     if ((el = t.closest('[data-cab-demo]'))) { close(); setTimeout(() => K.demo(), 350); return; }
     if ((el = t.closest('[data-cab-signout]'))) { signOut(); return; }
     if ((el = t.closest('[data-cab-menu]'))) { openMenu(); return; }
@@ -1276,7 +1262,6 @@
     if (!root) return;
     const t = e.target;
     if (t.id === 'cab-q') { onSearch(t.value); return; }
-    if (t.id === 'cab-code') { if (t.value.replace(/\D/g, '').length === 6) verify(); return; }
     if (t.id === 'pk-custom') {
       ob.pick.custom = t.value;
       ob.pick.min = null;
@@ -1369,9 +1354,36 @@
             <div class="row"><span class="row__label">Live updates<span class="row__sub">${S.live ? 'Connected — new bookings appear instantly' : 'Checking every 15 seconds'}</span></span></div>
             <div class="row"><span class="row__label">Online booking link<span class="row__sub">${esc(location.origin + location.pathname + '?m=' + K.SLUG)}</span></span></div>
           </div>
+          <div class="group-label">Change password</div>
+          <form class="bk-form" id="pw-form" autocomplete="on" onsubmit="return false">
+            <input type="email" autocomplete="username" value="${esc(email)}" hidden>
+            <label class="field"><span>New password</span>
+              <span class="pw"><input id="pw-new" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters">
+              <button type="button" class="pw__eye" data-pw-eye aria-label="Show password">${icon('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>')}</button></span></label>
+            <label class="field"><span>Repeat it</span><input id="pw-new2" type="password" autocomplete="new-password" placeholder="The same password"></label>
+            <button class="btn btn--primary btn--block" type="button" data-pw-save>Save new password</button>
+          </form>
           <button class="btn btn--soft btn--block" data-cab-signout>Sign out</button>
         </div>`;
-    }, { detent: 'medium' });
+    }, { detent: 'large' });
+  }
+
+  async function changePassword() {
+    const a = (K.$('#pw-new', K.Sheet.el()) || {}).value || '';
+    const b = (K.$('#pw-new2', K.Sheet.el()) || {}).value || '';
+    if (a.length < 8) { K.toast('Use at least 8 characters', 'x'); return; }
+    if (a !== b) { K.toast('The passwords don’t match', 'x'); return; }
+    const btn = K.$('[data-pw-save]', K.Sheet.el());
+    if (btn) { btn.disabled = true; btn.innerHTML = K.spinner(); }
+    try {
+      await K.Backend.auth.updatePassword(a);
+      K.haptic([10, 30, 10]);
+      K.toast('Password changed', 'ok');
+      K.Sheet.close();
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Save new password'; }
+      K.toast(/different|same/i.test(e.message) ? 'That’s already your password' : /weak|short|least/i.test(e.message) ? 'Pick a stronger password' : err(e), 'x');
+    }
   }
 
   async function signOut() {
@@ -1381,7 +1393,6 @@
     S.session = null;
     S.studio = null;
     S.known = null;
-    S.authStep = 'email';
     K.toast('Signed out', 'ok');
     renderAuth();
   }

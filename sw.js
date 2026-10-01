@@ -3,7 +3,7 @@
      (so edits on GitHub Pages show up right away).
    - Photos, 3D icons, fonts, QR lib: cache first. */
 
-const VERSION = 'studio-app-v13';
+const VERSION = 'studio-app-v14';
 const SHELL_CACHE = VERSION + '-shell';
 const MEDIA_CACHE = VERSION + '-media';
 const MEDIA_LIMIT = 120;

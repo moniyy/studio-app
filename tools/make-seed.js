@@ -6,8 +6,8 @@
  *
  *   node tools/make-seed.js [owner@email]
  *
- * The email (default owner@example.com) is the address you sign in with
- * in the master's dashboard — the first sign-in claims the studio.
+ * The email (default owner@example.com) is only stored for your records:
+ * the dashboard account is linked by owner_id (see README, "Вариант B").
  */
 const fs = require('fs');
 const path = require('path');

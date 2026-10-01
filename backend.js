@@ -89,17 +89,16 @@
       const { data } = await sb.auth.getSession();
       return data.session || null;
     },
-    // emails a magic link (opens in the browser) and a 6-digit code (for the installed app)
-    async sendLink(email, redirectTo) {
+    async signIn(email, password) {
       const sb = await client();
-      const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo, shouldCreateUser: true } });
-      if (error) throw toError(error);
-    },
-    async verifyCode(email, code) {
-      const sb = await client();
-      const { data, error } = await sb.auth.verifyOtp({ email, token: String(code).trim(), type: 'email' });
-      if (error) throw new BackendError(/expired|invalid/i.test(error.message) ? 'bad_code' : toError(error).code, error.message);
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw new BackendError(/invalid login|credentials/i.test(error.message) ? 'bad_login' : toError(error).code, error.message);
       return data.session;
+    },
+    async updatePassword(password) {
+      const sb = await client();
+      const { error } = await sb.auth.updateUser({ password });
+      if (error) throw new BackendError(toError(error).code, error.message);
     },
     async signOut() {
       const sb = await client();
@@ -114,7 +113,6 @@
 
   /* ---------- owner (signed-in master) ---------- */
   const owner = {
-    claim: () => rpc('claim_my_studios').then(scalars),
     studios: () => rpc('owner_studios'),
     bookings: (mid, from, to, status) => rpc('owner_bookings', { p_master_id: mid, p_from: from, p_to: to, p_status: status || null }),
     booking: id => rpc('owner_booking', { p_booking_id: id }),

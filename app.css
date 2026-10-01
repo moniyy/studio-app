@@ -5502,3 +5502,23 @@ input, select, textarea { font-size: max(16px, 1em); }
 .toff__grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 10px; }
 .toff__grid input, .toff .field input { width: 100%; min-height: 44px; }
 .tl__b { padding: 5px 10px; line-height: 1.25; }
+
+/* password field with show / hide */
+.pw { position: relative; display: block; }
+.pw input { padding-right: 52px; }
+.pw__eye {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-top: -20px;
+  border-radius: 12px;
+  color: var(--text-2);
+}
+.pw__eye svg { width: 20px; height: 20px; stroke-width: 1.6; }
+.pw__eye.is-on { color: var(--accent); }
+.cab-auth .btn { margin-top: 4px; }
+input::-ms-reveal, input::-ms-clear { display: none; }

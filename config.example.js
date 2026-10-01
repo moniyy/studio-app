@@ -1,6 +1,6 @@
 /* Studio App — backend config (copy to config.js and fill in).
    config.js is in .gitignore: GitHub Pages gets it from the deploy
-   workflow (tools/pages.yml → .github/workflows/pages.yml) using repository secrets.
+   workflow (.github/workflows/pages.yml) using repository secrets.
 
    Supabase → Project Settings → API:
      supabaseUrl      "Project URL"

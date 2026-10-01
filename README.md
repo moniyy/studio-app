@@ -37,9 +37,19 @@
 2. Supabase → **SQL Editor** → вставьте → **Run**. Мастер создан, услуги и часы — в базе.
 3. Фото и тексты: либо в поле `settings` того же SQL, либо в `masters/<slug>.json` с полем `"bookingEngine": "builtin"`
    (тогда из JSON берутся фото, галерея, отзывы, политики, а услуги, часы и правила — из базы).
-4. Дайте мастеру ссылку `https://moniyy.github.io/studio-app/?m=<slug>&owner=1`. Она входит по своему email
-   (письмо со ссылкой и 6-значным кодом) — студия сразу становится её. Дальше часы, отпуск, правила и записи — в кабинете.
-5. Услуги потом удобно менять в Supabase → **Table Editor** → `services`.
+4. Аккаунт мастера: Supabase → **Authentication → Users → Add user → Create new user** — email мастера,
+   временный пароль, галочка **Auto Confirm User**.
+5. Привяжите аккаунт к студии (SQL Editor, вторая часть `new-master.sql`):
+   ```sql
+   update public.masters set owner_id = (select id from auth.users where email = 'bella@example.com')
+    where slug = 'bella-nails';
+   ```
+6. Дайте мастеру ссылку `https://moniyy.github.io/studio-app/?m=<slug>&owner=1` и временный пароль.
+   Она входит (email + пароль) и сразу меняет пароль: значок аккаунта вверху → **Change password**.
+   Дальше часы, отпуск, правила и записи — в кабинете.
+7. Услуги потом удобно менять в Supabase → **Table Editor** → `services`.
+
+Студия привязывается только по `owner_id`: регистрация с чужим email студию не отдаёт.
 
 ## Подключение Supabase (один раз)
 
@@ -56,22 +66,20 @@
 4. **Authentication → URL Configuration**:
    - Site URL: `https://moniyy.github.io/studio-app/`
    - Redirect URLs: добавьте `https://moniyy.github.io/studio-app/**` и `http://127.0.0.1:5500/**` (для Live Server).
-5. **Authentication → Emails → Magic Link**: добавьте в шаблон строку с кодом — он нужен, чтобы войти в установленное
-   на iPhone приложение (ссылка из письма откроется в Safari, а не в иконке на экране «Домой»):
-   ```html
-   <p>Or type this code in the app: <b>{{ .Token }}</b></p>
-   ```
-   Встроенная почта Supabase отправляет лишь несколько писем в час — для реальной работы подключите свой SMTP
-   (**Authentication → Emails → SMTP Settings**, например Resend).
+5. **Authentication → Sign In / Providers → Email**: вход мастера — email + пароль, писем пока нет,
+   поэтому **Confirm email** выключен. Рекомендуется выключить и **Allow new users to sign up**:
+   аккаунты мастеров создаются вручную (Add user), публичная регистрация не нужна.
+   Письма (подтверждения, напоминания, сброс пароля) — в части 2 через свой SMTP.
 
 ### В терминале (Windows, PowerShell, в папке проекта)
 
 ```powershell
 npx supabase login                          # откроется браузер — подтвердите вход
 npx supabase link --project-ref <ref>       # <ref> — это часть Project URL: https://<ref>.supabase.co; спросит пароль БД
-node tools/make-seed.js you@example.com     # тестовый мастер test-studio, владелец — ваш email
-npx supabase db push --include-seed         # создаёт таблицы, защиту, функции и тестовые данные
+npx supabase db push --include-seed         # создаёт таблицы, защиту, функции и тестовые данные (test-studio)
 ```
+
+Потом создайте себе аккаунт и привяжите к `test-studio` — как в шагах 4–5 варианта B.
 
 Миграции лежат в `supabase/migrations/`, тестовые данные — в `supabase/seed.sql`. Следующие изменения схемы — новыми файлами
 миграций (`npx supabase migration new <имя>`) и снова `npx supabase db push`.
@@ -81,9 +89,8 @@ npx supabase db push --include-seed         # создаёт таблицы, з�
 - **Локально:** скопируйте `config.example.js` в `config.js` и впишите URL и anon-ключ. `config.js` в `.gitignore`.
 - **На GitHub Pages:** **Settings → Secrets and variables → Actions → New repository secret**:
   `SUPABASE_URL` и `SUPABASE_ANON_KEY` (или `gh secret set SUPABASE_URL` / `gh secret set SUPABASE_ANON_KEY`).
-  Сайт собирает workflow `.github/workflows/pages.yml` и сам кладёт `config.js` с этими значениями.
-  Включение (один раз): `gh auth refresh -h github.com -s workflow` → перенести `tools/pages.yml` в
-  `.github/workflows/pages.yml` → push → **Settings → Pages → Source: GitHub Actions**.
+  Сайт собирает workflow `.github/workflows/pages.yml` и сам кладёт `config.js` с этими значениями
+  (**Settings → Pages → Source: GitHub Actions**).
 
 ## Как устроена запись
 
