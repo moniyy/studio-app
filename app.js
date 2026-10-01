@@ -17,7 +17,11 @@
   const SLUG = /^[a-z0-9][a-z0-9_-]{0,60}$/.test(rawSlug) ? rawSlug : 'demo';
   const KEY = 'studio-app:' + SLUG;
 
-  const ACCENTS = [
+  /* Visual style per master: "soft" (original look) or "maison" (premium).
+     Cached so the right palette is applied before the first paint. */
+  let STYLE = (() => { try { return JSON.parse(localStorage.getItem(KEY + ':style')) === 'maison' ? 'maison' : 'soft'; } catch (e) { return 'soft'; } })();
+
+  const ACCENTS_SOFT = [
     { id: 'studio',   name: 'Studio',   color: null },
     { id: 'rose',     name: 'Rose',     color: '#E8739A' },
     { id: 'lavender', name: 'Lavender', color: '#9B87F5' },
@@ -25,11 +29,23 @@
     { id: 'ocean',    name: 'Ocean',    color: '#4A90D9' },
     { id: 'gold',     name: 'Gold',     color: '#C9A24A' }
   ];
+  // Maison: every accent has a shade for the dark and for the light theme
+  const ACCENTS_MAISON = [
+    { id: 'champagne', name: 'Champagne', color: { dark: '#C9A27E', light: '#9C7457' } },
+    { id: 'mocha',     name: 'Mocha',     color: { dark: '#B08A6E', light: '#6F5140' } },
+    { id: 'rose',      name: 'Rosé',      color: { dark: '#D8A7A1', light: '#A86F69' } },
+    { id: 'sage',      name: 'Sage',      color: { dark: '#A9BBA1', light: '#66795F' } },
+    { id: 'onyx',      name: 'Onyx',      color: { dark: '#EAE2D8', light: '#2A211C' } }
+  ];
+  const accentList = () => (STYLE === 'maison' ? ACCENTS_MAISON : ACCENTS_SOFT);
   const THEMES = ['light', 'dark', 'system'];
   const TEXT_SIZES = { small: 1, default: 1.1, large: 1.2 };
-  const DEFAULTS = { theme: 'system', accent: 'studio', textSize: 'default', reminders: false };
+  const DEFAULTS = { theme: 'system', accent: null, textSize: 'default', reminders: false }; // accent null → first of the style's list
   const FALLBACK_ACCENT = '#C9796B';
-  const THEME_BG = { light: '#F7F5F2', dark: '#0E0E11' };
+  const THEME_BG_SOFT = { light: '#F7F5F2', dark: '#0E0E11' };
+  const THEME_BG_MAISON = { light: '#F7F3EE', dark: '#0F0D0C' };
+  const themeBg = () => (STYLE === 'maison' ? THEME_BG_MAISON : THEME_BG_SOFT);
+  const THEME_BG = THEME_BG_SOFT;
 
   const root = document.documentElement;
   const darkMQ = window.matchMedia('(prefers-color-scheme: dark)');
@@ -63,7 +79,7 @@
   function sanitizeSettings(s) {
     s = Object.assign({}, DEFAULTS, s && typeof s === 'object' ? s : {});
     if (!THEMES.includes(s.theme)) s.theme = DEFAULTS.theme;
-    if (!ACCENTS.some(a => a.id === s.accent)) s.accent = DEFAULTS.accent;
+    if (!accentList().some(a => a.id === s.accent)) s.accent = accentList()[0].id;
     if (!(s.textSize in TEXT_SIZES)) s.textSize = DEFAULTS.textSize;
     s.reminders = !!s.reminders;
     return s;
@@ -88,27 +104,33 @@
     const n = parseInt(hex.slice(1), 16);
     const lin = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
     const L = 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
-    return 1.05 / (L + 0.05) >= 3 ? '#FFFFFF' : '#16161A';
+    // maison asks a little more of white text (champagne gets dark text)
+    return 1.05 / (L + 0.05) >= (STYLE === 'maison' ? 4 : 3) ? '#FFFFFF' : (STYLE === 'maison' ? '#1A1512' : '#16161A');
   }
 
   function resolvedTheme() {
     return settings.theme === 'system' ? (darkMQ.matches ? 'dark' : 'light') : settings.theme;
   }
 
+  const accentFor = (a, theme) => (!a || !a.color ? brandAccent : typeof a.color === 'string' ? a.color : a.color[theme || resolvedTheme()]);
   function accentHex() {
-    const a = ACCENTS.find(x => x.id === settings.accent);
-    return (a && a.color) || brandAccent;
+    return accentFor(accentList().find(x => x.id === settings.accent) || accentList()[0]);
   }
 
   function applySettings() {
     const theme = resolvedTheme();
     const accent = accentHex();
     root.dataset.theme = theme;
+    root.dataset.style = STYLE;
     root.style.setProperty('--accent', accent);
     root.style.setProperty('--on-accent', onAccentColor(accent));
     root.style.setProperty('--text-scale', TEXT_SIZES[settings.textSize]);
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.content = splashActive && SPLASH_PARAM === 'photo' ? '#000000' : THEME_BG[theme];
+    if (meta) meta.content = splashActive && SPLASH_PARAM === 'photo' ? '#000000' : themeBg()[theme];
+    // accent swatches follow the theme (maison shades differ per theme)
+    if (typeof document !== 'undefined') document.querySelectorAll('.swatch[data-accent]').forEach(el => {
+      el.style.setProperty('--c', accentFor(accentList().find(a => a.id === el.dataset.accent)));
+    });
   }
 
   applySettings();
@@ -130,8 +152,14 @@
   const G = () => (window.gsap && !reducedMQ.matches ? window.gsap : null);
   const IS_IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-  const SPRING = 'back.out(1.4)';
-  const ELASTIC = 'elastic.out(1,0.8)';
+  // springy in "soft", calm ease-out in "maison"
+  let SPRING = 'back.out(1.4)';
+  let ELASTIC = 'elastic.out(1,0.8)';
+  function applyMotion() {
+    SPRING = STYLE === 'maison' ? 'power3.out' : 'back.out(1.4)';
+    ELASTIC = STYLE === 'maison' ? 'power2.out' : 'elastic.out(1,0.8)';
+  }
+  applyMotion();
 
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -170,6 +198,25 @@
     const key = v.toLowerCase().replace(/[\s_]+/g, '-');
     const alias = { speech: 'speech-balloon', nail: 'nail-polish', gem: 'gem-stone', nails: 'nail-polish' };
     return FLUENT + (ICONS[key] || ICONS[alias[key]] || ICONS.sparkles);
+  }
+
+  /* Thin line art (Lucide-style, stroke 1.5) used instead of 3D emoji in "maison" */
+  const LINE_ART = {
+    calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+    sparkles: '<path d="M9.9 14.1 8.5 19l-1.4-4.9L2 12.5l5.1-1.6L8.5 6l1.4 4.9 5.1 1.6z"/><path d="M18 3v4M16 5h4M19 15v3M17.5 16.5h3"/>',
+    'gem-stone': '<path d="M6 3h12l4 6-10 12L2 9z"/><path d="M11 3 8 9l4 12 4-12-3-6M2 9h20"/>',
+    'speech-balloon': '<path d="M21 11.5a8.4 8.4 0 0 1-12.2 7.5L3 21l1.9-5.6A8.5 8.5 0 1 1 21 11.5z"/>',
+    bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+    heart: '<path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7z"/>',
+    eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    lipstick: '<path d="m14 4 6 6M4 20l5.5-1.5L20 8l-4-4L5.5 14.5z"/>',
+    'nail-polish': '<path d="M9 9h6v11a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1zM10 9V3h4v6"/>'
+  };
+  /* An illustration slot: 3D emoji in "soft", thin line art in "maison" */
+  function art(name, cls, imgAttrs) {
+    if (STYLE !== 'maison') return `<img${cls ? ` class="${cls}"` : ''} src="${esc(icon3d(name))}" alt=""${imgAttrs || ''}>`;
+    const key = String(name || '').toLowerCase().replace(/[\s_]+/g, '-').replace(/^gem$/, 'gem-stone').replace(/^speech$/, 'speech-balloon');
+    return `<span class="line-art${cls ? ' ' + cls : ''}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${LINE_ART[key] || LINE_ART.sparkles}</svg></span>`;
   }
 
   /* Line icons */
@@ -241,8 +288,13 @@
     }).filter(Boolean);
     d.beforeAfter = d.beforeAfter && d.beforeAfter.before && d.beforeAfter.after ? d.beforeAfter : null;
     d.deposit = +d.deposit || 0;
+    // how "Continue to booking" hands off: the artist's booking link, an Instagram
+    // DM, a text message — or "demo" (no hand-off, straight to the confirmation)
+    d.bookingMode = ['link', 'instagram', 'sms', 'demo'].includes(d.bookingMode) ? d.bookingMode
+      : d.bookingUrl ? 'link' : d.instagram ? 'instagram' : d.phone ? 'sms' : 'demo';
     d.heroVideo = typeof d.heroVideo === 'string' ? d.heroVideo.trim() : '';
     d.splashStyle = d.splashStyle === 'photo' ? 'photo' : 'clean';
+    d.style = d.style === 'maison' ? 'maison' : 'soft';
     d.splashEmoji = typeof d.splashEmoji === 'string' ? d.splashEmoji.trim() : '';
     d.prep = arr(d.prep).map(String).filter(Boolean);
     d.address = typeof d.address === 'string' ? d.address.trim() : '';
@@ -295,6 +347,8 @@
   const telUrl = () => 'tel:' + String(data.phone || '').replace(/[^\d+]/g, '');
   const bookUrl = () => safeUrl(data.bookingUrl);
   const ext = 'target="_blank" rel="noopener"';
+  /* "AL" for "Aria Lash Studio" (or data.monogram) */
+  const initials = () => String(data.monogram || String(data.name).split(/\s+/).slice(0, 2).map(w => w.charAt(0)).join('')).toUpperCase();
   const ratingText = () => (data.rating ? Number(data.rating).toFixed(1) : '');
 
   /* ---------------------------------------------------------
@@ -431,10 +485,10 @@
     if (!onScreen.length) return null;
     g.killTweensOf(onScreen);
     return ensure(g.fromTo(onScreen,
-      { opacity: 0, y: o.y == null ? 30 : o.y, scale: o.scale == null ? 0.98 : o.scale },
+      { opacity: 0, y: o.y == null ? (STYLE === 'maison' ? 12 : 30) : (STYLE === 'maison' ? Math.min(12, o.y) : o.y), scale: STYLE === 'maison' ? 1 : (o.scale == null ? 0.98 : o.scale) },
       {
         opacity: 1, y: 0, scale: 1,
-        duration: o.duration || 0.8, ease: o.ease || SPRING,
+        duration: STYLE === 'maison' ? Math.max(0.6, o.duration || 0.6) : (o.duration || 0.8), ease: STYLE === 'maison' ? 'power2.out' : (o.ease || SPRING),
         stagger: o.stagger == null ? 0.05 : o.stagger, delay: o.delay || 0,
         clearProps: 'opacity,transform'
       }));
@@ -479,7 +533,7 @@
     const heroImg = $('.hero__img', view);
     // noZoom: the splash photo has just landed exactly where the hero photo is
     if (heroImg && !opts.noZoom) ensure(g.fromTo(heroImg, { scale: 1.06 }, { scale: 1, duration: 1, ease: 'power2.out', clearProps: 'transform' }));
-    const heroParts = $$('.hero__avatar, .hero__greet, .hero__name, .hero__meta, .hero__status', view);
+    const heroParts = $$('.hero__avatar, .hero__greet, .hero__eyebrow, .hero__name, .hero__meta, .hero__status, .hero__next', view);
     const tweens = [
       springIn(heroParts, { delay: opts.intro ? 0.4 : 0.12, stagger: 0.08, y: 24 }),
       springIn($$('.navbar--home .nav-btn', view), { delay: 0.25, y: -10, scale: 0.6, ease: ELASTIC, duration: 1 }),
@@ -640,6 +694,7 @@
     if (left > 0) await wait(left);
     // light refresh of the content under the hero
     $('.home-rest', views.home).innerHTML = homeRestHTML();
+    rerule();
     const reel = $('.reel', views.home);
     if (reel) bindReel(reel);
     refreshStatus();
@@ -773,9 +828,13 @@
       ? `<video class="hero__img" src="${esc(safeUrl(data.heroVideo))}" ${data.heroPhoto ? `poster="${esc(safeUrl(data.heroPhoto))}"` : ''} autoplay muted loop playsinline preload="metadata"></video>`
       : data.heroPhoto ? `<img class="hero__img" src="${esc(safeUrl(data.heroPhoto))}" alt="">` : '';
 
+    const maison = STYLE === 'maison';
+    const firstSlot = data.slots[0] || data.nextAvailable || '';
+    const eyebrow = data.eyebrow || `${isNails() ? 'Nail' : 'Lash'} artistry · ${String(data.city || '').split(',')[0]}`;
     views.home.innerHTML = navShell({
       navClass: 'navbar--home',
       navTitle: data.name,
+      left: maison ? `<span class="mono" data-owner-hold role="img" aria-label="${esc(data.name)}">${esc(initials())}<svg class="hold-ring" viewBox="0 0 68 68" aria-hidden="true"><circle cx="34" cy="34" r="32" pathLength="100"/></svg></span>` : '',
       right: `
         <button class="nav-btn" id="share" aria-label="Share">${I.share}</button>
         <button class="nav-btn" id="bell" aria-label="Notifications">${I.bell}${hasUnread() ? '<i class="badge-dot"></i>' : ''}</button>`
@@ -786,9 +845,16 @@
             <div class="hero__tilt"><div class="hero__kb">${media}</div></div>
             <div class="hero__dim"></div>
           </div>
+          ${maison ? `
+          <div class="hero__content hero__content--maison">
+            <span class="hero__eyebrow">${esc(eyebrow)}</span>
+            <h1 class="hero__name">${esc(data.name)}</h1>
+            <div class="hero__meta">${rating ? `<span><b class="star">★</b>&nbsp;<b class="num">${rating}</b>&nbsp;·&nbsp;<span class="num">${esc(data.reviewCount || data.reviews.length)}</span>&nbsp;reviews</span>` : ''}${data.city ? `<span>${esc(data.city)}</span>` : ''}</div>
+            ${firstSlot ? `<button class="hero__next" data-book data-slot="${esc(firstSlot)}">Next: ${esc(firstSlot)} ${I.arrowR}</button>` : ''}
+          </div>` : `
           <div class="hero__content">
             <div class="hero__top">
-              ${data.avatar ? `<span class="hero__avatar-wrap">
+              ${data.avatar ? `<span class="hero__avatar-wrap" data-owner-hold>
                 <img class="hero__avatar" src="${esc(safeUrl(data.avatar))}" alt="" draggable="false">
                 <svg class="hold-ring" viewBox="0 0 68 68" aria-hidden="true"><circle cx="34" cy="34" r="32" pathLength="100"/></svg>
               </span>` : ''}
@@ -800,7 +866,7 @@
               ${data.city ? `<span>${I.pin}${esc(data.city)}</span>` : ''}
               ${rating ? `<span><b class="star">★</b><b class="num">${rating}</b></span>` : ''}
             </div>
-          </div>
+          </div>`}
         </section>
 
         <div class="body home-rest">${homeRestHTML()}</div>
@@ -811,6 +877,17 @@
     const reel = $('.reel', views.home);
     if (reel) bindReel(reel);
     observeStats();
+    rerule();
+  }
+
+  /* Maison: a thin gold rule between Home sections (only between visible ones) */
+  function rerule() {
+    const box = $('.home-rest', views.home);
+    if (!box) return;
+    $$('.rule', box).forEach(r => r.remove());
+    if (STYLE !== 'maison') return;
+    const kids = Array.from(box.children).filter(c => !c.hidden);
+    kids.slice(1).forEach(c => c.insertAdjacentHTML('beforebegin', '<i class="rule" aria-hidden="true"></i>'));
   }
 
   /* Everything below the hero (re-rendered on pull-to-refresh) */
@@ -848,7 +925,7 @@
           <section class="next glass" data-stagger>
             <div class="next__top">
               <span class="live"><i></i>NEXT AVAILABLE</span>
-              <img class="next__icon" src="${icon3d('calendar')}" alt="">
+              ${art('calendar', 'next__icon')}
             </div>
             <div class="next__time">${esc(data.nextAvailable || 'Book online')}</div>
             <div class="next__status">${I.clock}<span data-status></span></div>
@@ -895,7 +972,7 @@
                 <div class="svc-card" role="button" tabindex="0" data-open-service="${esc(s.id)}">
                   <span class="svc-card__photo">
                     <img src="${esc(sized(safeUrl(s.photo), 400))}" alt="" loading="lazy">
-                    <span class="svc-card__icon"><img src="${esc(icon3d(s.icon))}" alt="" loading="lazy"></span>
+                    ${STYLE === 'maison' ? '' : `<span class="svc-card__icon"><img src="${esc(icon3d(s.icon))}" alt="" loading="lazy"></span>`}
                     ${favButton('svc:' + s.id, 'fav--photo')}
                   </span>
                   <span class="svc-card__body">
@@ -934,7 +1011,7 @@
 
           ${x && x.courseTitle ? `
           <a class="card course press" data-stagger href="${esc(safeUrl(x.courseUrl))}" ${ext}>
-            <span class="course__icon"><img src="${icon3d('gem-stone')}" alt=""></span>
+            <span class="course__icon">${art('gem-stone')}</span>
             <span class="course__body">
               <span class="eyebrow">For future artists</span>
               <h3>${esc(x.courseTitle)}</h3>
@@ -961,11 +1038,10 @@
           <button type="button" class="search__clear" id="svc-clear" aria-label="Clear search" hidden>${I.x}</button>
         </label>
         <div class="chipbar" id="svc-chips" role="tablist" data-stagger>
-          <i class="chipbar__pill" aria-hidden="true"></i>
           ${categories().map(c => `<button class="chipbar__chip" role="tab" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
         </div>
-        <div class="svc-list" id="svc-list">
-          ${data.services.map(s => `
+        <div class="svc-list${STYLE === 'maison' ? ' svc-list--menu' : ''}" id="svc-list">
+          ${STYLE === 'maison' ? menuHTML() : data.services.map(s => `
             <div class="card svc2" role="button" tabindex="0" data-stagger data-svc="${esc(s.id)}" data-open-service="${esc(s.id)}">
               <span class="svc2__media">
                 <img class="svc2__photo" src="${esc(sized(safeUrl(s.photo), 300))}" alt="" loading="lazy">
@@ -982,13 +1058,31 @@
               </span>
             </div>`).join('')}
           <div class="empty" id="svc-empty" hidden>
-            <img src="${icon3d('sparkles')}" alt="">
+            ${art('sparkles')}
             <strong>No services found</strong>
             <span>Try another word — or ask ${esc(firstName())}’s assistant.</span>
           </div>
         </div>`
     });
     syncChips(false);
+  }
+
+  /* Maison: the price list reads like a restaurant menu —
+     "01 — Lashes", serif names, dotted leaders to the price */
+  function menuHTML() {
+    return categories().slice(1).map((c, i) => `
+      <section class="menu-sec" data-menu-sec>
+        <h3 class="menu-sec__h"><span class="num">${String(i + 1).padStart(2, '0')}</span> — ${esc(c)}</h3>
+        ${data.services.filter(s => s.category === c).map(s => `
+          <div class="svc2 menu-row" role="button" tabindex="0" data-stagger data-svc="${esc(s.id)}" data-open-service="${esc(s.id)}">
+            <span class="menu-row__line">
+              <span class="menu-row__title">${esc(s.title)}</span>
+              <i class="menu-row__dots" aria-hidden="true"></i>
+              <span class="menu-row__price num">${esc(price(s.price))}</span>
+            </span>
+            ${s.duration ? `<span class="menu-row__meta">${esc(s.duration)}${s.includes[0] ? ' · ' + esc(s.includes[0]) : ''}</span>` : ''}
+          </div>`).join('')}
+      </section>`).join('');
   }
 
   function serviceMatches(s) {
@@ -1008,9 +1102,8 @@
       b.setAttribute('aria-selected', on);
       if (on) active = b;
     });
-    const pill = $('.chipbar__pill', bar);
-    if (!active || !active.offsetWidth) return; // hidden tab: synced again when shown
-    slidePill(pill, active.offsetLeft, active.offsetWidth, animate);
+    // (no sliding pill: on iOS Safari an absolute pill inside a scroll
+    // container paints over the chip's text — the chip paints itself)
   }
 
   /* Filter the list; surviving cards glide to their new place (FLIP) */
@@ -1022,7 +1115,11 @@
     const want = c => serviceMatches(data.services.find(s => s.id === c.dataset.svc));
     const token = ++filterToken;
     const g = animate ? G() : null;
-    const syncEmpty = () => { $('#svc-empty').hidden = cards.some(c => !c.hidden); };
+    const syncEmpty = () => {
+      $('#svc-empty').hidden = cards.some(c => !c.hidden);
+      // menu sections disappear when none of their rows match
+      $$('[data-menu-sec]', list).forEach(sec => { sec.hidden = !$$('.svc2', sec).some(c => !c.hidden); });
+    };
     if (!g) { cards.forEach(c => { c.hidden = !want(c); }); syncEmpty(); return; }
 
     g.killTweensOf(cards);
@@ -1067,7 +1164,7 @@
             <strong>${esc(firstName())}’s assistant</strong>
             <span class="eyebrow">Replies instantly · 24/7</span>
           </span>
-          <img class="assistant__art" src="${icon3d('speech-balloon')}" alt="">
+          ${art('speech-balloon', 'assistant__art')}
         </div>
         <div class="chat__day" data-stagger>Today</div>
       </div>
@@ -1133,7 +1230,6 @@
         <p class="looks-sub" data-stagger>Tap a look you love — book it in two taps.</p>
         <div id="owner-looks" hidden></div>
         <div class="chipbar chipbar--looks" id="look-chips" role="tablist" data-stagger>
-          <i class="chipbar__pill" aria-hidden="true"></i>
         </div>
         <div class="masonry" id="masonry"></div>`
     });
@@ -1162,7 +1258,6 @@
       b.setAttribute('aria-selected', on);
       if (on) active = b;
     });
-    if (active && active.offsetWidth) slidePill($('.chipbar__pill', bar), active.offsetLeft, active.offsetWidth, animate);
   }
 
   function updateLookCounts() {
@@ -1181,7 +1276,7 @@
         <div class="look__media" style="aspect-ratio:${lookAR(l).toFixed(4)}">
           <img class="look__lqip" src="${esc(sized(safeUrl(l.photo), 40))}" alt="" aria-hidden="true">
           <img class="look__img" src="${esc(sized(safeUrl(l.photo), 500))}" alt="" loading="lazy" decoding="async">
-          ${l.isNew || l.popular ? `<span class="look__badges">${l.isNew ? '<b class="lbadge lbadge--new">New</b>' : ''}${l.popular ? '<b class="lbadge lbadge--hot">🔥 Most booked</b>' : ''}</span>` : ''}
+          ${l.isNew || l.popular ? `<span class="look__badges">${l.isNew ? '<b class="lbadge lbadge--new">New</b>' : ''}${l.popular ? `<b class="lbadge lbadge--hot">${STYLE === 'maison' ? '' : '🔥 '}Most booked</b>` : ''}</span>` : ''}
           ${favButton('look:' + l.id, 'fav--photo fav--sm')}
           ${st ? `<span class="look__stats num">👁 ${st.views} · 📅 ${st.bookings} bookings</span>` : ''}
           <span class="look__plaque"><b>${esc(l.title)}</b>${s ? `<span class="num">&nbsp;· ${esc(price(s.price))}</span>` : ''}</span>
@@ -1193,7 +1288,7 @@
     const saved = state.lookFilter === 'Saved';
     return `
       <div class="looks-empty" data-stagger>
-        <img src="${icon3d(saved ? 'heart' : 'sparkles')}" alt="">
+        ${art(saved ? 'heart' : 'sparkles')}
         <strong>${saved ? 'No saved looks yet' : 'No looks here yet'}</strong>
         <span>${saved ? 'Tap ♥ on a look you love — it’ll wait for you here.' : 'New work is on its way ✨'}</span>
         <button class="btn btn--soft btn--sm" data-look-filter="All">Browse all looks</button>
@@ -1433,7 +1528,7 @@
           <div class="row row--stack">
             <div class="row__head"><span class="row__icon" style="--ic:${IOS.pink}">${I.palette}</span><span class="row__label">Accent color</span><span class="row__value" id="accent-name"></span></div>
             <div class="swatches" role="radiogroup" aria-label="Accent color">
-              ${ACCENTS.map(a => `<button class="swatch" role="radio" data-accent="${a.id}" aria-label="${a.name}" aria-checked="false" style="--c:${a.color || 'var(--brand)'}">${I.check}</button>`).join('')}
+              ${accentList().map(a => `<button class="swatch" role="radio" data-accent="${a.id}" aria-label="${a.name}" aria-checked="false" style="--c:${accentFor(a)}">${I.check}</button>`).join('')}
             </div>
           </div>
           <div class="row row--stack">
@@ -1473,7 +1568,7 @@
       });
     });
     $$('.swatch', views.more).forEach(s => s.setAttribute('aria-checked', s.dataset.accent === settings.accent));
-    const a = ACCENTS.find(x => x.id === settings.accent);
+    const a = accentList().find(x => x.id === settings.accent);
     const name = $('#accent-name');
     if (name) name.textContent = a ? a.name : '';
     const sw = $('#reminders');
@@ -1516,7 +1611,7 @@
         <section class="next glass" data-stagger>
           <div class="next__top">
             <span class="live${s.open ? '' : ' is-off'}"><i></i>${s.open ? 'OPEN NOW' : 'CLOSED NOW'}</span>
-            <img class="next__icon" src="${icon3d('calendar')}" alt="">
+            ${art('calendar', 'next__icon')}
           </div>
           ${data.nextAvailable ? `<div class="next__label">Next available</div>
           <div class="next__time next__time--sm">${esc(data.nextAvailable)}</div>` : ''}
@@ -1701,7 +1796,7 @@
     const bell = $('#bell');
     const card = $('.notice__card', n);
     card.innerHTML = `
-      <img src="${icon3d('bell')}" alt="">
+      ${art('bell')}
       <div>
         <strong>What’s new</strong>
         <p>${esc(noticeText())}</p>
@@ -2307,7 +2402,7 @@
     const dep = data.deposit || 0;
     pane.innerHTML = `
       <h2 class="bk-title">Review</h2>
-      <p class="bk-sub">Check the details, then finish on ${esc(firstName())}’s booking page.</p>
+      <p class="bk-sub">Check the details, then ${{ instagram: `message ${esc(firstName())} on Instagram`, sms: `text ${esc(firstName())}` }[data.bookingMode] || `finish on ${esc(firstName())}’s booking page`}.</p>
       ${lookRefHTML()}
       <div class="card bk-sum">
         <div class="bk-sum__svc">
@@ -2322,7 +2417,7 @@
         <div class="bk-row bk-row--accent"><span>Deposit today</span><b class="num">${price(dep)}</b></div>
         ${numeric ? `<div class="bk-row"><span>Due at appointment</span><b class="num">${price(Math.max(0, s.price - dep))}</b></div>` : ''}` : ''}
       </div>
-      <div class="sheet__note">${I.shield}<span>Not reserved yet — pick <b>${esc(dayLabel(bk.off, false))}, ${fmtClock(bk.min)}</b> on the next page.</span></div>
+      <div class="sheet__note">${I.shield}<span>${bookingNote()}</span></div>
       ${prepHTML()}`;
   }
 
@@ -2358,9 +2453,142 @@
       action = `<button class="btn btn--primary" data-bk-next${bk.min != null ? '' : ' disabled'}>Review ${I.arrowR}</button>`;
     } else {
       summary = `<b class="num">${s ? esc(price(s.price)) : ''}</b><span>${data.deposit ? price(data.deposit) + ' today' : 'Pay at the studio'}</span>`;
-      action = `<a class="btn btn--primary" href="${esc(bookUrl())}" ${ext}>Continue to booking ${I.arrowR}</a>`;
+      action = `<button class="btn btn--primary" data-bk-continue>${esc(BOOK_CTA[data.bookingMode] || 'Continue to booking')} ${I.arrowR}</button>`;
     }
     foot.innerHTML = `<div class="sheet__summary">${summary}</div>${action}`;
+  }
+
+  /* ---------- Hand-off: link / Instagram DM / text / demo ---------- */
+  const BOOK_CTA = { link: 'Continue to booking', instagram: 'Message on Instagram', sms: 'Send a text', demo: 'Continue to booking' };
+  const shortDay = off => (off === 0 ? 'Today' : off === 1 ? 'Tomorrow' : `${DAY_SHORT[studioDate(off).dow]}, ${MONTHS[studioDate(off).month]} ${studioDate(off).day}`);
+  function bookingMessage() {
+    const s = bkService();
+    return `Hi! I'd like to book ${s ? s.title : 'an appointment'} — ${shortDay(bk.off)} ${fmtClock(bk.min)}`;
+  }
+  function bookingNote() {
+    const when = `<b>${esc(dayLabel(bk.off, false))}, ${fmtClock(bk.min)}</b>`;
+    switch (data.bookingMode) {
+      case 'instagram': return `We'll copy a ready message for ${when} — just paste it in ${esc(firstName())}'s DMs.`;
+      case 'sms': return `We'll open a text to ${esc(firstName())} asking for ${when}.`;
+      case 'demo': return `Demo — in your app this opens your booking for ${when}.`;
+      default: return `Not reserved yet — pick ${when} on the next page.`;
+    }
+  }
+
+  function continueBooking() {
+    const mode = data.bookingMode;
+    const text = bookingMessage();
+    haptic(10);
+    if (mode === 'link') {
+      window.open(bookUrl(), '_blank', 'noopener');
+    } else if (mode === 'instagram') {
+      // start the copy first, then open the DM in the same tap (no popup blocker)
+      const copy = navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error('no clipboard'));
+      window.open(igDmUrl(), '_blank', 'noopener');
+      copy.then(() => toast('Message copied — just paste it', 'ok'), () => toast(text, 'link'));
+    } else if (mode === 'sms') {
+      location.href = `sms:${String(data.phone || '').replace(/[^\d+]/g, '')}?&body=${encodeURIComponent(text)}`;
+    }
+    setTimeout(showBookingDone, mode === 'demo' ? 0 : 450);
+  }
+
+  const directionsUrl = () => {
+    const q = encodeURIComponent(data.address || data.city || data.name);
+    return IS_IOS ? `https://maps.apple.com/?q=${q}` : `https://www.google.com/maps/search/?api=1&query=${q}`;
+  };
+
+  /* "Request sent ✓": summary, calendar, directions, a little confetti */
+  function showBookingDone() {
+    if (!Sheet.isOpen()) return;
+    const s = bkService();
+    const l = bk.look ? lookById(bk.look) : null;
+    const sub = {
+      link: `Finish on ${esc(firstName())}'s booking page to lock it in.`,
+      instagram: `Paste the message in ${esc(firstName())}'s DMs — ${esc(firstName())} will confirm your spot.`,
+      sms: `${esc(firstName())} will confirm by text.`,
+      demo: 'Demo — in your app this opens your booking.'
+    }[data.bookingMode];
+    const content = Sheet.content();
+    content.innerHTML = `
+      <div class="bk-done" data-sheet-scroll>
+        <canvas class="confetti" aria-hidden="true"></canvas>
+        <div class="bk-done__head">
+          <span class="bk-done__check">${I.check}</span>
+          <h2>Request sent</h2>
+          <p>${sub}</p>
+        </div>
+        <div class="card bk-sum">
+          <div class="bk-sum__svc">
+            <img src="${esc(sized(safeUrl((l && l.photo) || (s && s.photo)), 200))}" alt="">
+            <span><b>${esc(s ? s.title : '')}</b><small>${esc(l ? l.title : (s ? s.category : ''))}</small></span>
+          </div>
+          <div class="bk-row"><span>Date</span><b>${esc(dayLabel(bk.off, true))}</b></div>
+          <div class="bk-row"><span>Time</span><b class="num">${fmtClock(bk.min)}</b></div>
+          ${s ? `<div class="bk-row"><span>Price</span><b class="num">${esc(price(s.price))}</b></div>` : ''}
+          ${data.address ? `<div class="bk-row bk-row--addr"><span>Address</span><b>${esc(data.address)}</b></div>` : ''}
+        </div>
+        <div class="bk-done__actions">
+          <button class="btn btn--soft" data-ics>${svg('<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4M12 13v5M9.5 15.5h5"/>')}Add to calendar</button>
+          <a class="btn btn--soft" href="${esc(directionsUrl())}" ${ext}>${I.pin}Get directions</a>
+        </div>
+        <button class="btn btn--primary btn--block bk-done__ok" data-sheet-close>Done</button>
+      </div>`;
+    const g = G();
+    if (g) {
+      ensure(g.fromTo($('.bk-done__check', content), { scale: 0.4, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.6, ease: SPRING, clearProps: 'transform,opacity' }));
+      springIn($$('.bk-done > :not(canvas)', content), { delay: 0.1, stagger: 0.06, y: 14 });
+    }
+    confetti($('.confetti', content));
+  }
+
+  /* A light confetti burst in the accent color (skipped with reduced motion) */
+  function confetti(canvas) {
+    if (!canvas || reducedMQ.matches) return;
+    const host = canvas.parentElement;
+    const W = host.clientWidth;
+    const H = Math.min(host.clientHeight, 420);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    const ctx = canvas.getContext('2d');
+    const accent = getComputedStyle(root).getPropertyValue('--accent').trim() || '#C9A27E';
+    const colors = [accent, accent, '#FFFFFF', '#E9D5B8', 'rgba(255,255,255,.7)'];
+    const parts = Array.from({ length: 70 }, () => ({
+      x: W / 2 + (Math.random() - 0.5) * 60,
+      y: 70,
+      vx: (Math.random() - 0.5) * 7,
+      vy: -Math.random() * 7 - 3,
+      r: Math.random() * Math.PI,
+      vr: (Math.random() - 0.5) * 0.3,
+      w: 4 + Math.random() * 5,
+      h: 6 + Math.random() * 6,
+      c: colors[Math.floor(Math.random() * colors.length)]
+    }));
+    const t0 = performance.now();
+    const frame = now => {
+      const t = now - t0;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      ctx.globalAlpha = Math.max(0, 1 - Math.max(0, t - 900) / 700);
+      parts.forEach(p => {
+        p.vy += 0.22;
+        p.vx *= 0.99;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.r += p.vr;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.r);
+        ctx.fillStyle = p.c;
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h * Math.abs(Math.cos(p.r * 2)));
+        ctx.restore();
+      });
+      if (t < 1600 && canvas.isConnected) requestAnimationFrame(frame);
+      else ctx.clearRect(0, 0, W, H);
+    };
+    requestAnimationFrame(frame);
   }
 
   function maxStep() {
@@ -4016,6 +4244,7 @@
       if ((el = t.closest('[data-bk-next]'))) { if (!el.disabled) goStep(bk.step + 1, true); return; }
 
       if ((el = t.closest('[data-ics]'))) { downloadIcs(); return; }
+      if ((el = t.closest('[data-bk-continue]'))) { continueBooking(); return; }
       if ((el = t.closest('[data-invite]'))) { shareInvite(); return; }
       if ((el = t.closest('[data-owner-exit]'))) { setOwnerMode(false); popOverlay(); return; }
       if ((el = t.closest('[data-owner-mode-exit]'))) { setOwnerMode(false); toast('Owner view off', 'ok'); return; }
@@ -4026,13 +4255,7 @@
         setFav(el.dataset.fav, el.getAttribute('aria-pressed') !== 'true');
         return;
       }
-      if ((el = t.closest('[data-loyalty]'))) {
-        const flipped = !el.classList.contains('is-flipped');
-        el.classList.toggle('is-flipped', flipped);
-        el.setAttribute('aria-pressed', flipped);
-        haptic();
-        return;
-      }
+      if ((el = t.closest('[data-loyalty]'))) { flipLoyalty(el); return; }
       if ((el = t.closest('[data-saved-photo]'))) {
         openLightbox(savedPhotos(), +el.dataset.savedPhoto, i => $(`[data-saved-photo="${i}"]`, views.more));
         return;
@@ -4306,7 +4529,7 @@
           <div class="notif-list">
             ${list.length ? list.map(n => `
               <div class="notif${read.includes(notifKey(n)) ? '' : ' is-unread'}">
-                <span class="notif__icon"><img src="${esc(icon3d(n.icon || 'bell'))}" alt=""></span>
+                <span class="notif__icon">${art(n.icon || 'bell')}</span>
                 <span class="notif__body">
                   <b>${esc(n.title)}</b>
                   ${n.text ? `<p>${esc(n.text)}</p>` : ''}
@@ -4358,7 +4581,7 @@
           <span class="loyalty__face loyalty__front">
             <span class="loyalty__head">
               <span><b>Loyalty card</b><small class="num">${filled} of ${total} visits</small></span>
-              <span class="loyalty__mark">${esc(String(data.name).charAt(0))}</span>
+              <span class="loyalty__mark">${esc(STYLE === 'maison' ? initials() : String(data.name).charAt(0))}</span>
             </span>
             <span class="loyalty__stamps">
               ${Array.from({ length: total }, (_, i) => `<i class="stamp${i < filled ? ' is-on' : ''}${i === total - 1 ? ' is-reward' : ''}" style="--i:${i}">${i < filled ? LASH : i === total - 1 ? GIFT : ''}</i>`).join('')}
@@ -4375,6 +4598,23 @@
           </span>
         </button>
       </div>`;
+  }
+
+  /* Loyalty card flip: squash to the edge, swap faces, open again */
+  function flipLoyalty(el) {
+    const flipped = !el.classList.contains('is-flipped');
+    const swap = () => {
+      el.classList.toggle('is-flipped', flipped);
+      el.setAttribute('aria-pressed', flipped);
+    };
+    haptic();
+    const g = G();
+    if (!g) { swap(); return; }
+    g.killTweensOf(el);
+    const tl = g.timeline();
+    tl.to(el, { scaleX: 0.02, scaleY: 0.97, duration: 0.2, ease: 'power2.in', onComplete: swap })
+      .to(el, { scaleX: 1, scaleY: 1, duration: 0.34, ease: 'power2.out', clearProps: 'transform' });
+    ensure(tl);
   }
 
   /* ---------- Haptics (Android) ---------- */
@@ -4443,6 +4683,28 @@
         window.addEventListener('deviceorientation', onOrient);
       }
     }
+  }
+
+  /* Maison loyalty card: a light sheen glides across the metal with the
+     mouse (desktop) or the phone's tilt */
+  function bindLoyaltySheen() {
+    let target = 0.3;
+    let raf = 0;
+    const apply = () => {
+      raf = 0;
+      const card = STYLE === 'maison' && $('.loyalty__card', views.home);
+      if (card) card.style.setProperty('--sheen', target.toFixed(3));
+    };
+    const set = v => { target = clamp(v, 0, 1); if (!raf) raf = requestAnimationFrame(apply); };
+    if (window.matchMedia('(pointer: fine)').matches) {
+      views.home.addEventListener('pointermove', e => {
+        const card = $('.loyalty__card', views.home);
+        if (!card) return;
+        const r = card.getBoundingClientRect();
+        set((e.clientX - r.left) / r.width);
+      }, { passive: true });
+    }
+    window.addEventListener('deviceorientation', e => { if (e.gamma != null) set(0.5 + e.gamma / 60); }, { passive: true });
   }
 
   /* ---------- Stats: count up from 0 when they appear ---------- */
@@ -4585,6 +4847,7 @@
     const html = bookAgainHTML();
     el.innerHTML = html;
     el.hidden = !html;
+    rerule();
   }
 
   /* "Before your visit" + Add to calendar (.ics) on the Review step */
@@ -4674,7 +4937,7 @@
     if (!r) return '';
     return `
       <section class="invite" data-stagger>
-        <img class="invite__art" src="${icon3d('gem-stone')}" alt="">
+        ${art('gem-stone', 'invite__art')}
         <div class="invite__text">
           <span class="eyebrow">Invite a friend</span>
           <b>${esc(r.title || 'Give $10, get $10')}</b>
@@ -4716,7 +4979,7 @@
     const maxViews = Math.max(1, ...top.map(t => t.views));
     const metric = (icon, value, label, opts) => `
       <div class="metric stat" data-value="${+value}" data-decimals="${(opts && opts.decimals) || 0}">
-        <img src="${icon3d(icon)}" alt="">
+        ${art(icon)}
         <b>${(opts && opts.prefix) || ''}<span class="stat__num num">${fmtStat(+value, (opts && opts.decimals) || 0)}</span>${(opts && opts.suffix) || ''}</b>
         <small>${label}</small>
       </div>`;
@@ -4826,7 +5089,7 @@
      cancels touchstart + contextmenu, and images can't be dragged at all. */
   const HOLD_MS = 500;
   function bindOwnerPress() {
-    const wrap = $('.hero__avatar-wrap', views.home);
+    const wrap = $('[data-owner-hold]', views.home);
     if (!wrap) return;
     let timer = 0;
     let start = null;
@@ -4960,7 +5223,7 @@
         art: `
           <div class="onb__art">
             <i class="onb__glow"></i>
-            <img class="onb__icon" src="${icon3d('speech-balloon')}" alt="">
+            ${art('speech-balloon', 'onb__icon')}
             <span class="onb__bubble onb__bubble--me">How much is a full set?</span>
             <span class="onb__bubble">${svc ? `${esc(svc.title)} is ${esc(price(svc.price))} ✨` : 'Here are our prices ✨'}</span>
           </div>`,
@@ -5378,7 +5641,7 @@
     el.setAttribute('aria-label', 'Welcome');
     el.innerHTML = `
       <div class="welcome__top">
-        ${data.heroPhoto ? `<div class="welcome__photo"><img src="${esc(sized(safeUrl(data.heroPhoto), 900))}" alt=""></div>` : `<img class="welcome__emoji" src="${esc(icon3d(splashEmoji()))}" alt="">`}
+        ${data.heroPhoto ? `<div class="welcome__photo"><img src="${esc(sized(safeUrl(data.heroPhoto), 900))}" alt=""></div>` : art(splashEmoji(), 'welcome__emoji')}
         ${rating ? `<span class="wchip wchip--a"><b class="star">★</b> <b class="num">${rating}</b> · ${esc(data.reviewCount || data.reviews.length)} reviews</span>` : ''}
         ${next ? `<span class="wchip wchip--b"><i></i>Next: ${esc(next)}</span>` : ''}
       </div>
@@ -5630,7 +5893,7 @@
     const box = document.createElement('div');
     box.className = 'error-state';
     box.innerHTML = `
-      <img src="${icon3d('sparkles')}" alt="">
+      ${art('sparkles')}
       <h1>This studio page isn’t available</h1>
       <p>Check the link and try again.</p>`;
     app.appendChild(box);
@@ -5745,6 +6008,12 @@
 
     brandAccent = data.brandAccent;
     store.set('brand', brandAccent);
+    if (data.style !== STYLE) {
+      STYLE = data.style;
+      settings = sanitizeSettings(settings);
+    }
+    store.set('style', STYLE);
+    applyMotion();
     applySettings();
     document.title = data.name;
 
@@ -5758,6 +6027,7 @@
     bindScrollers();
     bindHeroTilt();
     bindOwnerPress();
+    bindLoyaltySheen();
     window.addEventListener('offline', syncOnline);
     window.addEventListener('online', syncOnline);
     if (!navigator.onLine) syncOnline();

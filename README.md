@@ -11,6 +11,14 @@
    (только буквы, цифры, `-` и `_`).
 2. Поменяйте в новом файле данные мастера: `name`, `tagline`, `city`, `avatar`, `heroPhoto`, `brandAccent`,
    `bookingUrl` (ссылка на Acuity / GlossGenius / Booksy), `instagram`, `phone`, `services`, `gallery`, `hours` и остальное.
+   - `"style"`: `"maison"` — премиальный стиль (засечки, тонкие линии, champagne), `"soft"` — мягкий стиль с 3D-иконками.
+   - `"bookingMode"` — куда ведёт кнопка в конце записи:
+     `"link"` — открывает `bookingUrl`;
+     `"instagram"` — открывает директ (`ig.me/m/<instagram>`) и копирует готовое сообщение;
+     `"sms"` — открывает SMS на `phone` с готовым текстом;
+     `"demo"` — сразу экран «Request sent» (для демо). Если поле не задано, режим выбирается сам: `bookingUrl` → `instagram` → `phone`.
+   - `"monogram"` (необязательно) — инициалы для логотипа в стиле maison; по умолчанию первые буквы названия.
+   - `"eyebrow"` (необязательно) — строка над именем на главной, например `"Lash artistry · Atlanta"`.
 3. Сохраните, закоммитьте и отправьте на GitHub (`git add . && git commit -m "Add bella-nails" && git push`).
 4. Откройте `https://moniyy.github.io/studio-app/?m=<slug>` — это ссылка, которую мастер даёт клиенткам.
 
