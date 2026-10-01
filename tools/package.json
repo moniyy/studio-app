@@ -1,0 +1,11 @@
+{
+  "name": "studio-app-tools",
+  "private": true,
+  "description": "Helpers for Studio App (not part of the website)",
+  "scripts": {
+    "icon": "node make-icon.js"
+  },
+  "dependencies": {
+    "sharp": "^0.34.0"
+  }
+}

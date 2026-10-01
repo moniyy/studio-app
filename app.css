@@ -130,7 +130,15 @@ body {
 
 h1, h2, h3, p { margin: 0; }
 h1, h2, h3 { font-weight: 800; letter-spacing: -.02em; line-height: 1.15; }
-img { display: block; max-width: 100%; }
+img {
+  display: block;
+  max-width: 100%;
+  /* no iOS long-press preview, selection or drag ghost on any picture */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
 img.is-broken { visibility: hidden; }
 a { color: inherit; text-decoration: none; }
 .num { font-variant-numeric: tabular-nums; }
@@ -1101,7 +1109,15 @@ input { -webkit-user-select: text; user-select: text; }
   white-space: nowrap;
   transition: color .3s var(--ease), transform .45s var(--spring);
 }
-.chipbar__chip.is-active { color: var(--on-accent); }
+/* The active chip carries the accent itself (after the pill lands), so its
+   text can never end up on a non-accent background */
+.chipbar__chip { transition: color .3s var(--ease), background-color .2s var(--ease), transform .45s var(--spring); }
+.chipbar__chip.is-active {
+  color: var(--on-accent);
+  background-color: var(--accent);
+  transition: color .2s var(--ease), background-color .2s var(--ease) .32s, transform .45s var(--spring);
+}
+.chipbar__chip.is-active .chip-n { color: inherit; }
 .chipbar__chip:active { transform: scale(.94); transition-duration: .12s; }
 
 .svc-list { display: flex; flex-direction: column; gap: 12px; }
@@ -2463,7 +2479,7 @@ input { -webkit-user-select: text; user-select: text; }
   position: absolute;
   left: 0;
   right: 0;
-  top: max(6px, calc(var(--safe-top) - 48px));
+  top: calc(env(safe-area-inset-top, 0px) + 8px); /* never above the status bar area */
   z-index: 99;
   display: none;
   align-items: center;
@@ -3220,8 +3236,6 @@ img.fx-in { animation: fx-in .7s cubic-bezier(.2, .8, .2, 1); }
 .invite .btn { grid-column: 1 / -1; height: 46px; width: 100%; }
 
 /* ---------- Owner view (demo) ---------- */
-.hero__avatar { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; transition: transform 1s var(--ease), box-shadow .6s var(--ease); }
-.hero__avatar.is-holding { transform: scale(.88); box-shadow: 0 0 0 6px color-mix(in srgb, #fff 45%, transparent), 0 8px 24px rgba(0, 0, 0, .3); }
 .owner {
   position: absolute;
   inset: 0;
@@ -3488,7 +3502,7 @@ input, select, textarea { font-size: max(16px, 1em); }
   opacity: .55;
   transition: opacity .3s var(--ease);
 }
-.chipbar__chip.is-active .chip-n { opacity: .85; }
+.chipbar__chip.is-active .chip-n { opacity: .75; }
 
 .masonry.is-empty { display: block; }
 .look { position: relative; display: block; cursor: pointer; will-change: transform; transition: transform .45s var(--spring), filter .3s var(--ease); }
@@ -3765,3 +3779,103 @@ input, select, textarea { font-size: max(16px, 1em); }
 .fav svg path, .lightbox__like svg path { fill: inherit; }
 .lv__foot { background: var(--bg); }
 .lv__body { will-change: opacity; }
+
+/* =========================================================
+   iPhone fixes
+   ========================================================= */
+
+/* ---------- Status bar backing (installed PWA) ----------
+   Height = the status bar itself. Above the content, below sheets
+   and full-screen viewers. Hidden where it isn't needed. */
+.sb-scrim {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 170;
+  height: env(safe-area-inset-top, 0px);
+  pointer-events: none;
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  transition: opacity .3s var(--ease), background-color .3s var(--ease);
+}
+.app.is-dark-overlay .sb-scrim, .app.is-splash .sb-scrim { opacity: 0; }
+
+@media (display-mode: standalone) {
+  /* screens and Large Titles start 12px below the status bar */
+  .app { --safe-top: calc(env(safe-area-inset-top, 0px) + 12px); }
+  /* "black-translucent" always draws the clock in white: in the light theme
+     the backing uses a deep accent so the time and battery stay readable */
+  :root:not([data-theme="dark"]) .sb-scrim { background: color-mix(in srgb, var(--accent) 86%, #000); }
+}
+
+/* ---------- Owner long-press: progress ring ---------- */
+.hero__avatar-wrap {
+  position: relative;
+  flex: none;
+  display: block;
+  width: 56px;
+  height: 56px;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+.hero__avatar-wrap .hero__avatar { pointer-events: none; transition: transform .5s var(--ease); }
+.hero__avatar-wrap.is-holding .hero__avatar { transform: scale(.9); }
+.hold-ring {
+  position: absolute;
+  inset: -7px;
+  width: calc(100% + 14px);
+  height: calc(100% + 14px);
+  transform: rotate(-90deg);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .15s var(--ease);
+}
+.hold-ring circle {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  filter: drop-shadow(0 0 4px rgba(0, 0, 0, .35));
+}
+.hero__avatar-wrap.is-holding .hold-ring { opacity: 1; }
+.hero__avatar-wrap.is-holding .hold-ring circle { animation: hold-fill .5s linear forwards; }
+@keyframes hold-fill { to { stroke-dashoffset: 0; } }
+
+/* ---------- Owner chart: bars grow from the bottom ---------- */
+.ochart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 172px;
+  padding-top: 6px;
+}
+.ochart__col {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.ochart__v { font-size: var(--fs-11); font-weight: 800; color: var(--text-2); }
+.ochart__bar {
+  display: block;
+  width: 100%;
+  max-width: 32px;
+  height: calc(var(--h) * 116px);
+  min-height: 6px;
+  border-radius: 9px 9px 6px 6px;
+  background: color-mix(in srgb, var(--accent) 22%, var(--fill));
+  transform-origin: 50% 100%;
+}
+.ochart__d { font-size: var(--fs-11); font-weight: 600; color: var(--text-2); white-space: nowrap; }
+.ochart__col.is-today .ochart__bar { background: var(--accent); box-shadow: 0 8px 18px -8px var(--accent-glow); }
+.ochart__col.is-today .ochart__v, .ochart__col.is-today .ochart__d { color: var(--accent); font-weight: 800; }

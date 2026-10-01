@@ -82,11 +82,13 @@
     return '#' + h.toUpperCase();
   }
 
+  /* Text on an accent background: white when it reaches 3:1 contrast
+     (WCAG for large / bold UI text), otherwise near-black. */
   function onAccentColor(hex) {
     const n = parseInt(hex.slice(1), 16);
     const lin = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
     const L = 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
-    return L > 0.55 ? '#16161A' : '#FFFFFF';
+    return 1.05 / (L + 0.05) >= 3 ? '#FFFFFF' : '#16161A';
   }
 
   function resolvedTheme() {
@@ -786,7 +788,10 @@
           </div>
           <div class="hero__content">
             <div class="hero__top">
-              ${data.avatar ? `<img class="hero__avatar" src="${esc(safeUrl(data.avatar))}" alt="">` : ''}
+              ${data.avatar ? `<span class="hero__avatar-wrap">
+                <img class="hero__avatar" src="${esc(safeUrl(data.avatar))}" alt="" draggable="false">
+                <svg class="hold-ring" viewBox="0 0 68 68" aria-hidden="true"><circle cx="34" cy="34" r="32" pathLength="100"/></svg>
+              </span>` : ''}
               <span class="hero__status${st.open ? ' is-open' : ''}" data-status-pill><i></i><span>${esc(st.text)}</span></span>
             </div>
             <p class="hero__greet">${greeting()}</p>
@@ -1441,7 +1446,7 @@
           </div>
           <div class="row">
             <span class="row__icon" style="--ic:${IOS.red}">${I.bell}</span>
-            <span class="row__label">Reminders<span class="row__sub">Remind me before my appointment</span></span>
+            <span class="row__label">Remind me before my appointment<span class="row__sub">We'll add alerts 24h and 2h before to your calendar</span></span>
             <button class="switch" role="switch" id="reminders" aria-checked="false" aria-label="Remind me before my appointment"></button>
           </div>
         </div>
@@ -3701,6 +3706,8 @@
     f.innerHTML = `<img src="${esc(src)}" alt="">`;
     f.style.cssText = `left:${big.left - box.left}px;top:${big.top - box.top}px;width:${big.width}px;height:${big.height}px`;
     app.appendChild(f);
+    // the copy is always removed, even if the animation is interrupted
+    setTimeout(() => f.remove(), (o.duration || 0.6) * 1000 + 1500);
     const s = Math.max(tile.width / big.width, tile.height / big.height);
     const ix = Math.max(0, (big.width - tile.width / s) / 2);
     const iy = Math.max(0, (big.height - tile.height / s) / 2);
@@ -4094,7 +4101,7 @@
       if ((el = t.closest('[data-accent]'))) { setSetting('accent', el.dataset.accent); popIn(el, { from: 0.8 }); return; }
       if ((el = t.closest('#reminders'))) {
         setSetting('reminders', !settings.reminders);
-        toast(settings.reminders ? 'Reminders on' : 'Reminders off', 'bell');
+        haptic();
         return;
       }
       if ((el = t.closest('#reset'))) {
@@ -4511,6 +4518,7 @@
   function imgFx(img) {
     if (img.dataset.fx) return;
     img.dataset.fx = '1';
+    img.draggable = false; // no iOS drag ghost / long-press preview on any picture
     if (img.closest('.lb-fly, .splash, .lightbox, .stories, .onb, .welcome, .look, .lv, .owner-top') || /fluentui-emoji|\.svg(\?|$)/i.test(img.getAttribute('src') || '')) return;
     const ready = () => img.complete && img.naturalWidth > 0;
     // Cached images are ready right away: show them as they are, never blurred
@@ -4622,7 +4630,11 @@
       data.address ? `LOCATION:${icsText(data.address)}` : '',
       `DESCRIPTION:${icsText(notes)}`,
       data.bookingUrl ? `URL:${safeUrl(data.bookingUrl)}` : '',
-      'BEGIN:VALARM', 'TRIGGER:-PT2H', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(s.title + ' in 2 hours')}`, 'END:VALARM',
+      // Reminders setting on → alerts 24h and 2h before; off → no alerts
+      ...(settings.reminders ? [
+        'BEGIN:VALARM', 'TRIGGER:-P1D', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(s.title + ' tomorrow at ' + fmtClock(bk.min))}`, 'END:VALARM',
+        'BEGIN:VALARM', 'TRIGGER:-PT2H', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(s.title + ' in 2 hours')}`, 'END:VALARM'
+      ] : []),
       'END:VEVENT', 'END:VCALENDAR'
     ].filter(Boolean).join('\r\n');
     const url = URL.createObjectURL(new Blob([ics], { type: 'text/calendar;charset=utf-8' }));
@@ -4687,7 +4699,7 @@
      (every number here is demo data from JSON and is labelled so)
      --------------------------------------------------------- */
   let ownerEl = null;
-  function openOwner() {
+  function openOwner(opts) {
     const o = data.ownerDemo;
     if (!o || ownerEl) return;
     closeNotice();
@@ -4695,9 +4707,10 @@
     setOwnerMode(true);
     const tl = topLook();
     const tls = tl ? lookStats(tl) : null;
-    haptic();
+    if (!(opts && opts.quiet)) haptic(); // the long-press already buzzed
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const daily = (o.daily || []).slice(0, 7).map(v => +v || 0);
+    const DEMO_DAYS = [38, 45, 52, 41, 60, 49, 27];
+    const daily = DEMO_DAYS.map((d, i) => (o.daily && o.daily[i] != null ? +o.daily[i] || 0 : d));
     const maxDay = Math.max(1, ...daily);
     const top = (o.topServices || []).map(t => ({ s: data.services.find(x => x.id === t.id), views: +t.views || 0 })).filter(t => t.s).slice(0, 3);
     const maxViews = Math.max(1, ...top.map(t => t.views));
@@ -4707,19 +4720,16 @@
         <b>${(opts && opts.prefix) || ''}<span class="stat__num num">${fmtStat(+value, (opts && opts.decimals) || 0)}</span>${(opts && opts.suffix) || ''}</b>
         <small>${label}</small>
       </div>`;
-    const W = 320;
-    const barW = 26;
-    const gap = (W - 20 - barW * 7) / 6;
-    const chart = daily.map((v, i) => {
-      const h = Math.max(4, (v / maxDay) * 104);
-      const x = 10 + i * (barW + gap);
-      const hi = v === maxDay;
+    // Mon…Sun columns; today (studio time) in the accent
+    const todayIdx = (studioNow().day + 6) % 7;
+    const chart = days.map((d, i) => {
+      const v = daily[i] || 0;
       return `
-        <g class="bar-g">
-          <rect class="bar${hi ? ' is-max' : ''}" x="${x.toFixed(1)}" y="${(126 - h).toFixed(1)}" width="${barW}" height="${h.toFixed(1)}" rx="8"/>
-          <text class="bar-v" x="${(x + barW / 2).toFixed(1)}" y="${(118 - h).toFixed(1)}">${v}</text>
-          <text class="bar-l" x="${(x + barW / 2).toFixed(1)}" y="146">${days[i]}</text>
-        </g>`;
+        <div class="ochart__col${i === todayIdx ? ' is-today' : ''}">
+          <span class="ochart__v num">${v}</span>
+          <i class="ochart__bar" style="--h:${(v / maxDay).toFixed(3)}"></i>
+          <span class="ochart__d">${i === todayIdx ? 'Today' : d}</span>
+        </div>`;
     }).join('');
 
     ownerEl = document.createElement('div');
@@ -4747,7 +4757,7 @@
         </div>
         <section class="card owner__card" data-stagger>
           <div class="owner__h"><b>App opens by day</b><span class="demo-tag">Demo data</span></div>
-          <svg class="owner__chart" viewBox="0 0 ${W} 152" role="img" aria-label="App opens by day of the week">${chart}</svg>
+          <div class="ochart" role="img" aria-label="App opens by day of the week, demo data">${chart}</div>
         </section>
         <section class="card owner__card" data-stagger>
           <div class="owner__h"><b>Top questions clients asked</b><span class="demo-tag">Demo data</span></div>
@@ -4789,8 +4799,9 @@
     setTimeout(() => {
       $$('.metric', ownerEl).forEach(countUp);
       if (g) {
-        ensure(g.fromTo($$('.bar', ownerEl), { scaleY: 0 }, { scaleY: 1, transformOrigin: '50% 100%', duration: 0.8, ease: SPRING, stagger: 0.06, clearProps: 'transform' }));
-        ensure(g.fromTo($$('.bar-v', ownerEl), { opacity: 0 }, { opacity: 1, duration: 0.4, stagger: 0.06, delay: 0.4, ease: 'power2.out' }));
+        // bars grow from the bottom, the numbers ride up with them
+        ensure(g.fromTo($$('.ochart__bar', ownerEl), { scaleY: 0 }, { scaleY: 1, transformOrigin: '50% 100%', duration: 0.8, ease: SPRING, stagger: 0.06, clearProps: 'transform' }));
+        ensure(g.fromTo($$('.ochart__v', ownerEl), { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.5, stagger: 0.06, delay: 0.25, ease: SPRING, clearProps: 'opacity,transform' }));
       }
       $$('.owner__track i', ownerEl).forEach(i => i.classList.add('is-in'));
     }, 350);
@@ -4810,27 +4821,39 @@
   }
 
   /* Long-press (1s) on the hero avatar opens the owner view */
+  /* Long-press (500ms, own timer) on the hero avatar opens the owner view.
+     iOS would otherwise show its image preview / drag "ghost": the avatar
+     cancels touchstart + contextmenu, and images can't be dragged at all. */
+  const HOLD_MS = 500;
   function bindOwnerPress() {
+    const wrap = $('.hero__avatar-wrap', views.home);
+    if (!wrap) return;
     let timer = 0;
     let start = null;
     const cancel = () => {
       clearTimeout(timer);
       start = null;
-      const av = $('.hero__avatar', views.home);
-      if (av) av.classList.remove('is-holding');
+      wrap.classList.remove('is-holding');
     };
-    views.home.addEventListener('pointerdown', e => {
-      const av = e.target.closest('.hero__avatar');
-      if (!av || !data.ownerDemo) return;
+    wrap.addEventListener('touchstart', e => { if (data.ownerDemo) e.preventDefault(); }, { passive: false });
+    wrap.addEventListener('contextmenu', e => e.preventDefault());
+    wrap.addEventListener('dragstart', e => e.preventDefault());
+    wrap.addEventListener('pointerdown', e => {
+      if (!data.ownerDemo || (e.pointerType === 'mouse' && e.button !== 0)) return;
       start = { x: e.clientX, y: e.clientY };
-      av.classList.add('is-holding');
-      timer = setTimeout(() => { cancel(); openOwner(); }, 1000);
+      void wrap.offsetWidth; // restart the progress ring
+      wrap.classList.add('is-holding');
+      timer = setTimeout(() => {
+        cancel();
+        try { if (navigator.vibrate) navigator.vibrate(15); } catch (err) { /* not supported */ }
+        openOwner({ quiet: true });
+      }, HOLD_MS);
     });
-    views.home.addEventListener('pointermove', e => {
+    wrap.addEventListener('pointermove', e => {
       if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) cancel();
     });
-    ['pointerup', 'pointercancel', 'pointerleave'].forEach(t => views.home.addEventListener(t, cancel));
-    views.home.addEventListener('contextmenu', e => { if (e.target.closest('.hero__avatar')) e.preventDefault(); });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(t => wrap.addEventListener(t, cancel));
+    document.addEventListener('visibilitychange', cancel);
   }
 
   /* ---------------------------------------------------------
@@ -5616,82 +5639,18 @@
   /* ---------------------------------------------------------
      16. PWA — per-master manifest, icons & service worker
      --------------------------------------------------------- */
-  /* Home Screen icon: accent background (opaque — iOS turns transparent corners
-     black and rounds the icon itself) with the master's photo in a ringed circle.
-     The circle stays inside the maskable safe zone (80%). */
-  function drawIcon(size, img) {
-    const c = document.createElement('canvas');
-    c.width = c.height = size;
-    const g = c.getContext('2d');
-    const grad = g.createLinearGradient(0, 0, size, size);
-    grad.addColorStop(0, shade(data.brandAccent, 0.18));
-    grad.addColorStop(1, shade(data.brandAccent, -0.12));
-    g.fillStyle = grad;
-    g.fillRect(0, 0, size, size);
-    if (img) {
-      const r = size * 0.34;
-      const cx = size / 2;
-      const cy = size / 2;
-      g.beginPath();
-      g.arc(cx, cy, r + size * 0.028, 0, Math.PI * 2);
-      g.fillStyle = 'rgba(255,255,255,.95)';
-      g.fill();
-      g.save();
-      g.beginPath();
-      g.arc(cx, cy, r, 0, Math.PI * 2);
-      g.clip();
-      const s = Math.min(img.naturalWidth, img.naturalHeight);
-      g.drawImage(img, (img.naturalWidth - s) / 2, 0, s, s, cx - r, cy - r, r * 2, r * 2);
-      g.restore();
-    } else {
-      g.fillStyle = onAccentColor(data.brandAccent);
-      g.font = `800 ${Math.round(size * 0.46)}px "Plus Jakarta Sans", system-ui, sans-serif`;
-      g.textAlign = 'center';
-      g.textBaseline = 'middle';
-      g.fillText(String(data.name).trim().charAt(0).toUpperCase(), size / 2, size * 0.53);
-    }
-    return c.toDataURL('image/png');
-  }
-
-  function shade(hex, amt) {
-    const n = parseInt(hex.slice(1), 16);
-    const f = v => Math.max(0, Math.min(255, Math.round(v + (amt < 0 ? v * amt : (255 - v) * amt))));
-    return '#' + [n >> 16, (n >> 8) & 255, n & 255].map(v => f(v).toString(16).padStart(2, '0')).join('');
-  }
-
-  function loadCorsImage(src) {
-    return new Promise(resolve => {
-      if (!src) return resolve(null);
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => resolve(img);
-      img.onerror = () => resolve(null);
-      img.src = src;
-      setTimeout(() => resolve(null), 4000);
-    });
-  }
-
   async function setupPWA() {
     const abs = u => new URL(u, location.href).href;
     const startUrl = abs(params.has('m') ? './?m=' + encodeURIComponent(SLUG) : './');
-    let icons;
-    let touchIcon = null;
-
-    try {
-      if (data.appIcon) {
-        icons = [192, 512].map(s => ({ src: abs(data.appIcon), sizes: s + 'x' + s, type: 'image/png', purpose: 'any' }));
-      } else {
-        const img = await loadCorsImage(sized(data.avatar, 512));
-        let i180, i192, i512;
-        try { i180 = drawIcon(180, img); i192 = drawIcon(192, img); i512 = drawIcon(512, img); } catch (e) { i180 = drawIcon(180); i192 = drawIcon(192); i512 = drawIcon(512); }
-        touchIcon = i180;
-        icons = [
-          { src: i192, sizes: '192x192', type: 'image/png', purpose: 'any' },
-          { src: i512, sizes: '512x512', type: 'image/png', purpose: 'any' },
-          { src: i512, sizes: '512x512', type: 'image/png', purpose: 'maskable' }
-        ];
-      }
-    } catch (e) { icons = null; }
+    // Icons are real PNG files made by tools/make-icon.js (opaque, iOS-safe).
+    // A master can have their own set: "iconDir": "img/<slug>/" in their JSON.
+    const dir = String(data.iconDir || './img/').replace(/\/?$/, '/');
+    const icons = [
+      { src: abs(dir + 'icon-192.png'), sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: abs(dir + 'icon-512.png'), sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: abs(dir + 'icon-maskable-512.png'), sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+    ];
+    const touchIcon = abs(dir + 'apple-touch-icon.png');
 
     const manifest = {
       id: startUrl,
@@ -5704,17 +5663,14 @@
       orientation: 'portrait',
       background_color: THEME_BG.light,
       theme_color: data.brandAccent,
-      icons: icons || [
-        { src: abs('./img/icon-192.png'), sizes: '192x192', type: 'image/png' },
-        { src: abs('./img/icon-512.png'), sizes: '512x512', type: 'image/png' }
-      ]
+      icons
     };
 
     const link = $('link[rel="manifest"]');
     if (link) link.href = URL.createObjectURL(new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' }));
 
     const touch = $('link[rel="apple-touch-icon"]');
-    if (touch && (touchIcon || icons)) touch.href = touchIcon || icons[0].src;
+    if (touch) touch.href = touchIcon;
     const title = $('meta[name="apple-mobile-web-app-title"]');
     if (title) title.content = manifest.short_name;
   }
