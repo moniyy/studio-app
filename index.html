@@ -24,6 +24,9 @@
   <!-- GSAP drives the spring animations (deferred: it runs before app init) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.13.0/gsap.min.js" defer></script>
   <!-- Loaded in <head> on purpose: the first lines apply saved theme / accent / text size before the first paint. -->
+  <!-- Supabase keys (gitignored; the Pages workflow writes it) + the data layer -->
+  <script src="./config.js"></script>
+  <script src="./backend.js"></script>
   <script src="./app.js"></script>
 </head>
 <body>

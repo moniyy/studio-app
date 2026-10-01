@@ -13,3 +13,6 @@ npm-debug.log*
 *.log
 .env
 .claude/
+
+# Supabase keys for this browser app (see config.example.js) — never commit
+config.js
