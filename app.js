@@ -2979,6 +2979,8 @@
     if (m.accent) out.brandAccent = m.accent;
     out.bookingEngine = m.booking_engine;
     out.masterId = m.id;
+    // made-up dashboard numbers are for the demo only; real studios have Insights
+    if (m.booking_engine === 'builtin') out.ownerDemo = null;
     out.rules = {
       autoConfirm: !!m.auto_confirm, minNotice: +m.min_notice_hours || 0, maxDays: +m.max_days_ahead || 60,
       cancelWindow: +m.cancel_window_hours || 0, step: +m.slot_step_min || 30
@@ -3318,23 +3320,27 @@
     const s = data.services.find(x => x.id === b.service_id) || bkService();
     const pending = b.status === 'pending';
     const moved = opts && opts.moved;
-    const title = moved ? (pending ? 'Change requested' : 'Moved ✓') : pending ? 'Request sent' : 'You’re booked';
-    const sub = pending
-      ? `${esc(firstName())} will confirm soon — you’ll see it in My bookings.`
-      : `See you ${esc(whenText(b.start_at).replace(' · ', ' at '))}.`;
+    const dep = depositDue(b);
+    const title = moved ? (pending ? 'Change requested' : 'Moved ✓') : dep ? 'Almost there' : pending ? 'Request sent' : 'You’re booked';
+    const sub = dep && !moved
+      ? `Your time is reserved — send the ${esc(price(+b.deposit))} deposit to hold it.`
+      : pending
+        ? `${esc(firstName())} will confirm soon — you’ll see it in My bookings.`
+        : `See you ${esc(whenText(b.start_at).replace(' · ', ' at '))}.`;
     const content = Sheet.content();
     content.innerHTML = `
       <div class="bk-done" data-sheet-scroll>
         <canvas class="confetti" aria-hidden="true"></canvas>
         <div class="bk-done__head">
-          <span class="bk-done__check${pending ? ' is-pending' : ''}">${pending ? I.clock : I.check}</span>
+          <span class="bk-done__check${pending || dep ? ' is-pending' : ''}">${pending || dep ? I.clock : I.check}</span>
           <h2>${title}</h2>
           <p>${sub}</p>
         </div>
+        ${depositHTML(b)}
         <div class="card bk-sum">
           <div class="bk-sum__svc">
             <img src="${esc(b.service_photo ? sized(safeUrl(b.service_photo), 200) : photoSrc(s || { title: b.service_name }, 200))}"${phAttr(s || { title: b.service_name })} alt="">
-            <span><b>${esc(b.service_name || (s && s.title) || '')}</b><small>${statusText(b.status)}</small></span>
+            <span><b>${esc(b.service_name || (s && s.title) || '')}</b><small>${esc(bookingStatus(b))}</small></span>
           </div>
           <div class="bk-row"><span>Date</span><b>${esc(dayLabel(studioSpot(b.start_at).off, true))}</b></div>
           <div class="bk-row"><span>Time</span><b class="num">${fmtClock(studioSpot(b.start_at).min)}</b></div>
@@ -3353,8 +3359,49 @@
       ensure(g.fromTo($('.bk-done__check', content), { scale: 0.4, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.6, ease: SPRING, clearProps: 'transform,opacity' }));
       springIn($$('.bk-done > :not(canvas)', content), { delay: 0.1, stagger: 0.06, y: 14 });
     }
-    if (!pending) confetti($('.confetti', content));
+    if (!pending && !dep) confetti($('.confetti', content));
     haptic([10, 30, 10]);
+  }
+
+  /* ---------- Deposits: paid straight to the studio (Cash App, Zelle, Venmo, PayPal, Square) ---------- */
+  const paypalUser = v => String(v).replace(/^(https?:\/\/)?(www\.)?paypal\.me\//i, '').replace(/[/?#].*$/, '');
+  const PAY_METHODS = [
+    { id: 'cashapp', name: 'Cash App', handle: v => '$' + v.replace(/^\$/, ''), link: (v, a) => 'https://cash.app/$' + encodeURIComponent(v.replace(/^\$/, '')) + '/' + a },
+    { id: 'venmo', name: 'Venmo', handle: v => '@' + v.replace(/^@/, ''), link: (v, a, note) => `https://venmo.com/${encodeURIComponent(v.replace(/^@/, ''))}?txn=pay&amount=${a}&note=${encodeURIComponent(note)}` },
+    { id: 'paypal', name: 'PayPal', handle: v => 'paypal.me/' + paypalUser(v), link: (v, a) => `https://paypal.me/${encodeURIComponent(paypalUser(v))}/${a}USD` },
+    { id: 'zelle', name: 'Zelle', handle: v => v, link: () => '' },
+    { id: 'square', name: 'Square', handle: () => 'Pay by card', link: v => (/^https:\/\//i.test(v) ? v : '') }
+  ];
+  const depositDue = b => !!(b && b.deposit_status === 'pending' && +b.deposit > 0 && ['pending', 'confirmed'].includes(b.status));
+  // "Awaiting deposit" wins over pending / confirmed
+  const bookingStatus = b => (depositDue(b) ? 'Awaiting deposit' : statusText(b.status));
+  function payOptions(b) {
+    const p = (b.master && b.master.payments) || data.payments || {};
+    const amt = Math.round(+b.deposit * 100) / 100;
+    const note = ['Deposit', b.service_name, b.client_name].filter(Boolean).join(' · ');
+    return PAY_METHODS.filter(m => p[m.id] && String(p[m.id]).trim()).map(m => {
+      const v = String(p[m.id]).trim();
+      const url = m.link(v, amt, note);
+      return { id: m.id, name: m.name, handle: m.handle(v), copy: m.id === 'square' ? v : m.handle(v), url: url ? safeUrl(url) : '' };
+    });
+  }
+  function depositHTML(b) {
+    if (!depositDue(b)) return '';
+    const opts = payOptions(b);
+    const due = b.deposit_due_at
+      ? `Send it by ${whenText(b.deposit_due_at)} — after that the time goes back to the calendar.`
+      : 'Your spot is held as soon as it arrives.';
+    return `
+      <div class="dep card">
+        <div class="dep__head"><span class="dep__ic">${I.shield}</span><span><b>Pay ${esc(price(+b.deposit))} deposit to hold your spot</b><small>${esc(due)}</small></span></div>
+        <div class="dep__list">${opts.map(o => `
+          <div class="dep__row">
+            <span class="dep__m"><b>${esc(o.name)}</b><small>${esc(o.handle)}</small></span>
+            ${o.url ? `<a class="btn btn--primary btn--sm" href="${esc(o.url)}" ${ext} data-dep-pay="${esc(o.id)}">Pay</a>` : ''}
+            <button class="btn btn--soft btn--sm" data-dep-copy="${esc(o.copy)}">Copy</button>
+          </div>`).join('') || `<p class="dep__none">Ask ${esc(firstName())} how to send it.</p>`}</div>
+        <p class="dep__note">Add your name to the payment note. Once ${esc(firstName())} gets it, this changes to Confirmed.</p>
+      </div>`;
   }
 
   /* ---------- My bookings (tokens on this device) ---------- */
@@ -3370,7 +3417,9 @@
     return {
       token: b.manage_token, id: b.id, status: b.status, start_at: b.start_at, end_at: b.end_at,
       service_id: b.service_id, service_name: b.service_name, service_photo: b.service_photo,
-      price: b.price, late_cancel: !!b.late_cancel, updated_at: b.updated_at
+      price: b.price, late_cancel: !!b.late_cancel, updated_at: b.updated_at,
+      deposit: +b.deposit || 0, deposit_status: b.deposit_status || 'none', deposit_due_at: b.deposit_due_at || null,
+      fill_weeks: b.fill_weeks || null, completed_at: b.completed_at || null, cancel_reason: b.cancel_reason || null
     };
   }
   // opts.mine: this device made the change (so it's not news to her)
@@ -3392,7 +3441,9 @@
       try {
         const b = await Backend.getBooking(old.token);
         if (!b) return;
-        if (ACTIVE.includes(old.status) && b.status === 'cancelled_master') news.push(`${firstName()} cancelled your ${b.service_name} on ${whenText(old.start_at)}`);
+        if (ACTIVE.includes(old.status) && b.status === 'cancelled_master' && b.deposit_status === 'expired') news.push(`Your ${b.service_name} (${whenText(old.start_at)}) was released — the deposit didn’t arrive`);
+        else if (ACTIVE.includes(old.status) && b.status === 'cancelled_master') news.push(`${firstName()} cancelled your ${b.service_name} on ${whenText(old.start_at)}`);
+        else if (old.deposit_status === 'pending' && b.deposit_status === 'paid' && ACTIVE.includes(b.status)) news.push(`${firstName()} got your deposit — you’re all set ✨`);
         else if (ACTIVE.includes(b.status) && old.start_at !== b.start_at && Date.parse(old.start_at) !== Date.parse(b.start_at)) news.push(`${firstName()} moved your ${b.service_name} to ${whenText(b.start_at)}`);
         else if (old.status === 'pending' && b.status === 'confirmed') news.push(`${firstName()} confirmed your ${b.service_name} — ${whenText(b.start_at)}`);
         const all = mine().map(x => (x.token === old.token ? snapshot(b) : x));
@@ -3408,26 +3459,72 @@
     const b = upcoming()[0];
     if (!b) {
       const c = mine().find(x => x.status === 'cancelled_master' && Date.parse(x.start_at) > Date.now() - 7 * 864e5);
-      if (!c) return '';
+      if (!c) return afterVisitHTML();
+      const expired = c.deposit_status === 'expired';
       return `
         <div class="mybk card mybk--cancelled" data-manage="${esc(c.token)}" role="button" tabindex="0">
-          <div class="mybk__top"><span class="eyebrow">Your appointment</span><span class="bstat bstat--cancelled_master">Cancelled by the studio</span></div>
-          <div class="mybk__main"><b>${esc(c.service_name)}</b><span class="num">${esc(whenText(c.start_at))}</span></div>
+          <div class="mybk__top"><span class="eyebrow">Your appointment</span><span class="bstat bstat--cancelled_master">${expired ? 'Released' : 'Cancelled by the studio'}</span></div>
+          <div class="mybk__main"><b>${esc(c.service_name)}</b><span class="num">${esc(whenText(c.start_at))}</span>${expired ? '<small>The deposit didn’t arrive in time</small>' : ''}</div>
           <div class="mybk__actions"><button class="btn btn--primary btn--sm" data-book data-book-service="${esc(c.service_id || '')}">Book a new time</button></div>
         </div>`;
     }
+    const dep = depositDue(b);
     return `
-      <div class="mybk card" data-manage="${esc(b.token)}" role="button" tabindex="0">
-        <div class="mybk__top"><span class="eyebrow">Your appointment</span><span class="bstat bstat--${b.status}">${b.status === 'pending' ? 'Pending' : 'Confirmed'}</span></div>
+      <div class="mybk card${dep ? ' mybk--deposit' : ''}" data-manage="${esc(b.token)}" role="button" tabindex="0">
+        <div class="mybk__top"><span class="eyebrow">Your appointment</span><span class="bstat bstat--${dep ? 'deposit' : b.status}">${dep ? 'Awaiting deposit' : b.status === 'pending' ? 'Pending' : 'Confirmed'}</span></div>
         <div class="mybk__main">
           <img src="${esc(photoSrc(b, 200))}"${phAttr(b)} alt="">
           <span><b>${esc(b.service_name)}</b><span class="num">${esc(whenText(b.start_at))}</span><small class="mybk__count" data-countdown="${esc(b.start_at)}">${countdown(b.start_at)}</small></span>
         </div>
         <div class="mybk__actions">
-          <button class="btn btn--soft btn--sm" data-mybk-move="${esc(b.token)}">Reschedule</button>
+          ${dep ? `<button class="btn btn--primary btn--sm" data-manage="${esc(b.token)}">Pay ${esc(price(+b.deposit))} deposit</button>` : `<button class="btn btn--soft btn--sm" data-mybk-move="${esc(b.token)}">Reschedule</button>`}
           <button class="btn btn--soft btn--sm" data-mybk-cancel="${esc(b.token)}">Cancel</button>
         </div>
       </div>`;
+  }
+
+  /* After the visit: "How was your visit?" (review link), then "Time for your fill" */
+  const AFTER_KEY = 'after';
+  const afterSeen = k => !!(store.get(AFTER_KEY, {}) || {})[k];
+  function afterDismiss(k) {
+    const m = store.get(AFTER_KEY, {}) || {};
+    m[k] = Date.now();
+    store.set(AFTER_KEY, m);
+  }
+  function reviewLink() {
+    if (data.reviewUrl && /^https:\/\//i.test(data.reviewUrl)) return { url: data.reviewUrl, label: /instagram/i.test(data.reviewUrl) ? 'Review on Instagram' : 'Leave a review' };
+    if (data.instagram) return { url: 'https://instagram.com/' + encodeURIComponent(String(data.instagram).replace(/^@/, '')), label: 'Tag us on Instagram' };
+    return null;
+  }
+  function afterVisitHTML() {
+    const done = mine().filter(x => x.status === 'completed').sort((a, b) => Date.parse(b.start_at) - Date.parse(a.start_at))[0];
+    if (!done) return '';
+    const days = (Date.now() - Date.parse(done.end_at || done.start_at)) / 864e5;
+    const svc = data.services.find(s => s.id === done.service_id);
+    const x = k => `<button class="after__x" data-after-dismiss="${esc(k)}" aria-label="Dismiss">${I.x}</button>`;
+    const rv = reviewLink();
+    if (days < 10 && !afterSeen('r:' + done.token)) {
+      return `
+        <div class="mybk card after">
+          <div class="mybk__top"><span class="eyebrow">Your last visit</span>${x('r:' + done.token)}</div>
+          <div class="after__main"><span class="after__em" aria-hidden="true">✨</span><span><b>How was your visit?</b><small>${esc(done.service_name)} · ${esc(whenText(done.start_at))}. A quick review means the world to ${esc(firstName())}.</small></span></div>
+          <div class="mybk__actions">
+            ${rv ? `<a class="btn btn--primary btn--sm" href="${esc(safeUrl(rv.url))}" ${ext} data-after-review="${esc(done.token)}">${esc(rv.label)}</a>` : ''}
+            ${svc ? `<button class="btn btn--soft btn--sm" data-book data-book-service="${esc(svc.id)}">Book again</button>` : ''}
+          </div>
+        </div>`;
+    }
+    const weeks = +done.fill_weeks || (svc && +svc.fillWeeks) || 0;
+    if (weeks && svc && days >= weeks * 7 - 3 && days < weeks * 7 + 35 && !afterSeen('f:' + done.token)) {
+      const ago = Math.max(1, Math.round(days / 7));
+      return `
+        <div class="mybk card after after--fill">
+          <div class="mybk__top"><span class="eyebrow">Fill reminder</span>${x('f:' + done.token)}</div>
+          <div class="after__main"><span class="after__em" aria-hidden="true">💕</span><span><b>Time for your fill</b><small>It’s been ${ago} week${ago > 1 ? 's' : ''} since your ${esc(done.service_name)} — book now to keep them full.</small></span></div>
+          <div class="mybk__actions"><button class="btn btn--primary btn--sm" data-book data-book-service="${esc(svc.id)}">Book ${esc(svc.title)}</button></div>
+        </div>`;
+    }
+    return '';
   }
   function syncMyBookingCard() {
     const el = $('#my-booking', views.home);
@@ -3473,7 +3570,7 @@
     const late = b.late_now && can;
     box.innerHTML = `
       <header class="mg__head">
-        <span class="bstat bstat--${b.status}">${esc(statusText(b.status))}</span>
+        <span class="bstat bstat--${depositDue(b) ? 'deposit' : b.status}">${esc(bookingStatus(b))}</span>
         <button class="sheet__x" data-sheet-close aria-label="Close">${I.x}</button>
       </header>
       <div class="mg__hero">
@@ -3484,12 +3581,15 @@
           ${can ? `<small class="mg__count" data-countdown="${esc(b.start_at)}">${countdown(b.start_at)}</small>` : ''}
         </div>
       </div>
-      ${b.status === 'cancelled_master' ? `<div class="sheet__note mg__note--bad">${I.x}<span>${esc(firstName())} cancelled this appointment${b.cancel_reason ? `: “${esc(b.cancel_reason)}”` : ''}. Sorry for the change — pick a new time whenever you like.</span></div>` : ''}
-      ${b.status === 'pending' ? `<div class="sheet__note">${I.clock}<span>${esc(firstName())} hasn’t confirmed yet — you’ll see it here as soon as it’s confirmed.</span></div>` : ''}
+      ${b.status === 'cancelled_master' && b.deposit_status === 'expired' ? `<div class="sheet__note mg__note--bad">${I.x}<span>The deposit didn’t arrive in time, so this time went back to the calendar. Book again whenever you like.</span></div>`
+        : b.status === 'cancelled_master' ? `<div class="sheet__note mg__note--bad">${I.x}<span>${esc(firstName())} cancelled this appointment${b.cancel_reason ? `: “${esc(b.cancel_reason)}”` : ''}. Sorry for the change — pick a new time whenever you like.</span></div>` : ''}
+      ${depositHTML(b)}
+      ${b.status === 'pending' && !depositDue(b) ? `<div class="sheet__note">${I.clock}<span>${esc(firstName())} hasn’t confirmed yet — you’ll see it here as soon as it’s confirmed.</span></div>` : ''}
       <div class="card bk-sum">
         <div class="bk-row"><span>Name</span><b>${esc(b.client_name || '')}</b></div>
         ${b.duration_min ? `<div class="bk-row"><span>Duration</span><b>${esc(fmtDuration(b.duration_min))}</b></div>` : ''}
         ${b.price != null ? `<div class="bk-row"><span>Price</span><b class="num">${esc(price(+b.price))}</b></div>` : ''}
+        ${+b.deposit > 0 && b.deposit_status !== 'none' ? `<div class="bk-row"><span>Deposit</span><b class="num">${esc(price(+b.deposit))} · ${esc({ pending: 'not paid yet', paid: 'received ✓', waived: 'not needed', expired: 'not received' }[b.deposit_status] || '')}</b></div>` : ''}
         ${data.address ? `<div class="bk-row bk-row--addr"><span>Address</span><b>${esc(data.address)}</b></div>` : ''}
         ${b.client_note ? `<div class="bk-row bk-row--addr"><span>Your note</span><b>${esc(b.client_note)}</b></div>` : ''}
       </div>
@@ -3570,7 +3670,7 @@
       <button class="row row--link mybk-row" data-manage="${esc(b.token)}">
         <img src="${esc(photoSrc(b, 120))}"${phAttr(b)} alt="">
         <span class="row__label">${esc(b.service_name)}<span class="row__sub num">${esc(whenText(b.start_at))}</span></span>
-        <span class="bstat bstat--${b.status}">${esc(b.status === 'confirmed' ? 'Confirmed' : b.status === 'pending' ? 'Pending' : statusText(b.status))}</span>
+        <span class="bstat bstat--${depositDue(b) ? 'deposit' : b.status}">${esc(depositDue(b) ? 'Awaiting deposit' : b.status === 'confirmed' ? 'Confirmed' : b.status === 'pending' ? 'Pending' : statusText(b.status))}</span>
         <span class="row__chev">${I.chevR}</span>
       </button>`;
     if (!list.length) {
@@ -5336,6 +5436,16 @@
       }
       if ((el = t.closest('[data-mg-cancel-yes]'))) { if (!el.disabled) cancelMine(mg.reason); return; }
       if ((el = t.closest('[data-ics-booking]'))) { icsForBooking(el.dataset.icsBooking); return; }
+      if ((el = t.closest('[data-dep-copy]'))) {
+        const v = el.dataset.depCopy;
+        (navigator.clipboard ? navigator.clipboard.writeText(v) : Promise.reject(new Error('no clipboard')))
+          .then(() => toast(`Copied ${v}`, 'ok'), () => toast(v, 'link'));
+        haptic();
+        return;
+      }
+      if (t.closest('[data-dep-pay]')) return; // a payment app opens; nothing else
+      if ((el = t.closest('[data-after-dismiss]'))) { afterDismiss(el.dataset.afterDismiss); haptic(); syncMyBookingCard(); return; }
+      if ((el = t.closest('[data-after-review]'))) { afterDismiss('r:' + el.dataset.afterReview); setTimeout(syncMyBookingCard, 800); return; }
       if ((el = t.closest('[data-copy-manage]'))) {
         const url = manageUrl(el.dataset.copyManage);
         (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject(new Error('no clipboard')))

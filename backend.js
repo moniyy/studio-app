@@ -197,6 +197,9 @@
     saveClient: (id, p) => rpc('owner_save_client', { p_client_id: id, p }),
     saveFormula: (mid, f) => rpc('owner_save_formula', { p_master_id: mid, p: f }),
     deleteFormula: id => rpc('owner_delete_formula', { p_id: id }),
+    // 'paid' (received) · 'waived' (not needed) · 'pending' (undo)
+    setDeposit: (id, status) => rpc('owner_set_deposit', { p_booking_id: id, p_status: status }),
+    insights: (mid, period) => rpc('owner_insights', { p_master_id: mid, p_period: period || 'week' }),
 
     /* Photos → Storage "studio-media/<master_id>/<folder>/<uuid>.<ext>" (public URLs) */
     async upload(mid, folder, blob) {

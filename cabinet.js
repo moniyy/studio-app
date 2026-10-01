@@ -3,8 +3,9 @@
    Loaded on demand (?owner=1 or a long press on the monogram /
    avatar) for studios with the built-in booking engine.
    Sign in by email + password → Today (with Requests), Calendar,
-   Clients (CRM + lash map), Studio (profile, look, services, looks,
-   hours, texts, assistant answers). New bookings and cancellations arrive
+   Clients (CRM + lash map), Insights (real numbers from the database),
+   Studio (profile, look, services, looks, payments & deposits, hours,
+   texts, assistant answers). New bookings and cancellations arrive
    live (Supabase Realtime; polling when it isn't available).
    All UI helpers come from app.js through `kit`.
    ========================================================= */
@@ -26,6 +27,7 @@
     { id: 'today', label: 'Today', icon: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>' },
     { id: 'calendar', label: 'Calendar', icon: '<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>' },
     { id: 'clients', label: 'Clients', icon: '<circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 19.5c.8-3.3 3.4-5 6.5-5s5.7 1.7 6.5 5"/><path d="M16 5.5a3.2 3.2 0 0 1 0 6.2M18.5 14.8c1.6.7 2.6 2.2 3 4.2"/>' },
+    { id: 'insights', label: 'Insights', icon: '<path d="M5 19.5V12M10 19.5V5.5M15 19.5v-5M20 19.5V9"/>' },
     { id: 'studio', label: 'Studio', icon: '<path d="M4 10.5 12 4l8 6.5V20H4z"/><path d="M9.5 20v-5.5h5V20"/>' }
   ];
   const ACTIVE = ['pending', 'confirmed'];
@@ -248,6 +250,7 @@
         const old = prev.get(b.id);
         if (S.self.has(b.id)) return;
         if (!old && b.created_by === 'client' && isActive(b)) notify(b.status === 'pending' ? 'request' : 'new', b);
+        else if (old && isActive(old) && b.status === 'cancelled_master' && b.deposit_status === 'expired') notify('expired', b);
         else if (old && isActive(old) && b.status === 'cancelled_client') notify('cancel', b);
         else if (old && isActive(b) && Date.parse(old.start_at) !== Date.parse(b.start_at)) notify('move', b, old);
       });
@@ -270,6 +273,7 @@
       request: `New request: ${b.client_name} · ${svc} · ${when}`,
       cancel: `Cancelled: ${b.client_name} · ${svc} · ${at}`,
       late: `Late cancel: ${b.client_name} · ${svc} · ${at} — less than ${win}h notice`,
+      expired: `Released: ${b.client_name} · ${at} — the deposit didn’t arrive`,
       move: `Moved: ${b.client_name} · ${svc} → ${when}`
     }[kind];
     S.queue.push({ kind, text, id: b.id });
@@ -279,9 +283,9 @@
     }
     paintBadges();
     if (typeof navigator.vibrate === 'function' && (!navigator.userActivation || navigator.userActivation.hasBeenActive)) {
-      try { navigator.vibrate(kind === 'cancel' || kind === 'late' ? [40, 60, 40] : [25, 40, 25]); } catch (e) { /* not allowed */ }
+      try { navigator.vibrate(kind === 'cancel' || kind === 'late' || kind === 'expired' ? [40, 60, 40] : [25, 40, 25]); } catch (e) { /* not allowed */ }
     }
-    chime(kind === 'cancel' || kind === 'late');
+    chime(kind === 'cancel' || kind === 'late' || kind === 'expired');
     showBanner();
   }
 
@@ -292,7 +296,7 @@
     const n = S.queue.shift();
     const el = $('#cab-banner');
     el.className = `cab__banner cab__banner--${n.kind} is-on`;
-    el.innerHTML = `<button data-cab-b="${esc(n.id)}"><i>${icon(n.kind === 'cancel' || n.kind === 'late' ? '<path d="M6 6l12 12M18 6 6 18"/>' : n.kind === 'move' ? '<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/>' : '<path d="M12 5v14M5 12h14"/>')}</i><span>${esc(n.text)}</span></button>`;
+    el.innerHTML = `<button data-cab-b="${esc(n.id)}"><i>${icon(n.kind === 'cancel' || n.kind === 'late' || n.kind === 'expired' ? '<path d="M6 6l12 12M18 6 6 18"/>' : n.kind === 'move' ? '<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/>' : '<path d="M12 5v14M5 12h14"/>')}</i><span>${esc(n.text)}</span></button>`;
     setTimeout(() => {
       el.classList.remove('is-on');
       setTimeout(() => { bannerBusy = false; showBanner(); }, 400);
@@ -384,6 +388,8 @@
       else if (tab === 'clients') html = await clientsHTML();
       else if (tab === 'hours') html = await hoursHTML();
       else if (tab === 'studio') html = await studioHTML();
+      else if (tab === 'insights') html = await insightsHTML();
+      else if (tab === 'payments') html = await paymentsHTML();
       else if (tab === 'profile') html = await profileHTML();
       else if (tab === 'style') html = await styleHTML();
       else if (tab === 'services') html = await servicesHTML();
@@ -427,6 +433,7 @@
       </div>
       <div id="cab-push"></div>
       ${next ? nextClientHTML(next) : `<div class="card cab-next cab-next--none"><b>${live.length ? 'All done for today' : 'No clients today'}</b><span>${free.length ? 'Free windows are below — tap one to book a client.' : 'Enjoy the quiet.'}</span></div>`}
+      ${depositsWaitingHTML()}
       ${S.pending.length ? `<button class="cab-req card" data-cab-tab="requests">${icon('<path d="M4 6.5h16v11H4z"/><path d="m4 7 8 6 8-6"/>')}<span><b>${S.pending.length} request${S.pending.length > 1 ? 's' : ''} waiting</b><small>Approve or decline</small></span>${K.I.chevR}</button>` : ''}
       ${tlHead('Timeline')}
       ${timelineHTML(0, list)}
@@ -440,8 +447,9 @@
     return `
       <section class="card cab-next" data-cab-b="${esc(b.id)}" role="button" tabindex="0">
         <div class="cab-next__top"><span class="eyebrow">${started ? 'In the chair now' : 'Next client'}</span><span class="cab-next__in">${started ? 'until ' + K.fmtClock(spot(b.end_at).min) : K.countdown(b.start_at)}</span></div>
-        <h2>${esc(b.client_name || 'Client')}${tagBadges(b.client_tags)}</h2>
+        <h2>${esc(b.client_name || 'Client')}${tagBadges(b.client_tags, b.client_no_shows)}</h2>
         <p class="num">${esc(b.service_name)} · ${timeRange(b)}</p>
+        ${b.deposit_status === 'pending' ? `<span class="bstat bstat--deposit">Deposit ${money(b.deposit)} not received</span>` : ''}
         ${b.last_formula ? `<p class="cab-last num">${icon(LASH)}<span>Last time: <b>${esc(formulaLine(b.last_formula))}</b></span></p>` : ''}
         ${b.client_note ? `<p class="cab-next__note">“${esc(b.client_note)}”</p>` : ''}
         ${b.status === 'pending' ? '<span class="bstat bstat--pending">Not confirmed yet</span>' : ''}
@@ -517,7 +525,7 @@
         ${offs.map(o => `<div class="tl__off" style="top:${y(Math.max(from, o.s))}px;height:${((Math.min(to, o.e) - Math.max(from, o.s)) * PX).toFixed(1)}px"><span>${esc(o.reason || 'Time off')}</span></div>`).join('')}
         ${items.map(({ b, s, e }) => `
           <button class="tl__b tl__b--${b.status}${e - s < 40 ? ' is-short' : ''}" data-cab-b="${esc(b.id)}" style="top:${y(s)}px;height:${Math.max(26, (e - s) * PX - 3).toFixed(1)}px">
-            <b>${esc(b.client_name || 'Client')}</b><span>${esc(b.service_name)}</span><small class="num">${timeRange(b)}</small>
+            <b>${esc(b.client_name || 'Client')}${b.deposit_status === 'pending' && isActive(b) ? ' <em class="tl__dep" title="Deposit not received">$</em>' : ''}</b><span>${esc(b.service_name)}</span><small class="num">${timeRange(b)}</small>
           </button>`).join('')}
         ${cx.map(c => { const { b, s, e } = c; return `
           <button class="tl__b tl__b--cx${e - s < 40 ? ' is-short' : ''}${c.side || c.lanes > 1 ? ' is-narrow' : ''}" data-cab-b="${esc(b.id)}" style="${cxPos(c)}top:${y(s)}px;height:${Math.max(26, (e - s) * PX - 3).toFixed(1)}px">
@@ -703,7 +711,7 @@
     return `<div class="list">${list.map(c => `
       <button class="row row--link cl-row" data-cab-client="${esc(c.id)}">
         <span class="cl-av">${esc(String(c.name || '?').trim().charAt(0).toUpperCase())}</span>
-        <span class="row__label">${esc(c.name)}${tagBadges(c.tags)}<span class="row__sub num">${esc(phoneText(c.phone))}${c.next_visit ? ' · next ' + esc(K.dayLabel(spot(c.next_visit).off, false)) : ''}</span></span>
+        <span class="row__label">${esc(c.name)}${tagBadges(c.tags, c.no_shows)}<span class="row__sub num">${esc(phoneText(c.phone))}${c.next_visit ? ' · next ' + esc(K.dayLabel(spot(c.next_visit).off, false)) : ''}</span></span>
         <span class="row__value num">${c.visits ? c.visits + '×' : 'new'}</span>
         <span class="row__chev">${K.I.chevR}</span>
       </button>`).join('')}</div>`;
@@ -730,11 +738,12 @@
       const h = r.history || [];
       S2.client = c;
       S2.formulas = r.formulas || [];
+      const noShows = h.filter(b => b.status === 'no_show').length;
       const done = h.filter(b => b.status === 'completed');
       const spent = done.reduce((s, b) => s + (+b.price || 0), 0);
       box.innerHTML = `
         <header class="ob__head"><span class="eyebrow">Client</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
-        <h2>${esc(c.name)}${tagBadges(c.tags)}</h2>
+        <h2>${esc(c.name)}${tagBadges(c.tags, noShows)}</h2>
         <p class="ob__sub num">${esc(phoneText(c.phone))}${c.email ? ' · ' + esc(c.email) : ''}${spent ? ' · ' + money(spent) + ' spent' : ''} <button class="cab-link cab-link--in" data-ct-edit>Edit</button></p>
         <div class="ob__actions">
           <a class="btn btn--soft" href="${esc(telHref(c.phone))}">${K.I.phone}Call</a>
@@ -747,6 +756,7 @@
           <div class="${h.some(b => b.late_cancel) ? 'is-bad' : ''}"><b class="num">${h.filter(b => b.late_cancel).length}</b><small>Late cancels</small></div>
           <div class="${h.some(b => b.status === 'no_show') ? 'is-bad' : ''}"><b class="num">${h.filter(b => b.status === 'no_show').length}</b><small>No-shows</small></div>
         </div>
+        ${noShows >= 2 ? `<div class="ob-flag">${icon('<path d="M12 8v5M12 16.5v.01"/><circle cx="12" cy="12" r="8.5"/>')}<span><b>${noShows} no-shows</b> — a deposit is asked on every booking she makes.</span></div>` : ''}
         <div id="crm-box">${crmHTML(c, S2.formulas)}</div>
         <label class="field"><span>Your notes</span><textarea id="cl-notes" rows="4" maxlength="2000" placeholder="Allergies, preferences, what she likes to talk about…">${esc(c.notes)}</textarea></label>
         <button class="btn btn--soft btn--block" data-cl-save="${esc(c.id)}">Save notes</button>
@@ -921,8 +931,8 @@
      STUDIO — she runs everything herself: profile, look, services,
      looks, texts, assistant answers. Photos go to Supabase Storage.
      ========================================================= */
-  const PARENT = { requests: 'today', hours: 'studio', services: 'studio', profile: 'studio', style: 'studio', looks: 'studio', texts: 'studio', faq: 'studio' };
-  const SUB_TITLE = { requests: 'Today', hours: 'Studio', services: 'Studio', profile: 'Studio', style: 'Studio', looks: 'Studio', texts: 'Studio', faq: 'Studio' };
+  const PARENT = { requests: 'today', hours: 'studio', services: 'studio', profile: 'studio', style: 'studio', looks: 'studio', texts: 'studio', faq: 'studio', payments: 'studio' };
+  const SUB_TITLE = { requests: 'Today', hours: 'Studio', services: 'Studio', profile: 'Studio', style: 'Studio', looks: 'Studio', texts: 'Studio', faq: 'Studio', payments: 'Studio' };
   const backHTML = tab => PARENT[tab] ? `<button class="cab-back cab-back--top" data-cab-tab="${PARENT[tab]}">${K.I.chevL}${SUB_TITLE[tab]}</button>` : '';
   const S2 = { profile: null, services: null, looks: null, edit: null };
 
@@ -1033,6 +1043,7 @@
       <div class="group-label">Booking</div>
       <div class="list">
         ${row('hours', '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>', 'Hours, time off & rules')}
+        ${row('payments', '<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10.5h18M7 15h4"/>', 'Payments & deposits', Object.values(st.payments || {}).some(v => String(v || '').trim()) ? 'On' : 'Off')}
         ${row('texts', '<path d="M6 4h12v16H6z"/><path d="M9 8h6M9 12h6M9 16h4"/>', 'Policies & texts')}
         ${row('faq', '<path d="M20.5 11.8a8.3 8.3 0 0 1-12.2 7.3L3.5 20.5l1.4-4.6a8.3 8.3 0 1 1 15.6-4.1z"/>', 'Assistant answers', (st.faq || []).length)}
       </div>
@@ -1461,7 +1472,11 @@
   const formulaLine = f => f ? [f.curl, f.lengths, [f.thickness, f.lash_type].filter(Boolean).join(' ')].filter(Boolean).join(' · ') : '';
   const LASH = '<path d="M3 10c2.5 3 5.5 4.5 9 4.5s6.5-1.5 9-4.5"/><path d="M5.5 12.6 4 15M9 14.2l-.8 2.8M12 14.5V17.5M15 14.2l.8 2.8M18.5 12.6 20 15"/>';
   const TAG_CLS = { VIP: 'vip', New: 'new', Allergy: 'warn', 'Patch test done': 'ok' };
-  const tagBadges = tags => (tags || []).length ? ` <span class="ctags">${tags.map(t => `<em class="ctag ctag--${TAG_CLS[t] || 'x'}">${esc(t === 'Patch test done' ? 'Patch ✓' : t)}</em>`).join('')}</span>` : '';
+  const tagBadges = (tags, noShows) => {
+    const list = (tags || []).map(t => `<em class="ctag ctag--${TAG_CLS[t] || 'x'}">${esc(t === 'Patch test done' ? 'Patch ✓' : t)}</em>`);
+    if (noShows >= 2) list.push(`<em class="ctag ctag--warn">${noShows} no-shows</em>`);
+    return list.length ? ` <span class="ctags">${list.join('')}</span>` : '';
+  };
 
   // an editor in a sheet closed without saving → its fresh uploads are removed
   document.addEventListener('sheet:closed', () => {
@@ -1655,8 +1670,197 @@
       return true;
     }
     if ((el = t.closest('[data-fm-save]'))) { saveFormula(el); return true; }
+    // deposits & payments, insights
+    if ((el = t.closest('[data-dep-set]'))) { setDeposit(el.dataset.depSet, el); return true; }
+    if ((el = t.closest('[data-pay-save]'))) { savePayments(el); return true; }
+    if ((el = t.closest('[data-ins-per]'))) { S.insPer = el.dataset.insPer; S.insSel = null; K.haptic(); refreshView(); return true; }
+    if ((el = t.closest('[data-ins-bar]'))) {
+      S.insSel = +el.dataset.insBar;
+      $$('[data-ins-bar]').forEach(x => x.classList.toggle('is-sel', x === el));
+      const cap = $('#ins-cap');
+      if (cap && S.ins) cap.innerHTML = insCaption(S.ins, S.insSel);
+      K.haptic(5);
+      return true;
+    }
     if ((el = t.closest('[data-fm-del]'))) { deleteFormula(el); return true; }
     return false;
+  }
+
+  /* ---------- Deposits: what she sees and does ---------- */
+  const whenAt = iso => `${K.dayLabel(spot(iso).off, false)} ${K.fmtClock(spot(iso).min)}`;
+  function obDepositHTML(b) {
+    if (!(+b.deposit > 0) || b.deposit_status === 'none') return '';
+    const live = isActive(b);
+    const sub = {
+      pending: b.deposit_due_at ? `Not received yet · auto-cancels ${whenAt(b.deposit_due_at)} if it doesn’t arrive` : 'Not received yet',
+      paid: `Received${b.deposit_paid_at ? ' ' + ago(b.deposit_paid_at) : ''}`,
+      waived: 'Not needed for this visit',
+      expired: 'Never arrived — the booking was released'
+    }[b.deposit_status] || '';
+    return `
+      <div class="card ob-dep ob-dep--${b.deposit_status}">
+        <div class="ob-dep__top"><span class="ob-dep__ic">${icon('<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10.5h18M7 15h4"/>')}</span>
+          <span><b>Deposit ${money(b.deposit)}</b><small>${esc(sub)}</small></span></div>
+        ${b.deposit_status === 'pending' && live ? `
+        <button class="btn btn--primary btn--block" data-dep-set="paid">${K.I.check}Mark deposit received</button>
+        <button class="cab-link" data-dep-set="waived">Not needed this time</button>` : ''}
+        ${(b.deposit_status === 'paid' || b.deposit_status === 'waived') && live ? '<button class="cab-link" data-dep-set="pending">Undo</button>' : ''}
+      </div>`;
+  }
+  async function setDeposit(status, btn) {
+    const b = ob.b;
+    if (!b) return;
+    await busyBtn(btn, async () => {
+      const r = await K.Backend.owner.setDeposit(b.id, status);
+      ob.b = Object.assign({}, b, r);
+      if (S.known) S.known.set(b.id, ob.b);
+      S.cache = {};
+      K.toast({ paid: 'Deposit received — her booking says Confirmed', waived: 'No deposit needed for this visit', pending: 'Back to waiting for the deposit' }[status], 'ok');
+      renderOb();
+      refreshView();
+    });
+  }
+  function depositsWaitingHTML() {
+    const list = [...(S.known || new Map()).values()]
+      .filter(b => isActive(b) && b.deposit_status === 'pending' && Date.parse(b.start_at) > Date.now())
+      .sort((a, z) => Date.parse(a.start_at) - Date.parse(z.start_at));
+    if (!list.length) return '';
+    return `
+      <div class="group-label">Awaiting deposit</div>
+      <div class="list">${list.slice(0, 6).map(b => `
+        <button class="row row--link" data-cab-b="${esc(b.id)}">
+          <span class="row__label">${esc(b.client_name || 'Client')}<span class="row__sub num">${esc(b.service_name)} · ${esc(whenLine(b))}</span></span>
+          <span class="bstat bstat--deposit num">${money(b.deposit)}</span>
+          <span class="row__chev">${K.I.chevR}</span>
+        </button>`).join('')}</div>`;
+  }
+
+  /* ---------- Payments & deposits ---------- */
+  const PAY_FIELDS = [
+    ['cashapp', 'Cash App $cashtag', '$yourstudio'],
+    ['zelle', 'Zelle — email or phone', 'you@studio.com'],
+    ['venmo', 'Venmo username', '@yourstudio'],
+    ['paypal', 'PayPal.me', 'paypal.me/yourstudio'],
+    ['square', 'Square payment link', 'https://square.link/u/…']
+  ];
+  async function paymentsHTML() {
+    const [p, sch] = await Promise.all([loadProfile(true), K.Backend.owner.schedule(S.studio.id)]);
+    S.sched = sch;
+    const pay = (p.settings || {}).payments || {};
+    const r = sch.rules || {};
+    const sel = (name, value, opts, fmt) => `<select class="cab-sel" data-rule="${name}">${opts.map(o => `<option value="${o}"${+o === +value ? ' selected' : ''}>${fmt(o)}</option>`).join('')}</select>`;
+    return `
+      ${backHTML('payments')}
+      <header class="cab-h"><h1>Payments & deposits</h1></header>
+      <p class="cab-muted">Clients send deposits straight to you — we never touch the money. Add at least one way to get paid and every service with a deposit asks for it after booking.</p>
+      <form class="bk-form" id="pay-form" onsubmit="return false">
+        ${PAY_FIELDS.map(([k, label, ph]) => `<label class="field"><span>${esc(label)}</span><input name="${k}" maxlength="${k === 'square' ? 300 : 80}" value="${esc(pay[k] || '')}" placeholder="${esc(ph)}" autocapitalize="off" spellcheck="false"${k === 'square' ? ' type="url" inputmode="url"' : k === 'zelle' ? ' inputmode="email"' : ''}></label>`).join('')}
+      </form>
+      <button class="btn btn--primary btn--block" data-pay-save>Save payment details</button>
+      <div class="group-label">Deposit rules</div>
+      <div class="list">
+        <div class="row"><span class="row__label">Time to pay<span class="row__sub">Not received by then → the booking is cancelled, the time freed and you get a notification</span></span>
+          ${sel('deposit_hold_hours', r.deposit_hold_hours, [0, 1, 2, 4, 6, 12, 24, 48], h => (h ? h + ' h' : 'No limit'))}</div>
+        <div class="row"><span class="row__label">After 2 no-shows<span class="row__sub">That client pays a deposit on every booking, even for services without one</span></span>
+          ${sel('noshow_deposit', r.noshow_deposit, [10, 20, 25, 30, 40, 50, 75, 100], v => money(v))}</div>
+      </div>
+      <p class="cab-muted">The deposit for each service is set in Services.</p>`;
+  }
+  async function savePayments(btn) {
+    const f = $('#pay-form');
+    const v = n => f.elements[n].value.trim();
+    const pay = {
+      cashapp: v('cashapp').replace(/^\$/, '').replace(/^https?:\/\/(www\.)?cash\.app\/\$?/i, '').replace(/[/?#].*$/, ''),
+      zelle: v('zelle'),
+      venmo: v('venmo').replace(/^@/, '').replace(/^https?:\/\/(www\.)?venmo\.com\/(u\/)?/i, '').replace(/[/?#].*$/, ''),
+      paypal: v('paypal').replace(/^(https?:\/\/)?(www\.)?paypal\.me\//i, '').replace(/[/?#].*$/, ''),
+      square: v('square')
+    };
+    if (pay.square && !/^https:\/\//i.test(pay.square)) { K.toast('The Square link should start with https://', 'x'); return; }
+    if (pay.cashapp && !/^[A-Za-z][\w-]{0,30}$/.test(pay.cashapp)) { K.toast('Check the $cashtag', 'x'); return; }
+    Object.keys(pay).forEach(k => { if (!pay[k]) delete pay[k]; });
+    if (pay.cashapp) pay.cashapp = '$' + pay.cashapp;
+    if (pay.venmo) pay.venmo = '@' + pay.venmo;
+    await busyBtn(btn, async () => {
+      S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { settings: { payments: Object.keys(pay).length ? pay : null } });
+      K.toast(Object.keys(pay).length ? 'Saved — deposits are on' : 'Saved — no online deposits', 'ok');
+      published();
+      refreshView();
+    });
+  }
+
+  /* ---------- INSIGHTS (from the real bookings) ---------- */
+  const MON3 = i => String(K.MONTHS[i]).slice(0, 3);
+  const insLabel = (iso, per, long) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return per === 'month' ? (long ? `${K.MONTHS[m - 1]} ${y}` : MON3(m - 1)) : `${long ? 'Week of ' : ''}${MON3(m - 1)} ${d}`;
+  };
+  function insCaption(d, i) {
+    const s = d.series[i];
+    if (!s) return '';
+    return `<b>${esc(insLabel(s.start, d.period, true))}</b><span class="num">${money(s.revenue)} earned${+s.expected ? ' · ' + money(s.expected) + ' booked ahead' : ''} · ${s.bookings} booking${s.bookings === 1 ? '' : 's'}${s.no_shows ? ' · ' + s.no_shows + ' no-show' + (s.no_shows > 1 ? 's' : '') : ''}</span>`;
+  }
+  async function insightsHTML() {
+    const per = S.insPer || 'week';
+    const d = await K.Backend.owner.insights(S.studio.id, per);
+    S.ins = d;
+    const t = d.totals;
+    const ser = d.series || [];
+    const sel = S.insSel != null ? S.insSel : ser.length - 1;
+    const max = Math.max(1, ...ser.map(s => +s.revenue + +s.expected));
+    const seen = t.completed + t.no_shows;
+    const nsRate = seen ? Math.round((t.no_shows / seen) * 100) : 0;
+    const top = d.top_services || [];
+    const topMax = Math.max(1, ...top.map(s => s.n));
+    const cl = d.clients || { new: 0, returning: 0 };
+    const clAll = cl.new + cl.returning;
+    const order = [1, 2, 3, 4, 5, 6, 0];
+    const wd = d.weekday || [];
+    const wdMax = Math.max(1, ...wd);
+    const kpi = (v, l, bad) => `<div class="${bad ? 'is-bad' : ''}"><b class="num">${v}</b><small>${l}</small></div>`;
+    return `
+      <header class="cab-h cab-h--row"><h1>Insights</h1>
+        <div class="segmented ins-seg" role="radiogroup" style="--n:2;--idx:${per === 'month' ? 1 : 0}"><i class="segmented__thumb"></i>
+          <button role="radio" data-ins-per="week" aria-checked="${per === 'week'}">Weeks</button><button role="radio" data-ins-per="month" aria-checked="${per === 'month'}">Months</button></div>
+      </header>
+      <p class="cab-muted">Last 12 ${per === 'month' ? 'months' : 'weeks'} · from your bookings</p>
+      <div class="ins-kpi card">
+        ${kpi(money(t.revenue), 'Revenue')}
+        ${kpi(t.bookings, 'Bookings')}
+        ${kpi(nsRate + '%', 'No-show rate', nsRate >= 10)}
+        ${kpi(t.late_cancels, 'Late cancels', t.late_cancels > 0)}
+      </div>
+      <div class="card ins-chart">
+        <div class="ins-cap" id="ins-cap">${insCaption(d, sel)}</div>
+        <div class="ins-bars" role="list">${ser.map((s, i) => `
+          <button class="ins-bar${i === sel ? ' is-sel' : ''}" data-ins-bar="${i}" role="listitem" aria-label="${esc(insLabel(s.start, per, true))}: ${money(s.revenue)}">
+            <span class="ins-bar__col"><i class="ins-bar__exp" style="height:${((+s.expected / max) * 100).toFixed(1)}%"></i><i class="ins-bar__rev" style="height:${((+s.revenue / max) * 100).toFixed(1)}%"></i></span>
+            <small>${i % (per === 'month' ? 2 : 3) === (ser.length - 1) % (per === 'month' ? 2 : 3) ? esc(insLabel(s.start, per)) : ''}</small>
+          </button>`).join('')}</div>
+        <div class="ins-legend"><span><i class="ins-dot"></i>Earned</span><span><i class="ins-dot ins-dot--exp"></i>Booked ahead</span></div>
+      </div>
+      <div class="group-label">Cancellations & no-shows</div>
+      <div class="list">
+        <div class="row"><span class="row__label">Cancelled by clients<span class="row__sub">${t.late_cancels} late (inside your free-cancellation window)</span></span><span class="row__value num">${t.cancels}</span></div>
+        <div class="row"><span class="row__label">Cancelled by you</span><span class="row__value num">${t.studio_cancels - t.deposit_expired}</span></div>
+        <div class="row"><span class="row__label">Released — deposit not received</span><span class="row__value num">${t.deposit_expired}</span></div>
+        <div class="row"><span class="row__label">No-shows<span class="row__sub">${nsRate}% of visits that were due</span></span><span class="row__value num">${t.no_shows}</span></div>
+        ${+t.deposits_paid ? `<div class="row"><span class="row__label">Deposits received</span><span class="row__value num">${money(t.deposits_paid)}</span></div>` : ''}
+      </div>
+      <div class="group-label">Top services</div>
+      <div class="list ins-top">${top.length ? top.map(s => `
+        <div class="row row--stack">
+          <div class="row__head"><span class="row__label">${esc(s.name)}</span><span class="row__value num">${s.n} · ${money(s.revenue)}</span></div>
+          <span class="ins-meter"><i style="width:${((s.n / topMax) * 100).toFixed(1)}%"></i></span>
+        </div>`).join('') : '<div class="row"><span class="row__label cab-muted">No bookings yet</span></div>'}</div>
+      <div class="group-label">Clients</div>
+      <div class="card ins-cl">
+        <div class="ins-split">${clAll ? `<i class="ins-split__new" style="flex:${cl.new}"></i><i class="ins-split__ret" style="flex:${cl.returning}"></i>` : '<i class="ins-split__none"></i>'}</div>
+        <div class="ins-legend"><span><i class="ins-dot"></i>New · <b class="num">${cl.new}</b></span><span><i class="ins-dot ins-dot--ret"></i>Returning · <b class="num">${cl.returning}</b></span></div>
+      </div>
+      <div class="group-label">Busiest days</div>
+      <div class="card ins-wd">${order.map(i => `
+        <div class="ins-wd__d"><span class="ins-wd__col"><i style="height:${(((wd[i] || 0) / wdMax) * 100).toFixed(1)}%"></i></span><b class="num">${wd[i] || 0}</b><small>${K.DAY_NAMES[i].slice(0, 3)}</small></div>`).join('')}</div>`;
   }
 
   function onStudioInput(t) {
@@ -1870,9 +2074,11 @@
       actions.push(`<button class="btn btn--primary" data-ob-set="completed">${K.I.check}Mark completed</button>`);
       actions.push(`<button class="btn btn--soft ob__danger" data-ob-set="no_show">No-show</button>`);
     }
+    // completed by the clock (2 h after the end) — she can still correct it
+    if (b.status === 'completed' && b.auto_completed) actions.push(`<button class="btn btn--soft ob__danger" data-ob-set="no_show">It was a no-show</button>`);
     box.innerHTML = `
-      <header class="ob__head"><span class="bstat bstat--${b.status}">${esc(statusLabel(b.status))}</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
-      <h2>${esc(b.client_name || 'Client')}${tagBadges(b.client_tags)}</h2>
+      <header class="ob__head"><span class="ob__stats"><span class="bstat bstat--${b.status}">${esc(statusLabel(b.status))}${b.status === 'completed' && b.auto_completed ? ' · auto' : ''}</span>${b.deposit_status === 'pending' && isActive(b) ? '<span class="bstat bstat--deposit">Deposit pending</span>' : ''}</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
+      <h2>${esc(b.client_name || 'Client')}${tagBadges(b.client_tags, b.client_no_shows)}</h2>
       <p class="ob__sub num">${esc(K.dayLabel(spot(b.start_at).off, true))} · ${timeRange(b)}${future && isActive(b) ? ` · <em>${K.countdown(b.start_at)}</em>` : ''}</p>
       ${ob.mode === 'cancel' ? `
       <div class="card mg__confirm">
@@ -1884,6 +2090,7 @@
           <button class="btn btn--danger" data-ob-cancel-yes${ob.busy ? ' disabled' : ''}>${ob.busy ? K.spinner() : b.status === 'pending' ? 'Decline' : 'Cancel it'}</button>
         </div>
       </div>` : actions.length ? `<div class="ob__grid">${actions.join('')}</div>` : ''}
+      ${obDepositHTML(b)}
       <div class="card bk-sum">
         <div class="bk-row"><span>Service</span><b>${esc(b.service_name)}</b></div>
         ${b.price != null ? `<div class="bk-row"><span>Price</span><b class="num">${money(b.price)}</b></div>` : ''}

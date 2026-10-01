@@ -2,7 +2,7 @@
 //
 // Two callers:
 //   1. the bookings trigger (pg_net) with header x-push-secret = PUSH_HOOK_SECRET
-//      body: { kind: 'new' | 'request' | 'cancel' | 'move', booking_id, old_start_at? }
+//      body: { kind: 'new' | 'request' | 'cancel' | 'move' | 'deposit_expired', booking_id, old_start_at? }
 //   2. the dashboard's "Send test notification" with the master's own JWT
 //      body: { master_id }
 // Subscriptions answering 404 / 410 are deleted.
@@ -84,6 +84,9 @@ Deno.serve(async req => {
         break;
       case 'move':
         message = { title: 'Rescheduled', body: `${name} → ${at}`, url, tag: `${bk.id}-move` };
+        break;
+      case 'deposit_expired':
+        message = { title: 'Spot released', body: `${name} · ${at} — the deposit didn’t arrive in time`, url, tag: `${bk.id}-cancel` };
         break;
       default:
         return json({ error: 'unknown kind' }, 400);
