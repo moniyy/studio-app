@@ -2,6 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <!-- Per-master install: before anything else, point the manifest at this
+       master's own file (start_url = ./?m=<slug>), so "Add to Home Screen" opens
+       the studio it was added from. No ?m → the last studio opened here → demo. -->
+  <script>
+    (function () {
+      var ok = /^[a-z0-9][a-z0-9_-]{0,60}$/, m = (new URLSearchParams(location.search).get('m') || '').trim().toLowerCase();
+      if (!ok.test(m)) { try { m = localStorage.getItem('studio-app:last') || ''; } catch (e) { m = ''; } }
+      if (!ok.test(m)) m = 'demo';
+      document.write('<link rel="manifest" href="./manifests/' + m + '.webmanifest">');
+    })();
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Studio App</title>
 
@@ -12,7 +23,7 @@
   <meta name="apple-mobile-web-app-title" content="Studio">
   <meta name="format-detection" content="telephone=no">
 
-  <link rel="manifest" href="./manifest.json">
+  <noscript><link rel="manifest" href="./manifests/demo.webmanifest"></noscript>
   <link rel="icon" type="image/png" href="./img/icon-192.png">
   <link rel="apple-touch-icon" href="./img/apple-touch-icon.png">
 

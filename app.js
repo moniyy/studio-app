@@ -13,8 +13,16 @@
         so saved theme / accent / text size never flash.
      --------------------------------------------------------- */
   const params = new URLSearchParams(location.search);
-  const rawSlug = (params.get('m') || 'demo').trim().toLowerCase();
-  const SLUG = /^[a-z0-9][a-z0-9_-]{0,60}$/.test(rawSlug) ? rawSlug : 'demo';
+  // ?m=slug → that studio; no ?m → the last studio opened on this device → demo
+  // (an installed app or an old bookmark without ?m still opens "her" studio)
+  const SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,60}$/;
+  const rawSlug = (params.get('m') || '').trim().toLowerCase()
+    || (() => { try { return localStorage.getItem('studio-app:last') || ''; } catch (e) { return ''; } })();
+  const SLUG = SLUG_RE.test(rawSlug) ? rawSlug : 'demo';
+  if (params.get('m') !== SLUG) {
+    params.set('m', SLUG);
+    try { history.replaceState(history.state, '', location.pathname + '?' + params.toString() + location.hash); } catch (e) { /* file:// */ }
+  }
   const KEY = 'studio-app:' + SLUG;
 
   /* Visual style: "soft" (original), "maison" (serif, champagne) or "noir"
@@ -3510,6 +3518,35 @@
   }
 
   /* ---------- Owner: real dashboard (cabinet.js) or the demo ---------- */
+  /* The master signed in on this device (in this app — an installed iPhone app
+     has its own storage): a switch at the top flips between her dashboard and
+     what clients see; the installed app opens straight into the dashboard. */
+  let cabOpen = false;
+  const ownerHere = () => isBuiltin() && !!store.get('ownerHere');
+  function setOwnerHere(on) {
+    if (on) store.set('ownerHere', true); else store.remove('ownerHere');
+    syncOwnerSwitch();
+  }
+  function syncOwnerSwitch() {
+    let el = $('#ownsw');
+    if (!el && ownerHere()) {
+      app.insertAdjacentHTML('beforeend', `
+        <div class="ownsw" id="ownsw" role="tablist" aria-label="View">
+          <i class="ownsw__thumb" aria-hidden="true"></i>
+          <button role="tab" data-ownsw="studio">Studio</button>
+          <button role="tab" data-ownsw="client">Client view</button>
+        </div>`);
+      el = $('#ownsw');
+    }
+    if (!el) return;
+    const on = ownerHere();
+    el.hidden = !on;
+    app.classList.toggle('has-ownsw', on);
+    el.classList.toggle('is-client', !cabOpen);
+    $$('[data-ownsw]', el).forEach(b => b.setAttribute('aria-selected', String((b.dataset.ownsw === 'studio') === cabOpen)));
+    requestAnimationFrame(() => Object.values(views).forEach(v => updateNav(v)));
+  }
+
   let cabinetP = null;
   function openCabinet(opts) {
     if (!isBuiltin()) { openOwner(opts); return; }
@@ -3531,6 +3568,8 @@
       tzParts, zonedMs, studioDate, studioSpot, dateKey, dayLabel, sized, safeUrl, ERR_COPY, errText, initials,
       maskPhone, phoneDigits, statusText, countdown, IS_IOS, reducedMQ, spinner, closeNotice,
       demo: () => { if (data.ownerDemo) openOwner(); else toast('No demo data for this studio', 'x'); },
+      setOwnerHere,
+      onCabinet: open => { cabOpen = open; syncOwnerSwitch(); },
       onDataChanged: () => { Object.keys(openCache).forEach(k => delete openCache[k]); refreshOpenings(); }
     };
   }
@@ -5182,6 +5221,12 @@
       if ((el = t.closest('[data-owner-exit]'))) { setOwnerMode(false); popOverlay(); return; }
       if ((el = t.closest('[data-owner-mode-exit]'))) { setOwnerMode(false); toast('Owner view off', 'ok'); return; }
       if ((el = t.closest('[data-owner-open]'))) { openCabinet(); return; }
+      if ((el = t.closest('[data-ownsw]'))) {
+        haptic();
+        if (el.dataset.ownsw === 'studio' && !cabOpen) openCabinet();
+        if (el.dataset.ownsw === 'client' && cabOpen && window.StudioCabinet) window.StudioCabinet.close();
+        return;
+      }
       if ((el = t.closest('[data-owner-looks]'))) { ownerAfter = () => go('gallery'); popOverlay(); return; }
       if ((el = t.closest('[data-fav]'))) {
         e.stopPropagation();
@@ -6709,8 +6754,10 @@
         try { history.replaceState(history.state, '', location.pathname + '?' + params.toString() + location.hash); } catch (e) { /* file:// */ }
       }
       setTimeout(() => openCabinet({ booking }), first ? 200 : 900);
-    }
-    else if (ownerMode) setOwnerMode(true);
+    } else if (ownerHere() && isStandalone()) {
+      setTimeout(() => openCabinet({ auto: true }), first ? 200 : 500);
+    } else if (ownerMode) setOwnerMode(true);
+    syncOwnerSwitch();
     if (LOOK_PARAM) setTimeout(openLookFromLink, 650);
     return first;
   }
@@ -6911,22 +6958,14 @@
     ];
     const touchIcon = abs(dir + 'apple-touch-icon.png');
 
-    const manifest = {
-      id: startUrl,
-      name: data.name,
-      short_name: data.name.length > 14 ? data.name.split(/\s+/).slice(0, 2).join(' ') : data.name,
-      description: data.tagline || '',
-      start_url: startUrl,
-      scope: abs('./'),
-      display: 'standalone',
-      orientation: 'portrait',
-      background_color: THEME_BG.light,
-      theme_color: data.brandAccent,
-      icons
-    };
-
+    const manifest = { short_name: data.name.length > 14 ? data.name.split(/\s+/).slice(0, 2).join(' ') : data.name };
+    void startUrl;
+    void icons;
+    // a studio without its own manifests/<slug>.webmanifest (made by tools/make-manifest.js):
+    // drop the broken link — iOS then installs the current address (?m=<slug>) with the title below
     const link = $('link[rel="manifest"]');
-    if (link) link.href = URL.createObjectURL(new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' }));
+    if (link && !/\/manifests\//.test(link.href)) link.remove();
+    else if (link) fetch(link.href, { method: 'HEAD' }).then(r => { if (!r.ok) link.remove(); }).catch(() => { /* offline */ });
 
     const touch = $('link[rel="apple-touch-icon"]');
     if (touch) touch.href = touchIcon;
@@ -7010,6 +7049,7 @@
       return;
     }
     cacheForOffline();
+    try { localStorage.setItem('studio-app:last', SLUG); } catch (e) { /* private mode */ }
 
     brandAccent = data.brandAccent;
     store.set('brand', brandAccent);

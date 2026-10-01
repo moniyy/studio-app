@@ -65,6 +65,8 @@
     K = kit;
     if (root) { if (opts && opts.booking && S.studio) openBooking(opts.booking); return; }
     S.target = (opts && opts.booking) || null;
+    S.auto = !!(opts && opts.auto);
+    K.onCabinet && K.onCabinet(true);
     K.closeNotice && K.closeNotice();
     if (!(opts && opts.quiet)) K.haptic();
     root = document.createElement('div');
@@ -98,6 +100,7 @@
     try {
       S.session = await K.Backend.auth.session();
       if (S.session) await enter();
+      else if (S.auto) { K.setOwnerHere && K.setOwnerHere(false); close(); } // signed out meanwhile: stay in the client app
       else renderAuth();
     } catch (e) {
       renderAuth(err(e));
@@ -106,6 +109,7 @@
 
   function close(fromHistory) {
     if (!root) return;
+    K.onCabinet && K.onCabinet(false);
     stopLive();
     document.removeEventListener('click', onClick);
     document.removeEventListener('input', onInput);
@@ -176,6 +180,8 @@
       renderAuth(err(e));
       return;
     }
+    K.setOwnerHere && K.setOwnerHere(!!S.studio);
+    if (!S.studio && S.auto) { close(); return; }
     if (!S.studio) {
       $('#cab-main').innerHTML = `
         <div class="cab-auth">
@@ -1614,6 +1620,7 @@
     stopLive();
     S.session = null;
     S.studio = null;
+    K.setOwnerHere && K.setOwnerHere(false);
     S.known = null;
     K.toast('Signed out', 'ok');
     renderAuth();

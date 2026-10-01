@@ -28,13 +28,16 @@
    - `"bookingMode"` — куда ведёт кнопка в конце записи: `"link"` (открывает `bookingUrl`), `"instagram"` (директ + готовое
      сообщение в буфере), `"sms"` (SMS на `phone`), `"demo"` (сразу экран «Request sent»).
    - `"monogram"`, `"eyebrow"` (необязательно) — инициалы-логотип и строка над именем на главной.
-3. `git add . && git commit -m "Add bella-nails" && git push`
-4. Ссылка для клиенток: `https://moniyy.github.io/studio-app/?m=<slug>`
+3. Файл установки на экран «Домой»: `node tools/make-manifest.js bella-nails` → `manifests/bella-nails.webmanifest`
+   (иначе иконка на iPhone откроет последнего открытого мастера или demo).
+4. `git add . && git commit -m "Add bella-nails" && git push`
+5. Ссылка для клиенток: `https://moniyy.github.io/studio-app/?m=<slug>`
 
 ### Вариант B — своя запись (builtin, нужна Supabase)
 
 1. Откройте `supabase/new-master.sql`, поменяйте название, email мастера, часовой пояс, услуги и часы.
 2. Supabase → **SQL Editor** → вставьте → **Run**. Мастер создан, услуги и часы — в базе.
+   Файл установки на экран «Домой»: `node tools/make-manifest.js bella-nails` (название и стиль берутся из базы через `config.js`).
 3. Фото и тексты: либо в поле `settings` того же SQL, либо в `masters/<slug>.json` с полем `"bookingEngine": "builtin"`
    (тогда из JSON берутся фото, галерея, отзывы, политики, а услуги, часы и правила — из базы).
 4. Аккаунт мастера: Supabase → **Authentication → Users → Add user → Create new user** — email мастера,
@@ -47,6 +50,9 @@
 6. Дайте мастеру ссылку `https://moniyy.github.io/studio-app/?m=<slug>&owner=1` и временный пароль.
    Она входит (email + пароль) и сразу меняет пароль: значок аккаунта вверху → **Change password**.
    Дальше часы, отпуск, правила и записи — в кабинете.
+   **На iPhone:** у приложения на экране «Домой» своё хранилище, отдельное от Safari — поэтому вход нужно сделать
+   ещё раз уже **внутри установленного приложения** (долгое нажатие на монограмму / аватар → вход). После этого
+   приложение сразу открывается в кабинете, а сверху переключатель **Studio · Client view** — посмотреть, как видят клиентки.
 7. Услуги потом удобно менять в Supabase → **Table Editor** → `services`.
 
 Студия привязывается только по `owner_id`: регистрация с чужим email студию не отдаёт.
@@ -166,7 +172,7 @@ node tools/make-icon.js --master bella-nails # для мастера → img/bel
 - `masters/*.json` — данные мастеров
 - `supabase/` — миграции, тестовые данные, шаблон нового мастера
 - `tools/` — генерация иконок и тестовых данных
-- `manifest.json`, `sw.js`, `img/` — установка на главный экран и офлайн
+- `manifests/<slug>.webmanifest`, `sw.js`, `img/` — установка на главный экран (у каждого мастера свой файл) и офлайн
 
 ## Локальный запуск
 
