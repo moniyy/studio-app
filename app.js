@@ -2067,6 +2067,33 @@
     }));
   }
 
+  /* The master saved something in her dashboard: fetch the studio again and
+     redraw the client app (what clients see) — chat and position stay */
+  let reloadTimer = 0;
+  function reloadStudio() {
+    clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(async () => {
+      if (!isBuiltin()) return;
+      try {
+        const prof = await Backend.profile(SLUG);
+        if (!prof || !prof.master) return;
+        let base = null;
+        try { const r = await fetch('./masters/' + SLUG + '.json', { cache: 'no-cache' }); if (r.ok) base = await r.json(); } catch (e) { /* none */ }
+        data = normalizeData(mergeProfile(base, prof));
+        brandAccent = data.brandAccent;
+        if (data.style !== STYLE && !readStyle('styleUser')) adoptStyle(data.style);
+        if (data.defaultAccent && !store.get('accentPicked') && accentList().some(a => a.id === data.defaultAccent)) settings.accent = data.defaultAccent;
+        document.title = data.name;
+        applyMotion();
+        applySettings();
+        Object.keys(openCache).forEach(k => delete openCache[k]);
+        rerenderForStyle();
+        refreshOpenings();
+        setupPWA();
+      } catch (e) { /* offline: next time */ }
+    }, 300);
+  }
+
   function rerenderForStyle() {
     const tabs = ['home', 'services', 'gallery', 'more'];
     const tops = {};
@@ -2172,6 +2199,7 @@
     /* Runs from the history stack (back button, drag, ×, scrim) */
     function closeUI() {
       isOpen = false;
+      document.dispatchEvent(new Event('sheet:closed'));
       const v = closeV;
       closeV = 0;
       const dist = Math.max(0, closedOff() - offset);
@@ -2477,7 +2505,7 @@
 
   // "Everything Aria offers — prices from $45." (the lowest numeric price)
   function pricesFrom() {
-    const nums = data.services.map(x => +x.price).filter(n => isFinite(n) && n > 0);
+    const nums = data.services.map(x => +String(x.price).replace(/[^\d.]/g, '')).filter(n => isFinite(n) && n > 0);
     return `Everything ${firstName()} offers${nums.length ? ' — prices from ' + price(Math.min(...nums)) : ''}.`;
   }
 
@@ -2931,9 +2959,13 @@
     too_late: 'This appointment has already started',
     not_found: 'Booking not found',
     not_bookable: 'Online booking is paused right now',
-    network: 'No connection — try again',
+    network: 'Connection problem — try again',
+    timeout: 'Connection problem — try again',
     outside_hours: 'That time is outside your booking hours',
-    bad_code: 'That code didn’t work — check the email or send a new one'
+    bad_code: 'That code didn’t work — check the email or send a new one',
+    phone_taken: 'Another client already has this phone',
+    too_big: 'That’s too much text or too large a photo',
+    forbidden: 'This account can’t change that studio'
   };
   const errText = e => ERR_COPY[e && e.code] || 'Something went wrong — try again';
 
@@ -2954,9 +2986,17 @@
     if (m.booking_engine === 'builtin') {
       out.services = (prof.services || []).map(s => ({
         id: s.id, category: s.category, title: s.name, description: s.description,
-        includes: s.includes || [], price: +s.price, deposit: +s.deposit || 0,
-        photo: s.photo || '', duration: fmtDuration(+s.duration_min), buffer: +s.buffer_min || 0
+        includes: s.includes || [], price: s.price_from ? 'from ' + price(+s.price) : +s.price, deposit: +s.deposit || 0,
+        photo: s.photo || '', duration: fmtDuration(+s.duration_min), buffer: +s.buffer_min || 0,
+        fillWeeks: +s.fill_weeks || 0
       }));
+      // her portfolio from the dashboard (Looks) replaces any gallery in settings
+      if ((prof.looks || []).length) {
+        out.gallery = prof.looks.map(l => ({
+          id: l.id, title: l.title, tag: l.tag || '', serviceId: l.service_id || '', photo: l.photo,
+          before: l.before_photo || '', isNew: !!l.is_new, popular: !!l.popular
+        }));
+      }
       const byDay = {};
       (prof.hours || []).forEach(h => { (byDay[h.weekday] = byDay[h.weekday] || []).push(`${h.start}-${h.end}`); });
       out.hours = {};
@@ -3181,33 +3221,53 @@
     };
     return {
       summary: `<b class="num">${s ? esc(price(s.price)) : ''}</b><span>Pay at the studio</span>`,
-      action: `<button class="btn btn--primary" data-bk-confirm${bkx.agree && !bkx.busy ? '' : ' disabled'}>${bkx.busy ? spinner() : 'Confirm'}</button>`
+      action: `<button class="btn btn--primary${bkx.agree ? '' : ' is-off'}" data-bk-confirm${bkx.busy ? ' disabled aria-busy="true"' : ''}${bkx.agree ? '' : ' aria-disabled="true"'}>${bkx.busy ? spinner() : 'Confirm'}</button>`
     };
   }
   const spinner = () => '<i class="spin" aria-hidden="true"></i><span class="sr">Working…</span>';
+
+  // One id per choice (service + time + phone): a retry — after a timeout or a
+  // double tap — sends the same id, and the server answers with the same booking
+  function requestIdFor(s, d) {
+    const key = [s.id, bk.iso, phoneDigits(d.phone)].join('|');
+    if (bkx.reqKey !== key) {
+      bkx.reqKey = key;
+      bkx.reqId = (crypto.randomUUID && crypto.randomUUID()) ||
+        'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => (Math.random() * 16 | 0).toString(16));
+    }
+    return bkx.reqId;
+  }
 
   async function confirmBooking() {
     const s = bkService();
     if (!s || !bk.iso || bkx.busy) return;
     const d = bkx.details;
-    bkx.busy = true;
+    bkx.busy = true; // set before anything async: a second tap is ignored
     renderBkFoot();
     haptic(10);
+    let done = false;
     try {
       const res = await Backend.createBooking(SLUG, {
-        serviceId: s.id, startAt: bk.iso, name: d.name.trim(), phone: d.phone, email: (d.email || '').trim(), note: (d.note || '').trim()
+        serviceId: s.id, startAt: bk.iso, name: d.name.trim(), phone: d.phone, email: (d.email || '').trim(),
+        note: (d.note || '').trim(), requestId: requestIdFor(s, d)
       });
       if (d.remember) store.set(ME_KEY, { name: d.name.trim(), phone: d.phone, email: (d.email || '').trim(), remember: true });
       else store.remove(ME_KEY);
       saveMine(res);
       delete openCache[s.id];
+      done = true;
       bkx.busy = false;
+      bkx.reqKey = null;
       showBookedDone(res);
       syncMyBookingCard();
       refreshOpenings();
     } catch (e) {
       bkx.busy = false;
       slotTakenOrToast(e);
+    } finally {
+      // whatever happened, the button never stays stuck
+      bkx.busy = false;
+      if (!done && Sheet.isOpen() && $('#bk-foot')) renderBkFoot();
     }
   }
 
@@ -3216,17 +3276,22 @@
     bkx.busy = true;
     renderBkFoot();
     haptic(10);
+    let done = false;
     try {
       const res = await Backend.rescheduleBooking(bkx.token, bk.iso);
       saveMine(res, { mine: true });
       Object.keys(openCache).forEach(k => delete openCache[k]);
       bkx.busy = false;
+      done = true;
       showBookedDone(res, { moved: true });
       syncMyBookingCard();
       refreshOpenings();
     } catch (e) {
       bkx.busy = false;
       slotTakenOrToast(e);
+    } finally {
+      bkx.busy = false;
+      if (!done && Sheet.isOpen() && $('#bk-foot')) renderBkFoot();
     }
   }
 
@@ -3564,13 +3629,16 @@
   function cabinetKit() {
     return {
       $, $$, esc, I, svg, art, Sheet, toast, haptic, springIn, popIn, G, ensure, pushOverlay, popOverlay,
-      data, SLUG, store, Backend, price, fmtClock, fmtTime, fmtDuration, MONTHS, DAY_NAMES, DAY_SHORT, DAY_KEYS,
+      get data() { return data; }, SLUG, store, Backend, price, fmtClock, fmtTime, fmtDuration, MONTHS, DAY_NAMES, DAY_SHORT, DAY_KEYS,
       tzParts, zonedMs, studioDate, studioSpot, dateKey, dayLabel, sized, safeUrl, ERR_COPY, errText, initials,
       maskPhone, phoneDigits, statusText, countdown, IS_IOS, reducedMQ, spinner, closeNotice,
       demo: () => { if (data.ownerDemo) openOwner(); else toast('No demo data for this studio', 'x'); },
       setOwnerHere,
       onCabinet: open => { cabOpen = open; syncOwnerSwitch(); },
-      onDataChanged: () => { Object.keys(openCache).forEach(k => delete openCache[k]); refreshOpenings(); }
+      onDataChanged: () => { Object.keys(openCache).forEach(k => delete openCache[k]); refreshOpenings(); },
+      reloadStudio,
+      accentsFor: st => (st === 'maison' ? ACCENTS_MAISON : st === 'noir' ? ACCENTS_NOIR : ACCENTS_SOFT).map(a => ({ id: a.id, name: a.name, color: accentFor(a) })),
+      photoSrc, svcKind
     };
   }
 
@@ -5209,7 +5277,19 @@
         return;
       }
       if ((el = t.closest('[data-bk-retry]'))) { bkx.loadErr = null; bk.cache = null; renderBkTime(); return; }
-      if ((el = t.closest('[data-bk-confirm]'))) { if (!el.disabled) confirmBooking(); return; }
+      if ((el = t.closest('[data-bk-confirm]'))) {
+        if (el.disabled || bkx.busy) return;
+        if (!bkx.agree) {
+          // not silent: show what's missing
+          haptic(20);
+          toast('Tick “I agree” first', 'x');
+          const tick = $('.tick--agree', Sheet.el());
+          if (tick) { tick.scrollIntoView({ block: 'center', behavior: reducedMQ.matches ? 'auto' : 'smooth' }); tick.classList.remove('is-nudge'); void tick.offsetWidth; tick.classList.add('is-nudge'); }
+          return;
+        }
+        confirmBooking();
+        return;
+      }
       if ((el = t.closest('[data-bk-move]'))) { if (!el.disabled) moveBooking(); return; }
       if ((el = t.closest('[data-bk-step]'))) { if (!el.disabled) goStep(+el.dataset.bkStep, true); return; }
       if ((el = t.closest('[data-bk-back]'))) { goStep(bk.step - 1, true); return; }
@@ -5335,7 +5415,7 @@
       if ((el = t.closest('.segmented[data-seg="style"] button'))) { setStyle(el.dataset.value); return; }
       if ((el = t.closest('.segmented[data-seg="theme"] button'))) { setThemeAnimated(el.dataset.value, e.clientX || innerWidth / 2, e.clientY || innerHeight / 2); return; }
       if ((el = t.closest('.segmented button'))) { setSetting(el.parentElement.dataset.seg, el.dataset.value); return; }
-      if ((el = t.closest('[data-accent]'))) { setSetting('accent', el.dataset.accent); popIn(el, { from: 0.8 }); return; }
+      if ((el = t.closest('[data-accent]'))) { store.set('accentPicked', true); setSetting('accent', el.dataset.accent); popIn(el, { from: 0.8 }); return; }
       if ((el = t.closest('#reminders'))) {
         setSetting('reminders', !settings.reminders);
         haptic();
@@ -7054,6 +7134,7 @@
     brandAccent = data.brandAccent;
     store.set('brand', brandAccent);
     adoptStyle(readStyle('styleUser') || data.style);
+    if (data.defaultAccent && !store.get('accentPicked') && accentList().some(a => a.id === data.defaultAccent)) settings.accent = data.defaultAccent;
     store.set('style', STYLE);
     applyMotion();
     applySettings();

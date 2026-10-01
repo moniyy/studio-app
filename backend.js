@@ -13,6 +13,7 @@
   const configured = /^https?:\/\//.test(cfg.supabaseUrl || '') && !!cfg.supabaseAnonKey &&
     !/YOUR-/i.test(String(cfg.supabaseUrl) + cfg.supabaseAnonKey);
   const SDK = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js';
+  const MEDIA_BUCKET = 'studio-media';
 
   /* Errors carry a short code the UI can translate: slot_taken, invalid_phone,
      network, not_found, forbidden, … (the RPCs raise these as messages) */
@@ -21,11 +22,13 @@
   }
   const KNOWN = ['slot_taken', 'invalid_phone', 'invalid_email', 'invalid_name', 'too_many', 'not_found',
     'not_active', 'too_late', 'not_bookable', 'service_not_found', 'outside_hours', 'bad_status', 'forbidden',
-    'hours_overlap', 'hours_invalid'];
+    'hours_overlap', 'hours_invalid', 'phone_taken', 'too_big', 'timeout'];
+  const TIMEOUT = 15000;
   function toError(e) {
     if (e instanceof BackendError) return e;
     const msg = String((e && (e.message || e.msg || e.error_description)) || e || '');
     if (KNOWN.includes(msg)) return new BackendError(msg);
+    if (e && e.name === 'AbortError') return new BackendError('timeout', msg);
     if (/fetch|network|load failed|NetworkError|timed? ?out/i.test(msg) || (e && e.name === 'TypeError')) return new BackendError('network', msg);
     if (e && (e.code === '42501' || /permission denied|JWT/i.test(msg))) return new BackendError('forbidden', msg);
     return new BackendError('unknown', msg);
@@ -44,42 +47,77 @@
     });
   }
 
+  // A request that hangs (lost network, a frozen tab woken on iOS…) becomes a clear error
+  function withTimeout(p, ms, onAbort) {
+    let t;
+    return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => { if (onAbort) onAbort(); rej(new BackendError('timeout', 'timed out')); }, ms || TIMEOUT); })])
+      .finally(() => clearTimeout(t));
+  }
+
   let clientP = null;
   function client() {
     if (!configured) return Promise.reject(new BackendError('not_configured'));
     if (!clientP) {
-      clientP = loadScript(SDK).then(() => window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
-        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'implicit', storageKey: 'studio-app-auth' },
+      clientP = withTimeout(loadScript(SDK), 20000).then(() => window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
+        auth: {
+          persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'implicit', storageKey: 'studio-app-auth',
+          // no cross-tab navigator.locks: a lock left behind by a suspended iOS tab
+          // used to block every later request silently (only a reload helped)
+          lock: (name, acquireTimeout, fn) => fn()
+        },
         realtime: { params: { eventsPerSecond: 5 } }
       })).catch(e => { clientP = null; throw toError(e); });
     }
     return clientP;
   }
 
+  // the master's calls (her session is attached by supabase-js)
   async function rpc(fn, args) {
     const sb = await client();
     let res;
-    try { res = await sb.rpc(fn, args || {}); } catch (e) { throw toError(e); }
+    try { res = await withTimeout(sb.rpc(fn, args || {})); } catch (e) { throw toError(e); }
     if (res.error) throw toError(res.error);
     return res.data;
+  }
+
+  // clients' calls: a plain fetch to the RPC — no SDK, no session, no locks,
+  // aborted after 15 s. Same answers as through supabase-js.
+  async function publicRpc(fn, args) {
+    if (!configured) throw new BackendError('not_configured');
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    let res;
+    try {
+      res = await withTimeout(fetch(`${cfg.supabaseUrl}/rest/v1/rpc/${fn}`, {
+        method: 'POST',
+        headers: { apikey: cfg.supabaseAnonKey, Authorization: 'Bearer ' + cfg.supabaseAnonKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify(args || {}),
+        signal: ctl ? ctl.signal : undefined
+      }), TIMEOUT, () => ctl && ctl.abort());
+    } catch (e) { throw toError(e); }
+    const text = await res.text();
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch (e) { body = text; }
+    if (!res.ok) throw toError(body && body.message ? body : { message: 'HTTP ' + res.status });
+    return body;
   }
   // set-returning RPCs come back as [value] or [{fn: value}] depending on the server
   const scalars = rows => (Array.isArray(rows) ? rows : []).map(x => (x && typeof x === 'object' && !Array.isArray(x) ? Object.values(x)[0] : x));
 
   /* ---------- public (clients) ---------- */
   const publicApi = {
-    profile: slug => rpc('get_public_profile', { p_slug: slug }),
+    profile: slug => publicRpc('get_public_profile', { p_slug: slug }),
     openings: (slug, serviceId, fromDate, days, ignore) =>
-      rpc('get_openings', { p_slug: slug, p_service_id: serviceId, p_from: fromDate, p_days: days, p_ignore: ignore || null }).then(scalars),
+      publicRpc('get_openings', { p_slug: slug, p_service_id: serviceId, p_from: fromDate, p_days: days, p_ignore: ignore || null }).then(scalars),
     slots: (slug, serviceId, date, ignore) =>
-      rpc('get_available_slots', { p_slug: slug, p_service_id: serviceId, p_date: date, p_ignore: ignore || null }).then(scalars),
-    createBooking: (slug, o) => rpc('create_booking', {
+      publicRpc('get_available_slots', { p_slug: slug, p_service_id: serviceId, p_date: date, p_ignore: ignore || null }).then(scalars),
+    // requestId: the same id on a retry returns the same booking (never two)
+    createBooking: (slug, o) => publicRpc('create_booking', {
       p_slug: slug, p_service_id: o.serviceId, p_start_at: o.startAt,
-      p_name: o.name, p_phone: o.phone, p_email: o.email || null, p_note: o.note || null
+      p_name: o.name, p_phone: o.phone, p_email: o.email || null, p_note: o.note || null, p_request_id: o.requestId || null
     }),
-    getBooking: token => rpc('get_booking', { p_token: token }),
-    cancelBooking: (token, reason) => rpc('cancel_booking', { p_token: token, p_reason: reason || null }),
-    rescheduleBooking: (token, startAt) => rpc('reschedule_booking', { p_token: token, p_new_start_at: startAt })
+    getBooking: token => publicRpc('get_booking', { p_token: token }),
+    cancelBooking: (token, reason) => publicRpc('cancel_booking', { p_token: token, p_reason: reason || null }),
+    rescheduleBooking: (token, startAt) => publicRpc('reschedule_booking', { p_token: token, p_new_start_at: startAt })
   };
 
   /* ---------- auth (the master) ---------- */
@@ -91,7 +129,7 @@
     },
     async signIn(email, password) {
       const sb = await client();
-      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      const { data, error } = await withTimeout(sb.auth.signInWithPassword({ email, password }));
       if (error) throw new BackendError(/invalid login|credentials/i.test(error.message) ? 'bad_login' : toError(error).code, error.message);
       return data.session;
     },
@@ -141,9 +179,44 @@
     pushDevices: mid => rpc('owner_push_devices', { p_master_id: mid }),
     async sendTestPush(mid) {
       const sb = await client();
-      const { data, error } = await sb.functions.invoke('send-push', { body: { master_id: mid } });
+      const { data, error } = await withTimeout(sb.functions.invoke('send-push', { body: { master_id: mid } }));
       if (error) throw toError(error);
       return data;
+    },
+
+    /* Studio: services, profile, looks, clients, lash map */
+    services: mid => rpc('owner_services', { p_master_id: mid }),
+    saveService: (mid, svc) => rpc('owner_save_service', { p_master_id: mid, p: svc }),
+    deleteService: id => rpc('owner_delete_service', { p_id: id }),
+    reorder: (mid, table, ids) => rpc('owner_reorder', { p_master_id: mid, p_table: table, p_ids: ids }),
+    profile: mid => rpc('owner_profile', { p_master_id: mid }),
+    saveProfile: (mid, p) => rpc('owner_save_profile', { p_master_id: mid, p }),
+    looks: mid => rpc('owner_looks', { p_master_id: mid }),
+    saveLook: (mid, look) => rpc('owner_save_look', { p_master_id: mid, p: look }),
+    deleteLook: id => rpc('owner_delete_look', { p_id: id }),
+    saveClient: (id, p) => rpc('owner_save_client', { p_client_id: id, p }),
+    saveFormula: (mid, f) => rpc('owner_save_formula', { p_master_id: mid, p: f }),
+    deleteFormula: id => rpc('owner_delete_formula', { p_id: id }),
+
+    /* Photos → Storage "studio-media/<master_id>/<folder>/<uuid>.<ext>" (public URLs) */
+    async upload(mid, folder, blob) {
+      const sb = await client();
+      const ext = blob.type === 'image/webp' ? 'webp' : blob.type === 'image/png' ? 'png' : 'jpg';
+      const id = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()) + Math.random().toString(36).slice(2);
+      const path = `${mid}/${folder}/${id}.${ext}`;
+      const bucket = sb.storage.from(MEDIA_BUCKET);
+      const { error } = await withTimeout(bucket.upload(path, blob, { contentType: blob.type, cacheControl: '31536000', upsert: false }), 60000);
+      if (error) throw toError(error);
+      return bucket.getPublicUrl(path).data.publicUrl;
+    },
+    // only our own uploads are removed; anything else (e.g. stock photos) is left alone
+    async removeMedia(url) {
+      const marker = `/storage/v1/object/public/${MEDIA_BUCKET}/`;
+      const i = String(url || '').indexOf(marker);
+      if (i < 0) return false;
+      const sb = await client();
+      const { error } = await withTimeout(sb.storage.from(MEDIA_BUCKET).remove([decodeURIComponent(url.slice(i + marker.length).split('?')[0])]));
+      return !error;
     },
 
     /* Realtime: calls onChange({type, record, old}) for this master's bookings.

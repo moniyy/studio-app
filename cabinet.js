@@ -2,8 +2,9 @@
    Studio App — the master's dashboard ("cabinet").
    Loaded on demand (?owner=1 or a long press on the monogram /
    avatar) for studios with the built-in booking engine.
-   Sign in by email (magic link or 6-digit code) → Today, Calendar,
-   Requests, Clients, Hours. New bookings and cancellations arrive
+   Sign in by email + password → Today (with Requests), Calendar,
+   Clients (CRM + lash map), Studio (profile, look, services, looks,
+   hours, texts, assistant answers). New bookings and cancellations arrive
    live (Supabase Realtime; polling when it isn't available).
    All UI helpers come from app.js through `kit`.
    ========================================================= */
@@ -24,9 +25,8 @@
   const TABS = [
     { id: 'today', label: 'Today', icon: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>' },
     { id: 'calendar', label: 'Calendar', icon: '<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>' },
-    { id: 'requests', label: 'Requests', icon: '<path d="M4 6.5h16v11H4z"/><path d="m4 7 8 6 8-6"/>' },
     { id: 'clients', label: 'Clients', icon: '<circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 19.5c.8-3.3 3.4-5 6.5-5s5.7 1.7 6.5 5"/><path d="M16 5.5a3.2 3.2 0 0 1 0 6.2M18.5 14.8c1.6.7 2.6 2.2 3 4.2"/>' },
-    { id: 'hours', label: 'Hours', icon: '<path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2"/><circle cx="12" cy="12" r="5"/>' }
+    { id: 'studio', label: 'Studio', icon: '<path d="M4 10.5 12 4l8 6.5V20H4z"/><path d="M9.5 20v-5.5h5V20"/>' }
   ];
   const ACTIVE = ['pending', 'confirmed'];
 
@@ -345,10 +345,11 @@
 
   function paintBadges() {
     if (!root) return;
-    Object.keys(S.badges).forEach(k => {
+    const shown = { today: S.badges.today + S.badges.requests, calendar: S.badges.calendar };
+    Object.keys(shown).forEach(k => {
       const b = $(`[data-badge="${k}"]`);
       if (!b) return;
-      const n = S.badges[k];
+      const n = shown[k];
       b.hidden = !n;
       b.textContent = n > 9 ? '9+' : String(n || '');
     });
@@ -361,7 +362,8 @@
     S.tab = tab;
     if (tab === 'today' || tab === 'calendar') S.badges[tab] = 0;
     paintBadges();
-    $$('.cab__tab').forEach(b => b.classList.toggle('is-active', b.dataset.cabTab === tab));
+    $$('.cab__tab').forEach(b => b.classList.toggle('is-active', b.dataset.cabTab === (PARENT[tab] || tab)));
+    if (S2.edit && !['service', 'look', 'formula'].includes(S2.edit.kind)) cleanupUnsaved();
     const main = $('#cab-main');
     main.innerHTML = `<div class="cab__view" data-view="${tab}"><div class="cab-load"><i class="spin"></i></div></div>`;
     main.scrollTop = 0;
@@ -381,6 +383,13 @@
       else if (tab === 'requests') html = requestsHTML();
       else if (tab === 'clients') html = await clientsHTML();
       else if (tab === 'hours') html = await hoursHTML();
+      else if (tab === 'studio') html = await studioHTML();
+      else if (tab === 'profile') html = await profileHTML();
+      else if (tab === 'style') html = await styleHTML();
+      else if (tab === 'services') html = await servicesHTML();
+      else if (tab === 'looks') html = await looksHTML();
+      else if (tab === 'texts') html = await textsHTML();
+      else if (tab === 'faq') html = await faqHTML();
       if (!root || S.tab !== tab) return;
       const keep = tab === 'clients' && document.activeElement && document.activeElement.id === 'cab-q';
       if (keep) { $('#cab-clients').innerHTML = clientsListHTML(); return; }
@@ -431,8 +440,9 @@
     return `
       <section class="card cab-next" data-cab-b="${esc(b.id)}" role="button" tabindex="0">
         <div class="cab-next__top"><span class="eyebrow">${started ? 'In the chair now' : 'Next client'}</span><span class="cab-next__in">${started ? 'until ' + K.fmtClock(spot(b.end_at).min) : K.countdown(b.start_at)}</span></div>
-        <h2>${esc(b.client_name || 'Client')}</h2>
+        <h2>${esc(b.client_name || 'Client')}${tagBadges(b.client_tags)}</h2>
         <p class="num">${esc(b.service_name)} · ${timeRange(b)}</p>
+        ${b.last_formula ? `<p class="cab-last num">${icon(LASH)}<span>Last time: <b>${esc(formulaLine(b.last_formula))}</b></span></p>` : ''}
         ${b.client_note ? `<p class="cab-next__note">“${esc(b.client_note)}”</p>` : ''}
         ${b.status === 'pending' ? '<span class="bstat bstat--pending">Not confirmed yet</span>' : ''}
         <div class="cab-next__actions">
@@ -594,6 +604,7 @@
     const list = S.pending.slice().sort((a, b) => Date.parse(a.start_at) - Date.parse(b.start_at));
     const auto = S.sched && S.sched.rules && S.sched.rules.auto_confirm;
     return `
+      ${backHTML('requests')}
       <header class="cab-h"><h1>Requests</h1></header>
       ${list.length ? `<p class="cab-muted">Swipe right to approve, left to decline.</p>
       <div class="cab-reqs">${list.map(b => `
@@ -609,7 +620,7 @@
             </div>
           </div>
         </div>`).join('')}</div>` : `
-      <div class="cab-empty">${K.art('bell')}<b>No requests</b><span>${auto ? 'Auto-confirm is on — new bookings are confirmed instantly. You can change it in Hours.' : 'New booking requests will show up here.'}</span></div>`}`;
+      <div class="cab-empty">${K.art('bell')}<b>No requests</b><span>${auto ? 'Auto-confirm is on — new bookings are confirmed instantly. You can change it in Studio → Hours.' : 'New booking requests will show up here.'}</span></div>`}`;
   }
 
   async function decide(id, yes) {
@@ -683,7 +694,7 @@
     S.clients = await K.Backend.owner.clients(S.studio.id, S.q);
     return `
       <header class="cab-h"><h1>Clients</h1></header>
-      <label class="search">${K.I.search}<input id="cab-q" type="search" placeholder="Name, phone or email" value="${esc(S.q)}" autocomplete="off" enterkeyhint="search"></label>
+      <label class="search">${K.I.search}<input id="cab-q" type="search" placeholder="Name, phone, email or tag" value="${esc(S.q)}" autocomplete="off" enterkeyhint="search"></label>
       <div id="cab-clients">${clientsListHTML()}</div>`;
   }
   function clientsListHTML() {
@@ -692,7 +703,7 @@
     return `<div class="list">${list.map(c => `
       <button class="row row--link cl-row" data-cab-client="${esc(c.id)}">
         <span class="cl-av">${esc(String(c.name || '?').trim().charAt(0).toUpperCase())}</span>
-        <span class="row__label">${esc(c.name)}<span class="row__sub num">${esc(phoneText(c.phone))}${c.next_visit ? ' · next ' + esc(K.dayLabel(spot(c.next_visit).off, false)) : ''}</span></span>
+        <span class="row__label">${esc(c.name)}${tagBadges(c.tags)}<span class="row__sub num">${esc(phoneText(c.phone))}${c.next_visit ? ' · next ' + esc(K.dayLabel(spot(c.next_visit).off, false)) : ''}</span></span>
         <span class="row__value num">${c.visits ? c.visits + '×' : 'new'}</span>
         <span class="row__chev">${K.I.chevR}</span>
       </button>`).join('')}</div>`;
@@ -717,12 +728,14 @@
       if (!box || !r) return;
       const c = r.client;
       const h = r.history || [];
+      S2.client = c;
+      S2.formulas = r.formulas || [];
       const done = h.filter(b => b.status === 'completed');
       const spent = done.reduce((s, b) => s + (+b.price || 0), 0);
       box.innerHTML = `
         <header class="ob__head"><span class="eyebrow">Client</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
-        <h2>${esc(c.name)}</h2>
-        <p class="ob__sub num">${esc(phoneText(c.phone))}${c.email ? ' · ' + esc(c.email) : ''}${spent ? ' · ' + money(spent) + ' spent' : ''}</p>
+        <h2>${esc(c.name)}${tagBadges(c.tags)}</h2>
+        <p class="ob__sub num">${esc(phoneText(c.phone))}${c.email ? ' · ' + esc(c.email) : ''}${spent ? ' · ' + money(spent) + ' spent' : ''} <button class="cab-link cab-link--in" data-ct-edit>Edit</button></p>
         <div class="ob__actions">
           <a class="btn btn--soft" href="${esc(telHref(c.phone))}">${K.I.phone}Call</a>
           <a class="btn btn--soft" href="${esc(smsHref(c.phone))}">${icon('<path d="M20.5 11.8a8.3 8.3 0 0 1-12.2 7.3L3.5 20.5l1.4-4.6a8.3 8.3 0 1 1 15.6-4.1z"/>')}Text</a>
@@ -734,7 +747,8 @@
           <div class="${h.some(b => b.late_cancel) ? 'is-bad' : ''}"><b class="num">${h.filter(b => b.late_cancel).length}</b><small>Late cancels</small></div>
           <div class="${h.some(b => b.status === 'no_show') ? 'is-bad' : ''}"><b class="num">${h.filter(b => b.status === 'no_show').length}</b><small>No-shows</small></div>
         </div>
-        <label class="field"><span>Your notes</span><textarea id="cl-notes" rows="4" maxlength="2000" placeholder="Lash map, allergies, preferences…">${esc(c.notes)}</textarea></label>
+        <div id="crm-box">${crmHTML(c, S2.formulas)}</div>
+        <label class="field"><span>Your notes</span><textarea id="cl-notes" rows="4" maxlength="2000" placeholder="Allergies, preferences, what she likes to talk about…">${esc(c.notes)}</textarea></label>
         <button class="btn btn--soft btn--block" data-cl-save="${esc(c.id)}">Save notes</button>
         <div class="group-label">History</div>
         <div class="list">${h.length ? h.map(b => `
@@ -749,7 +763,7 @@
   async function saveNotes(id) {
     const v = (K.$('#cl-notes', K.Sheet.el()) || {}).value || '';
     try {
-      await K.Backend.owner.setNotes(id, v);
+      await K.Backend.owner.saveClient(id, { notes: v });
       K.haptic();
       K.toast('Notes saved', 'ok');
       const c = (S.clients || []).find(x => x.id === id);
@@ -769,7 +783,8 @@
     const sel = (name, value, opts, fmt) => `<select class="cab-sel" data-rule="${name}">${opts.map(o => `<option value="${o}"${+o === +value ? ' selected' : ''}>${fmt(o)}</option>`).join('')}</select>`;
     const hrsFmt = h => (h === 0 ? 'None' : h < 24 ? h + ' h' : h / 24 + (h === 24 ? ' day' : ' days'));
     return `
-      <header class="cab-h"><h1>Hours</h1></header>
+      ${backHTML('hours')}
+      <header class="cab-h"><h1>Hours & rules</h1></header>
       <div class="group-label">Working hours</div>
       <div class="list hrs">
         ${order.map(d => {
@@ -900,6 +915,762 @@
       K.toast('Saved', 'ok');
       K.onDataChanged();
     } catch (e) { K.toast(err(e), 'x'); refreshView(); }
+  }
+
+  /* =========================================================
+     STUDIO — she runs everything herself: profile, look, services,
+     looks, texts, assistant answers. Photos go to Supabase Storage.
+     ========================================================= */
+  const PARENT = { requests: 'today', hours: 'studio', services: 'studio', profile: 'studio', style: 'studio', looks: 'studio', texts: 'studio', faq: 'studio' };
+  const SUB_TITLE = { requests: 'Today', hours: 'Studio', services: 'Studio', profile: 'Studio', style: 'Studio', looks: 'Studio', texts: 'Studio', faq: 'Studio' };
+  const backHTML = tab => PARENT[tab] ? `<button class="cab-back cab-back--top" data-cab-tab="${PARENT[tab]}">${K.I.chevL}${SUB_TITLE[tab]}</button>` : '';
+  const S2 = { profile: null, services: null, looks: null, edit: null };
+
+  async function loadProfile(force) {
+    if (!S2.profile || force) S2.profile = await K.Backend.owner.profile(S.studio.id);
+    return S2.profile;
+  }
+  async function loadServices(force) {
+    if (!S2.services || force) S2.services = await K.Backend.owner.services(S.studio.id);
+    return S2.services;
+  }
+  async function loadLooks(force) {
+    if (!S2.looks || force) S2.looks = await K.Backend.owner.looks(S.studio.id);
+    return S2.looks;
+  }
+  // after any save: clients see it right away (the client app reloads the studio)
+  function published() { K.reloadStudio && K.reloadStudio(); K.onDataChanged && K.onDataChanged(); }
+
+  /* ---------- photos: pick → shrink to ~1600px WebP (JPEG where WebP can't be made) → upload ---------- */
+  const toBlob = (canvas, type, q) => new Promise(res => canvas.toBlob(b => res(b), type, q));
+  async function shrink(file) {
+    let src;
+    try { src = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) {
+      src = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
+    }
+    const w0 = src.width || src.naturalWidth;
+    const h0 = src.height || src.naturalHeight;
+    const k = Math.min(1, 1600 / Math.max(w0, h0));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(w0 * k);
+    canvas.height = Math.round(h0 * k);
+    canvas.getContext('2d').drawImage(src, 0, 0, canvas.width, canvas.height);
+    let blob = await toBlob(canvas, 'image/webp', 0.82);
+    if (!blob || blob.type !== 'image/webp') blob = await toBlob(canvas, 'image/jpeg', 0.85); // older Safari
+    return blob;
+  }
+  // must be called straight from a tap (opens the photo picker)
+  function pickPhoto(folder, onDone, onBusy) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    input.addEventListener('change', async () => {
+      const file = input.files && input.files[0];
+      input.remove();
+      if (!file) return;
+      if (!/^image\//.test(file.type) && !/\.(heic|heif|jpe?g|png|webp)$/i.test(file.name)) { K.toast('That isn’t a photo', 'x'); return; }
+      onBusy && onBusy(true);
+      try {
+        const blob = await shrink(file);
+        if (blob.size > 5 * 1024 * 1024) throw new Error('too_big');
+        const url = await K.Backend.owner.upload(S.studio.id, folder, blob);
+        onDone(url);
+      } catch (e) {
+        K.toast(e.message === 'too_big' ? 'That photo is too large' : 'Upload failed — ' + err(e).toLowerCase(), 'x');
+      } finally { onBusy && onBusy(false); }
+    }, { once: true });
+    input.click();
+  }
+  // a photo slot inside a form: preview + Upload / Change / Remove
+  function photoSlot(key, url, label, kind) {
+    return `
+      <div class="phf${url ? '' : ' is-empty'}" data-phf="${key}" data-kind="${kind || 'misc'}" data-label="${esc(label)}">
+        <span class="phf__img">${url ? `<img src="${esc(url)}" alt="">` : icon('<rect x="3.5" y="5" width="17" height="14" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="m20.5 16-5-5-8 8"/>')}</span>
+        <span class="phf__body"><b>${esc(label)}</b><small>${url ? 'Looks good' : 'From your camera roll — we shrink it for you'}</small></span>
+        <span class="phf__acts">
+          <button type="button" class="btn btn--soft btn--sm" data-phf-pick="${key}">${url ? 'Change' : 'Upload'}</button>
+          ${url ? `<button type="button" class="phf__del" data-phf-del="${key}" aria-label="Remove photo">${K.I.x}</button>` : ''}
+        </span>
+      </div>`;
+  }
+  // replace one slot after an upload / removal
+  function setSlot(slot, url) {
+    if (slot && slot.isConnected) slot.outerHTML = photoSlot(slot.dataset.phf, url, slot.dataset.label, slot.dataset.kind);
+  }
+  // uploaded but never saved → removed when the editor closes unsaved
+  function trackUpload(url) { (S2.edit && (S2.edit.__new = S2.edit.__new || [])).push(url); }
+  async function cleanupUnsaved() {
+    const e = S2.edit;
+    S2.edit = null;
+    if (e && e.__new && !e.__saved) e.__new.forEach(u => K.Backend.owner.removeMedia(u).catch(() => null));
+  }
+  async function dropReplaced(oldUrl, newUrl) {
+    if (oldUrl && oldUrl !== newUrl) K.Backend.owner.removeMedia(oldUrl).catch(() => null);
+  }
+
+  /* ---------- the Studio tab ---------- */
+  async function studioHTML() {
+    const [p, svcs, looks] = await Promise.all([loadProfile(true), loadServices(true), loadLooks(true)]);
+    const st = p.settings || {};
+    const row = (tab, ic, label, value) => `
+      <button class="row row--link" data-cab-tab="${tab}">
+        <span class="row__icon">${icon(ic)}</span>
+        <span class="row__label">${label}</span>
+        ${value != null ? `<span class="row__value num">${esc(String(value))}</span>` : ''}
+        <span class="row__chev">${K.I.chevR}</span>
+      </button>`;
+    return `
+      <header class="cab-h"><span class="eyebrow">${esc(location.host + location.pathname.replace(/\/$/, ''))}/?m=${esc(K.SLUG)}</span><h1>Studio</h1></header>
+      <div class="group-label">Your page</div>
+      <div class="list">
+        ${row('profile', '<circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5c1-3.3 3.8-5 7-5s6 1.7 7 5"/>', 'Profile & photos', st.tagline ? '' : 'Add')}
+        ${row('style', '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17M3.5 12h8.5"/>', 'Look & feel', ({ soft: 'Soft', maison: 'Maison', noir: 'Noir' })[p.style] || '')}
+        ${row('services', '<path d="M10 3.5l1.8 4.9 4.9 1.8-4.9 1.8L10 16.9l-1.8-4.9-4.9-1.8 4.9-1.8z"/>', 'Services', svcs.filter(s => s.active).length)}
+        ${row('looks', '<rect x="3.5" y="4" width="17" height="16" rx="4"/><circle cx="9" cy="9.5" r="1.5"/><path d="m20.5 15-4-4L7 20"/>', 'Looks', looks.length)}
+      </div>
+      <div class="group-label">Booking</div>
+      <div class="list">
+        ${row('hours', '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>', 'Hours, time off & rules')}
+        ${row('texts', '<path d="M6 4h12v16H6z"/><path d="M9 8h6M9 12h6M9 16h4"/>', 'Policies & texts')}
+        ${row('faq', '<path d="M20.5 11.8a8.3 8.3 0 0 1-12.2 7.3L3.5 20.5l1.4-4.6a8.3 8.3 0 1 1 15.6-4.1z"/>', 'Assistant answers', (st.faq || []).length)}
+      </div>
+      <button class="btn btn--soft btn--block" data-cab-close>${icon('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>')}See it as a client</button>`;
+  }
+
+  /* ---------- Profile & photos ---------- */
+  const PROFILE_FIELDS = [
+    ['tagline', 'Subtitle', 'Lashes & brows that wake up ready'],
+    ['city', 'City', 'Atlanta, GA'],
+    ['address', 'Address', '1080 Peachtree St NE, Suite 4B'],
+    ['parking', 'Parking', 'Free 2-hour parking in the garage'],
+    ['phone', 'Phone', '(404) 555-0142'],
+    ['instagram', 'Instagram', '@yourstudio'],
+    ['reviewUrl', 'Review link (Google / Instagram)', 'https://g.page/r/…']
+  ];
+  async function profileHTML() {
+    const p = await loadProfile(true);
+    const st = p.settings || {};
+    S2.edit = { kind: 'profile', heroPhoto: st.heroPhoto || '', avatar: st.avatar || '', __orig: { heroPhoto: st.heroPhoto || '', avatar: st.avatar || '' } };
+    return `
+      ${backHTML('profile')}
+      <header class="cab-h"><h1>Profile</h1></header>
+      <form class="bk-form" id="pf-form" onsubmit="return false">
+        ${photoSlot('heroPhoto', st.heroPhoto, 'Cover photo (Home)', 'cover')}
+        ${photoSlot('avatar', st.avatar, 'Your photo', 'avatar')}
+        <label class="field"><span>Studio name</span><input name="name" maxlength="80" value="${esc(p.name)}"></label>
+        ${PROFILE_FIELDS.map(([k, label, ph]) => `
+          <label class="field"><span>${esc(label)}</span>
+            ${k === 'parking' ? `<textarea name="${k}" rows="2" maxlength="300" placeholder="${esc(ph)}">${esc(st[k] || '')}</textarea>`
+              : `<input name="${k}" maxlength="${k === 'reviewUrl' ? 300 : 120}" value="${esc(st[k] || '')}" placeholder="${esc(ph)}"${k === 'phone' ? ' type="tel" inputmode="tel"' : k === 'reviewUrl' ? ' type="url" inputmode="url" autocapitalize="off"' : ''}></label>`}
+          `).join('')}
+      </form>
+      <button class="btn btn--primary btn--block" data-pf-save>Save profile</button>`;
+  }
+  async function saveProfileForm(btn) {
+    const f = $('#pf-form');
+    const val = n => (f.elements[n] ? f.elements[n].value.trim() : '');
+    const ig = val('instagram').replace(/^@/, '').replace(/^https?:\/\/(www\.)?instagram\.com\//i, '').replace(/\/.*$/, '');
+    const url = val('reviewUrl');
+    if (url && !/^https:\/\//i.test(url)) { K.toast('The review link should start with https://', 'x'); return; }
+    const settings = {};
+    PROFILE_FIELDS.forEach(([k]) => { settings[k] = val(k) || null; });
+    settings.instagram = ig || null;
+    settings.heroPhoto = S2.edit.heroPhoto || null;
+    settings.avatar = S2.edit.avatar || null;
+    await busyBtn(btn, async () => {
+      S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { name: val('name'), settings });
+      dropReplaced(S2.edit.__orig.heroPhoto, S2.edit.heroPhoto);
+      dropReplaced(S2.edit.__orig.avatar, S2.edit.avatar);
+      S2.edit.__saved = true;
+      S2.edit.__orig = { heroPhoto: S2.edit.heroPhoto, avatar: S2.edit.avatar };
+      K.toast('Profile saved', 'ok');
+      published();
+    });
+  }
+  // a button that shows a spinner while its work runs, and always comes back
+  async function busyBtn(btn, work) {
+    const label = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = K.spinner(); }
+    try { await work(); K.haptic([10, 30, 10]); } catch (e) { K.toast(err(e), 'x'); } finally { if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = label; } }
+  }
+
+  /* ---------- Look & feel (style + accent, live preview) ---------- */
+  const STYLE_LOOK = {
+    soft: { bg: '#F7F5F2', card: '#FFFFFF', text: '#16161A', font: "'Plus Jakarta Sans', system-ui, sans-serif", w: 800, r: 16 },
+    maison: { bg: '#F7F3EE', card: '#FFFFFF', text: '#2A211C', font: "'Fraunces', Georgia, serif", w: 400, r: 14 },
+    noir: { bg: '#F2F2F7', card: '#FFFFFF', text: '#0A0A0B', font: "'Inter', system-ui, sans-serif", w: 700, r: 14 }
+  };
+  async function styleHTML() {
+    const p = await loadProfile(true);
+    const st = p.settings || {};
+    S2.edit = { kind: 'style', style: p.style || 'noir', accent: st.defaultAccent || null };
+    return `
+      ${backHTML('style')}
+      <header class="cab-h"><h1>Look & feel</h1></header>
+      <div id="sty-box">${styleBoxHTML()}</div>
+      <button class="btn btn--primary btn--block" data-sty-save>Save look</button>
+      <p class="cab-muted">Clients can still switch light / dark and pick their own accent in the app.</p>`;
+  }
+  function styleBoxHTML() {
+    const e = S2.edit;
+    const list = K.accentsFor(e.style);
+    if (!e.accent || !list.some(a => a.id === e.accent)) e.accent = list[0].id;
+    const acc = list.find(a => a.id === e.accent).color;
+    const L = STYLE_LOOK[e.style];
+    const name = (S2.profile && S2.profile.name) || K.data.name;
+    return `
+      <div class="segmented" role="radiogroup" style="--n:3;--idx:${['soft', 'maison', 'noir'].indexOf(e.style)}"><i class="segmented__thumb"></i>
+        ${['soft', 'maison', 'noir'].map(x => `<button role="radio" data-sty="${x}" aria-checked="${x === e.style}">${x.charAt(0).toUpperCase() + x.slice(1)}</button>`).join('')}
+      </div>
+      <div class="sty-acc" role="radiogroup" aria-label="Accent">
+        ${list.map(a => `<button class="swatch" role="radio" data-sty-acc="${a.id}" aria-checked="${a.id === e.accent}" aria-label="${esc(a.name)}" style="--c:${a.color}">${K.I.check}</button>`).join('')}
+      </div>
+      <div class="sty-prev" style="--pb:${L.bg};--pc:${L.card};--pt:${L.text};--pa:${acc};--pf:${L.font};--pw:${L.w};--pr:${L.r}px">
+        <div class="sty-prev__hero"><span>${esc(name)}</span><small>★ 4.9 · Book in two taps</small></div>
+        <div class="sty-prev__card">
+          <b>Next available</b><span class="sty-prev__time">Today 3:30 PM</span>
+          <div class="sty-prev__chips"><i class="on">3:30 PM</i><i>5:00 PM</i><i>Tomorrow</i></div>
+          <span class="sty-prev__btn">Book</span>
+        </div>
+      </div>`;
+  }
+  async function saveStyle(btn) {
+    const e = S2.edit;
+    const acc = K.accentsFor(e.style).find(a => a.id === e.accent);
+    await busyBtn(btn, async () => {
+      S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { style: e.style, accent: /^#[0-9a-f]{6}$/i.test(acc && acc.color) ? acc.color : null, settings: { defaultAccent: e.accent } });
+      K.toast('Look saved — clients see it now', 'ok');
+      published();
+    });
+  }
+
+  /* ---------- Services (add / edit / hide / delete / drag to reorder) ---------- */
+  const CATS = ['Lashes', 'Brows', 'Nails', 'Other'];
+  const DURATIONS = [15, 20, 30, 40, 45, 50, 60, 75, 90, 105, 120, 135, 150, 165, 180, 210, 240, 270, 300];
+  const durText = m => (m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ' ' + (m % 60) + 'm' : ''}` : m + ' min');
+  async function servicesHTML() {
+    const list = await loadServices(true);
+    return `
+      ${backHTML('services')}
+      <header class="cab-h cab-h--row"><h1>Services</h1><button class="btn btn--primary btn--sm" data-svc-new>${icon('<path d="M12 5v14M5 12h14"/>')}Add</button></header>
+      ${list.length ? `<p class="cab-muted">Drag ≡ to change the order clients see. Tap to edit.</p>
+      <div class="list sortable" data-sort="services">${list.map(s => `
+        <div class="row svc-row${s.active ? '' : ' is-hidden'}" data-id="${esc(s.id)}">
+          <button class="drag" data-drag aria-label="Drag to reorder">${icon('<path d="M5 8h14M5 12h14M5 16h14"/>')}</button>
+          <img class="svc-row__img" src="${esc(K.photoSrc({ photo: s.photo, category: s.category, title: s.name }, 160))}" alt="">
+          <button class="svc-row__main" data-svc-edit="${esc(s.id)}">
+            <b>${esc(s.name)}</b>
+            <small class="num">${esc(s.category)} · ${durText(s.duration_min)}${s.buffer_min ? ' + ' + s.buffer_min + 'm' : ''} · ${s.price_from ? 'from ' : ''}${money(s.price)}${+s.deposit ? ' · deposit ' + money(s.deposit) : ''}${s.active ? '' : ' · hidden'}</small>
+          </button>
+          <span class="row__chev">${K.I.chevR}</span>
+        </div>`).join('')}</div>` : `<div class="cab-empty">${K.art('sparkles')}<b>No services yet</b><span>Add your first one — clients can book it right away.</span></div>`}`;
+  }
+  function openServiceEditor(svc) {
+    const s = svc || { name: '', category: 'Lashes', description: '', duration_min: 60, buffer_min: 15, price: '', price_from: false, deposit: 0, photo: '', active: true, fill_weeks: null };
+    S2.edit = { kind: 'service', id: s.id || null, photo: s.photo || '', __orig: { photo: s.photo || '' } };
+    const cats = [...new Set(CATS.concat((S2.services || []).map(x => x.category)))];
+    K.haptic();
+    K.Sheet.open(el => {
+      el.innerHTML = `
+        <div class="ob" data-sheet-scroll>
+          <header class="ob__head"><span class="eyebrow">${s.id ? 'Edit service' : 'New service'}</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
+          <form class="bk-form" id="svc-form" onsubmit="return false">
+            ${photoSlot('photo', s.photo, 'Photo', 'services')}
+            <label class="field"><span>Name</span><input name="name" maxlength="80" value="${esc(s.name)}" placeholder="Classic Full Set"></label>
+            <div class="field"><span>Category</span>
+              <div class="chips-wrap" data-cat-chips>${cats.map(c => `<button type="button" class="chip${c === s.category ? ' is-active' : ''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
+              <input name="category_custom" class="chip-input" maxlength="30" placeholder="Other name…" value="${cats.includes(s.category) ? '' : esc(s.category)}"></div></div>
+            <label class="field"><span>Description</span><textarea name="description" rows="3" maxlength="600" placeholder="What she gets, how it feels, how long it lasts">${esc(s.description || '')}</textarea></label>
+            <div class="form-2">
+              <label class="field"><span>Duration</span><select class="cab-sel cab-sel--wide" name="duration_min">${DURATIONS.concat(DURATIONS.includes(s.duration_min) ? [] : [s.duration_min]).sort((a, b) => a - b).map(m => `<option value="${m}"${m === s.duration_min ? ' selected' : ''}>${durText(m)}</option>`).join('')}</select></label>
+              <label class="field"><span>Buffer after</span><select class="cab-sel cab-sel--wide" name="buffer_min">${[0, 5, 10, 15, 20, 30, 45, 60].map(m => `<option value="${m}"${m === +s.buffer_min ? ' selected' : ''}>${m ? m + ' min' : 'None'}</option>`).join('')}</select></label>
+            </div>
+            <div class="form-2">
+              <label class="field"><span>Price, $</span><input name="price" type="number" inputmode="decimal" min="0" step="1" value="${esc(s.price === '' ? '' : +s.price)}" placeholder="120"></label>
+              <label class="field"><span>Deposit, $</span><input name="deposit" type="number" inputmode="decimal" min="0" step="1" value="${esc(+s.deposit || '')}" placeholder="0"></label>
+            </div>
+            <label class="tick"><input type="checkbox" name="price_from"${s.price_from ? ' checked' : ''}><i aria-hidden="true">${K.I.check}</i><span>Show as “from $” (the price can be higher)</span></label>
+            <label class="field"><span>Fill reminder</span><select class="cab-sel cab-sel--wide" name="fill_weeks">${[['', 'None'], [2, 'After 2 weeks'], [3, 'After 3 weeks'], [4, 'After 4 weeks'], [5, 'After 5 weeks'], [6, 'After 6 weeks'], [8, 'After 8 weeks']].map(([v, l]) => `<option value="${v}"${String(v) === String(s.fill_weeks || '') ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
+            <div class="row hrs-switch"><span class="row__label">Visible to clients<span class="row__sub">Off: hidden from the app, nothing is deleted</span></span><button type="button" class="switch" role="switch" aria-checked="${s.active !== false}" data-svc-active></button></div>
+          </form>
+          <button class="btn btn--primary btn--block" data-svc-save>${s.id ? 'Save service' : 'Add service'}</button>
+          ${s.id ? '<button class="btn btn--soft btn--block ob__danger" data-svc-del>Delete service</button>' : ''}
+        </div>`;
+    }, { detent: 'large' });
+  }
+  async function saveService(btn) {
+    const f = K.$('#svc-form', K.Sheet.el());
+    const v = n => f.elements[n] ? f.elements[n].value.trim() : '';
+    const custom = v('category_custom');
+    const chip = K.$('[data-cat-chips] .chip.is-active', K.Sheet.el());
+    const svc = {
+      id: S2.edit.id || undefined, name: v('name'), category: custom || (chip ? chip.dataset.cat : 'Other'),
+      description: v('description'), duration_min: +v('duration_min'), buffer_min: +v('buffer_min'),
+      price: v('price') === '' ? null : +v('price'), deposit: +v('deposit') || 0, price_from: f.elements.price_from.checked,
+      fill_weeks: v('fill_weeks') || '', photo: S2.edit.photo || '',
+      active: K.$('[data-svc-active]', K.Sheet.el()).getAttribute('aria-checked') === 'true'
+    };
+    if (!svc.name) { K.toast('Add a name', 'x'); return; }
+    if (svc.price == null || !(svc.price >= 0)) { K.toast('Add a price', 'x'); return; }
+    if (svc.deposit > svc.price && svc.price > 0) { K.toast('The deposit is bigger than the price', 'x'); return; }
+    await busyBtn(btn, async () => {
+      await K.Backend.owner.saveService(S.studio.id, svc);
+      dropReplaced(S2.edit.__orig.photo, S2.edit.photo);
+      S2.edit.__saved = true;
+      K.toast(svc.id ? 'Service saved' : 'Service added — clients can book it', 'ok');
+      K.Sheet.close();
+      published();
+      if (S.tab === 'services') refreshView();
+    });
+  }
+  async function deleteService(btn) {
+    if (btn.dataset.sure !== '1') { btn.dataset.sure = '1'; btn.textContent = 'Tap again to delete'; K.haptic(20); setTimeout(() => { if (btn.isConnected) { btn.dataset.sure = ''; btn.textContent = 'Delete service'; } }, 3000); return; }
+    await busyBtn(btn, async () => {
+      await K.Backend.owner.deleteService(S2.edit.id);
+      if (S2.edit.__orig.photo) K.Backend.owner.removeMedia(S2.edit.__orig.photo).catch(() => null);
+      S2.edit.__saved = true;
+      K.toast('Service deleted — past bookings keep its name', 'ok');
+      K.Sheet.close();
+      published();
+      refreshView();
+    });
+  }
+
+  /* drag ≡ to reorder (services, looks) */
+  function bindSortable() {
+    const box = $('.sortable');
+    if (!box) return;
+    box.addEventListener('pointerdown', e => {
+      const h = e.target.closest('[data-drag]');
+      if (!h) return;
+      e.preventDefault();
+      const row = h.closest('[data-id]');
+      const rows = () => [...box.querySelectorAll('[data-id]')];
+      const startY = e.clientY;
+      const r0 = row.getBoundingClientRect();
+      let moved = false;
+      row.classList.add('is-dragging');
+      // listeners on window: moving the row in the DOM drops any pointer capture
+      const move = ev => {
+        if (ev.pointerId !== e.pointerId) return;
+        const dy = ev.clientY - startY;
+        if (Math.abs(dy) > 3) moved = true;
+        row.style.transform = `translateY(${dy}px)`;
+        const mid = r0.top + r0.height / 2 + dy;
+        const others = rows().filter(x => x !== row);
+        const before = others.find(x => { const b = x.getBoundingClientRect(); return mid < b.top + b.height / 2; });
+        const nextSib = row.nextElementSibling;
+        if (before !== nextSib && (before || nextSib)) {
+          const old = row.getBoundingClientRect().top;
+          if (before) box.insertBefore(row, before); else box.appendChild(row);
+          const now = row.getBoundingClientRect().top;
+          // keep the row under the finger after the DOM jump
+          const cur = parseFloat((row.style.transform.match(/-?[\d.]+/) || [0])[0]);
+          row.style.transform = `translateY(${cur - (now - old)}px)`;
+          K.haptic(5);
+        }
+      };
+      const up = async () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+        row.classList.remove('is-dragging');
+        row.style.transform = '';
+        if (!moved) return;
+        const ids = rows().map(x => x.dataset.id);
+        try {
+          await K.Backend.owner.reorder(S.studio.id, box.dataset.sort, ids);
+          K.toast('Order saved', 'ok');
+          published();
+        } catch (x) { K.toast(err(x), 'x'); refreshView(); }
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+    });
+  }
+
+  /* ---------- Looks (portfolio) ---------- */
+  async function looksHTML() {
+    const [list, svcs] = await Promise.all([loadLooks(true), loadServices()]);
+    return `
+      ${backHTML('looks')}
+      <header class="cab-h cab-h--row"><h1>Looks</h1><button class="btn btn--primary btn--sm" data-look-new>${icon('<path d="M12 5v14M5 12h14"/>')}Add</button></header>
+      ${list.length ? `<p class="cab-muted">Clients pick a look and book it in two taps. Drag ≡ to reorder.</p>
+      <div class="list sortable" data-sort="looks">${list.map(l => `
+        <div class="row svc-row" data-id="${esc(l.id)}">
+          <button class="drag" data-drag aria-label="Drag to reorder">${icon('<path d="M5 8h14M5 12h14M5 16h14"/>')}</button>
+          <img class="svc-row__img svc-row__img--look" src="${esc(l.photo)}" alt="">
+          <button class="svc-row__main" data-look-edit="${esc(l.id)}">
+            <b>${esc(l.title)}${l.is_new ? ' <em class="lk-new">NEW</em>' : ''}</b>
+            <small>${esc([l.tag, (svcs.find(s => s.id === l.service_id) || {}).name].filter(Boolean).join(' · ') || 'No tag yet')}${l.before_photo ? ' · before/after' : ''}</small>
+          </button>
+          <span class="row__chev">${K.I.chevR}</span>
+        </div>`).join('')}</div>` : `<div class="cab-empty">${K.art('sparkles')}<b>No looks yet</b><span>Upload your best work — clients book by the look they love.</span></div>`}`;
+  }
+  function openLookEditor(look) {
+    const l = look || { title: '', tag: '', service_id: '', photo: '', before_photo: '', is_new: true, popular: false };
+    S2.edit = { kind: 'look', id: l.id || null, photo: l.photo || '', before_photo: l.before_photo || '', __orig: { photo: l.photo || '', before_photo: l.before_photo || '' } };
+    const tags = [...new Set((S2.looks || []).map(x => x.tag).filter(Boolean).concat(['Classic', 'Hybrid', 'Volume', 'Brows']))].slice(0, 8);
+    K.haptic();
+    K.Sheet.open(el => {
+      el.innerHTML = `
+        <div class="ob" data-sheet-scroll>
+          <header class="ob__head"><span class="eyebrow">${l.id ? 'Edit look' : 'New look'}</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
+          <form class="bk-form" id="look-form" onsubmit="return false">
+            ${photoSlot('photo', l.photo, 'Photo of your work', 'looks')}
+            <label class="field"><span>Name of the look</span><input name="title" maxlength="60" value="${esc(l.title)}" placeholder="Wispy Cat Eye"></label>
+            <label class="field"><span>Tag</span><input name="tag" maxlength="30" value="${esc(l.tag)}" placeholder="Hybrid" list="look-tags"></label>
+            <div class="chips-wrap">${tags.map(t => `<button type="button" class="chip" data-tag-pick="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+            <label class="field"><span>Service to book</span><select class="cab-sel cab-sel--wide" name="service_id"><option value="">—</option>${(S2.services || []).filter(s => s.active).map(s => `<option value="${esc(s.id)}"${s.id === l.service_id ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
+            ${photoSlot('before_photo', l.before_photo, 'Before photo (optional)', 'looks')}
+            <div class="row hrs-switch"><span class="row__label">Mark as New</span><button type="button" class="switch" role="switch" aria-checked="${!!l.is_new}" data-look-flag="is_new"></button></div>
+            <div class="row hrs-switch"><span class="row__label">Most booked</span><button type="button" class="switch" role="switch" aria-checked="${!!l.popular}" data-look-flag="popular"></button></div>
+          </form>
+          <button class="btn btn--primary btn--block" data-look-save>${l.id ? 'Save look' : 'Add look'}</button>
+          ${l.id ? '<button class="btn btn--soft btn--block ob__danger" data-look-del>Delete look</button>' : ''}
+        </div>`;
+    }, { detent: 'large' });
+  }
+  async function saveLook(btn) {
+    const f = K.$('#look-form', K.Sheet.el());
+    const flag = k => K.$(`[data-look-flag="${k}"]`, K.Sheet.el()).getAttribute('aria-checked') === 'true';
+    const look = {
+      id: S2.edit.id || undefined, title: f.elements.title.value.trim(), tag: f.elements.tag.value.trim(),
+      service_id: f.elements.service_id.value, photo: S2.edit.photo, before_photo: S2.edit.before_photo || '',
+      is_new: flag('is_new'), popular: flag('popular')
+    };
+    if (!look.photo) { K.toast('Upload a photo first', 'x'); return; }
+    if (!look.title) { K.toast('Give the look a name', 'x'); return; }
+    await busyBtn(btn, async () => {
+      await K.Backend.owner.saveLook(S.studio.id, look);
+      dropReplaced(S2.edit.__orig.photo, S2.edit.photo);
+      dropReplaced(S2.edit.__orig.before_photo, S2.edit.before_photo);
+      S2.edit.__saved = true;
+      K.toast(look.id ? 'Look saved' : 'Look added', 'ok');
+      K.Sheet.close();
+      published();
+      if (S.tab === 'looks') refreshView();
+    });
+  }
+  async function deleteLook(btn) {
+    if (btn.dataset.sure !== '1') { btn.dataset.sure = '1'; btn.textContent = 'Tap again to delete'; K.haptic(20); setTimeout(() => { if (btn.isConnected) { btn.dataset.sure = ''; btn.textContent = 'Delete look'; } }, 3000); return; }
+    await busyBtn(btn, async () => {
+      await K.Backend.owner.deleteLook(S2.edit.id);
+      [S2.edit.__orig.photo, S2.edit.__orig.before_photo].filter(Boolean).forEach(u => K.Backend.owner.removeMedia(u).catch(() => null));
+      S2.edit.__saved = true;
+      K.toast('Look deleted', 'ok');
+      K.Sheet.close();
+      published();
+      refreshView();
+    });
+  }
+
+  /* ---------- Policies & texts ---------- */
+  const POLICY = [
+    ['Deposit', /deposit/i, 'A $30 deposit secures your spot and goes toward your service.'],
+    ['Cancellations', /cancel/i, 'Free to cancel or move up to 24 hours before.'],
+    ['Late arrivals', /late/i, 'After 15 minutes we may need to shorten your service.'],
+    ['No-shows', /no.?show/i, 'A missed visit without notice is charged the full deposit.']
+  ];
+  async function textsHTML() {
+    const st = (await loadProfile(true)).settings || {};
+    const pol = st.policies || [];
+    const find = re => (pol.find(p => re.test(p.title)) || {}).text || '';
+    S2.edit = { kind: 'texts', aftercare: (st.aftercare || []).map(a => ({ step: a.step || '', text: a.text || '' })) };
+    return `
+      ${backHTML('texts')}
+      <header class="cab-h"><h1>Policies & texts</h1></header>
+      <form class="bk-form" id="tx-form" onsubmit="return false">
+        <div class="group-label">Policies</div>
+        ${POLICY.map(([t, re, ph]) => `<label class="field"><span>${t}</span><textarea name="pol_${t}" rows="2" maxlength="500" placeholder="${esc(ph)}">${esc(find(re))}</textarea></label>`).join('')}
+        <div class="group-label">Before your visit</div>
+        <label class="field"><span>One tip per line</span><textarea name="prep" rows="4" maxlength="1200" placeholder="Come with clean lashes — no mascara">${esc((st.prep || []).join('\n'))}</textarea></label>
+        <div class="group-label">Aftercare</div>
+        <div id="ac-list">${aftercareHTML()}</div>
+        <button type="button" class="hrs__add" data-ac-add>${icon('<path d="M12 5v14M5 12h14"/>')}Add a step</button>
+      </form>
+      <button class="btn btn--primary btn--block" data-tx-save>Save texts</button>`;
+  }
+  function aftercareHTML() {
+    return S2.edit.aftercare.map((a, i) => `
+      <div class="ac-step card">
+        <div class="ac-step__top"><b class="num">${i + 1}</b><button type="button" class="hrs__del" data-ac-del="${i}" aria-label="Remove step">${K.I.x}</button></div>
+        <input class="ac-in" data-ac="${i}:step" maxlength="80" value="${esc(a.step)}" placeholder="Keep them dry for 24 hours">
+        <textarea class="ac-in" data-ac="${i}:text" rows="2" maxlength="400" placeholder="Why and how">${esc(a.text)}</textarea>
+      </div>`).join('') || '<p class="cab-muted">No aftercare steps yet.</p>';
+  }
+  async function saveTexts(btn) {
+    const f = $('#tx-form');
+    const st = (S2.profile && S2.profile.settings) || {};
+    const known = POLICY.map(p => p[1]);
+    const kept = (st.policies || []).filter(p => !known.some(re => re.test(p.title)));
+    const policies = POLICY.map(([t]) => ({ title: t, text: f.elements['pol_' + t].value.trim() })).filter(p => p.text).concat(kept);
+    const prep = f.elements.prep.value.split('\n').map(x => x.trim()).filter(Boolean).slice(0, 12);
+    const aftercare = S2.edit.aftercare.map(a => ({ step: a.step.trim(), text: a.text.trim() })).filter(a => a.step);
+    await busyBtn(btn, async () => {
+      S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { settings: { policies, prep, aftercare } });
+      K.toast('Texts saved', 'ok');
+      published();
+    });
+  }
+
+  /* ---------- Assistant answers (FAQ) ---------- */
+  const STOP = new Set('what when where which with your have does about there their this that from will would could should much many how can the and for are you our'.split(' '));
+  const autoKeywords = q => [...new Set(String(q).toLowerCase().replace(/[^a-z0-9\s'-]/g, ' ').split(/\s+/).filter(w => w.length > 3 && !STOP.has(w)))].slice(0, 8);
+  async function faqHTML() {
+    const st = (await loadProfile(true)).settings || {};
+    S2.edit = { kind: 'faq', faq: (st.faq || []).map(f => ({ q: f.q || '', a: f.a || '', extra: (f.keywords || []).filter(k => !autoKeywords(f.q).includes(k)).join(', ') })) };
+    return `
+      ${backHTML('faq')}
+      <header class="cab-h cab-h--row"><h1>Assistant</h1><button class="btn btn--primary btn--sm" data-faq-add>${icon('<path d="M12 5v14M5 12h14"/>')}Add</button></header>
+      <p class="cab-muted">The assistant in the Ask tab answers with these. Prices, hours and openings it knows by itself.</p>
+      <div id="faq-list">${faqListHTML()}</div>
+      <button class="btn btn--primary btn--block" data-faq-save>Save answers</button>`;
+  }
+  function faqListHTML() {
+    return S2.edit.faq.map((f, i) => `
+      <div class="ac-step card">
+        <div class="ac-step__top"><b>Q${i + 1}</b><button type="button" class="hrs__del" data-faq-del="${i}" aria-label="Remove">${K.I.x}</button></div>
+        <input class="ac-in" data-faq="${i}:q" maxlength="140" value="${esc(f.q)}" placeholder="Do you do bottom lashes?">
+        <textarea class="ac-in" data-faq="${i}:a" rows="3" maxlength="600" placeholder="The answer clients see">${esc(f.a)}</textarea>
+        <input class="ac-in ac-in--sm" data-faq="${i}:extra" maxlength="200" value="${esc(f.extra)}" placeholder="Also answers to (optional): bottom, lower lashes">
+      </div>`).join('') || '<div class="cab-empty"><b>No answers yet</b><span>Add the questions clients ask you most.</span></div>';
+  }
+  async function saveFaq(btn) {
+    const faq = S2.edit.faq.filter(f => f.q.trim() && f.a.trim()).map(f => ({
+      q: f.q.trim(), a: f.a.trim(),
+      keywords: [...new Set(autoKeywords(f.q).concat(f.extra.split(',').map(x => x.trim().toLowerCase()).filter(Boolean)))]
+    }));
+    await busyBtn(btn, async () => {
+      S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { settings: { faq } });
+      K.toast('Answers saved', 'ok');
+      published();
+    });
+  }
+
+  /* ---------- CRM: tags, contacts, lash map ---------- */
+  const TAGS = ['VIP', 'New', 'Allergy', 'Patch test done'];
+  const CURLS = ['J', 'B', 'C', 'CC', 'D', 'L'];
+  const THICK = ['0.03', '0.05', '0.07', '0.10', '0.12', '0.15'];
+  const TYPES = ['Classic', 'Hybrid', 'Volume', 'Mega volume'];
+  const LENGTHS = Array.from({ length: 11 }, (_, i) => i + 6); // 6–16 mm
+  // "C · 10–13 · 0.07 Hybrid"
+  const formulaLine = f => f ? [f.curl, f.lengths, [f.thickness, f.lash_type].filter(Boolean).join(' ')].filter(Boolean).join(' · ') : '';
+  const LASH = '<path d="M3 10c2.5 3 5.5 4.5 9 4.5s6.5-1.5 9-4.5"/><path d="M5.5 12.6 4 15M9 14.2l-.8 2.8M12 14.5V17.5M15 14.2l.8 2.8M18.5 12.6 20 15"/>';
+  const TAG_CLS = { VIP: 'vip', New: 'new', Allergy: 'warn', 'Patch test done': 'ok' };
+  const tagBadges = tags => (tags || []).length ? ` <span class="ctags">${tags.map(t => `<em class="ctag ctag--${TAG_CLS[t] || 'x'}">${esc(t === 'Patch test done' ? 'Patch ✓' : t)}</em>`).join('')}</span>` : '';
+
+  // an editor in a sheet closed without saving → its fresh uploads are removed
+  document.addEventListener('sheet:closed', () => {
+    if (root && S2.edit && ['service', 'look', 'formula'].includes(S2.edit.kind)) cleanupUnsaved();
+  });
+
+  function crmHTML(c, formulas) {
+    const tags = c.tags || [];
+    return `
+      <div class="group-label">Tags</div>
+      <div class="chips-wrap">${TAGS.map(t => `<button class="chip${tags.includes(t) ? ' is-active' : ''}${t === 'Allergy' ? ' chip--warn' : ''}" data-ctag="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+      ${tags.includes('Patch test done') ? `<label class="field"><span>Patch test date</span><input type="date" data-patch-date value="${esc(c.patch_test_at || '')}"></label>` : ''}
+      <div class="group-label cab-tlhead"><span>Lash map</span><button class="cab-link" data-fm-new="${esc(c.id)}">${icon('<path d="M12 5v14M5 12h14"/>')}Add</button></div>
+      ${formulas.length ? `<div class="list">${formulas.map(f => `
+        <button class="row row--link fm-row" data-fm-edit="${esc(f.id)}">
+          ${f.photo ? `<img src="${esc(f.photo)}" alt="">` : `<span class="fm-ic">${icon('<path d="M3 10c2.5 3 5.5 4.5 9 4.5s6.5-1.5 9-4.5"/><path d="M5.5 12.6 4 15M9 14.2l-.8 2.8M12 14.5V17.5M15 14.2l.8 2.8M18.5 12.6 20 15"/>')}</span>`}
+          <span class="row__label">${esc(formulaLine(f) || 'Formula')}<span class="row__sub">${esc(K.dayLabel(spot(f.created_at).off, false))}${f.glue ? ' · ' + esc(f.glue) : ''}${f.note ? ' · ' + esc(f.note.slice(0, 40)) : ''}</span></span>
+          <span class="row__chev">${K.I.chevR}</span>
+        </button>`).join('')}</div>` : '<p class="cab-muted">Write down curl, lengths and thickness after each visit — next time it’s right on her booking.</p>'}`;
+  }
+
+  async function toggleTag(t) {
+    const c = S2.client;
+    if (!c) return;
+    const tags = (c.tags || []).includes(t) ? c.tags.filter(x => x !== t) : (c.tags || []).concat(t);
+    try {
+      const r = await K.Backend.owner.saveClient(c.id, { tags });
+      S2.client = r.client;
+      S2.formulas = r.formulas;
+      K.haptic();
+      const box = K.$('#crm-box', K.Sheet.el());
+      if (box) box.innerHTML = crmHTML(S2.client, S2.formulas);
+    } catch (e) { K.toast(err(e), 'x'); }
+  }
+
+  function openFormulaEditor(clientId, f, bookingId) {
+    const x = f || { curl: '', lengths: '', thickness: '', lash_type: '', glue: localStorage.getItem('studio-app:cab:glue') || '', note: '', photo: '' };
+    const [from, to] = String(x.lengths || '').split(/[–-]/).map(n => parseInt(n, 10));
+    S2.edit = { kind: 'formula', id: x.id || null, client_id: clientId, booking_id: (f && f.booking_id) || bookingId || null, curl: x.curl, thickness: x.thickness, lash_type: x.lash_type, photo: x.photo || '', __orig: { photo: x.photo || '' } };
+    const chips = (name, list, cur) => `<div class="chips-wrap" data-fm-chips="${name}">${list.map(v => `<button type="button" class="chip${v === cur ? ' is-active' : ''}" data-fm-pick="${name}:${esc(v)}">${esc(v)}</button>`).join('')}</div>`;
+    const sel = (name, cur) => `<select class="cab-sel cab-sel--wide" name="${name}"><option value="">—</option>${LENGTHS.map(n => `<option value="${n}"${n === cur ? ' selected' : ''}>${n} mm</option>`).join('')}</select>`;
+    K.Sheet.open(el => {
+      el.innerHTML = `
+        <div class="ob" data-sheet-scroll>
+          <header class="ob__head"><span class="eyebrow">Lash map</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
+          <h2>${esc((S2.client && S2.client.name) || 'Formula')}</h2>
+          <form class="bk-form" id="fm-form" onsubmit="return false">
+            <div class="field"><span>Curl</span>${chips('curl', CURLS, x.curl)}</div>
+            <div class="form-2"><label class="field"><span>Lengths from</span>${sel('len_from', from)}</label><label class="field"><span>to</span>${sel('len_to', to)}</label></div>
+            <div class="field"><span>Thickness</span>${chips('thickness', THICK, x.thickness)}</div>
+            <div class="field"><span>Type</span>${chips('lash_type', TYPES, x.lash_type)}</div>
+            <label class="field"><span>Glue</span><input name="glue" maxlength="60" value="${esc(x.glue || '')}" placeholder="Sky S+"></label>
+            <label class="field"><span>Note</span><textarea name="note" rows="2" maxlength="1000" placeholder="Shorter inner corners, sensitive left eye">${esc(x.note || '')}</textarea></label>
+            ${photoSlot('photo', x.photo, 'After photo', 'formulas')}
+          </form>
+          <button class="btn btn--primary btn--block" data-fm-save>Save lash map</button>
+          ${x.id ? '<button class="btn btn--soft btn--block ob__danger" data-fm-del>Delete</button>' : ''}
+        </div>`;
+    }, { detent: 'large' });
+  }
+  async function saveFormula(btn) {
+    const f = K.$('#fm-form', K.Sheet.el());
+    const e = S2.edit;
+    const a = +f.elements.len_from.value;
+    const b = +f.elements.len_to.value;
+    const lengths = a && b ? `${Math.min(a, b)}–${Math.max(a, b)}` : a || b ? String(a || b) : '';
+    const glue = f.elements.glue.value.trim();
+    const p = { id: e.id || undefined, client_id: e.client_id, booking_id: e.booking_id || '', curl: e.curl || '', lengths, thickness: e.thickness || '', lash_type: e.lash_type || '', glue, note: f.elements.note.value.trim(), photo: e.photo || '' };
+    if (!p.curl && !lengths && !p.thickness && !p.lash_type && !p.note) { K.toast('Fill in at least one thing', 'x'); return; }
+    await busyBtn(btn, async () => {
+      await K.Backend.owner.saveFormula(S.studio.id, p);
+      try { if (glue) localStorage.setItem('studio-app:cab:glue', glue); } catch (x) { /* private mode */ }
+      dropReplaced(e.__orig.photo, e.photo);
+      e.__saved = true;
+      K.toast('Lash map saved', 'ok');
+      S.cache = {};
+      const cid = e.client_id;
+      K.Sheet.close();
+      setTimeout(() => openClient(cid), 380);
+    });
+  }
+  async function deleteFormula(btn) {
+    if (btn.dataset.sure !== '1') { btn.dataset.sure = '1'; btn.textContent = 'Tap again to delete'; return; }
+    await busyBtn(btn, async () => {
+      await K.Backend.owner.deleteFormula(S2.edit.id);
+      if (S2.edit.__orig.photo) K.Backend.owner.removeMedia(S2.edit.__orig.photo).catch(() => null);
+      S2.edit.__saved = true;
+      const cid = S2.edit.client_id;
+      K.Sheet.close();
+      setTimeout(() => openClient(cid), 380);
+    });
+  }
+
+  // edit contacts (name, phone, email) in place
+  function openContactEditor() {
+    const c = S2.client;
+    K.Sheet.open(el => {
+      el.innerHTML = `
+        <div class="ob" data-sheet-scroll>
+          <header class="ob__head"><span class="eyebrow">Contacts</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
+          <form class="bk-form" id="ct-form" onsubmit="return false">
+            <label class="field"><span>Name</span><input name="name" maxlength="80" value="${esc(c.name)}"></label>
+            <label class="field"><span>Phone</span><input name="phone" type="tel" inputmode="tel" value="${esc(K.maskPhone(c.phone))}"></label>
+            <label class="field"><span>Email</span><input name="email" type="email" inputmode="email" autocapitalize="off" value="${esc(c.email || '')}"></label>
+          </form>
+          <button class="btn btn--primary btn--block" data-ct-save>Save</button>
+        </div>`;
+    }, { detent: 'medium' });
+  }
+  async function saveContacts(btn) {
+    const f = K.$('#ct-form', K.Sheet.el());
+    const cid = S2.client.id;
+    await busyBtn(btn, async () => {
+      await K.Backend.owner.saveClient(cid, { name: f.elements.name.value.trim(), phone: f.elements.phone.value, email: f.elements.email.value.trim() });
+      S.clients = null;
+      K.toast('Contacts saved', 'ok');
+      K.Sheet.close();
+      setTimeout(() => openClient(cid), 380);
+    });
+  }
+
+  function onStudioClick(t) {
+    let el;
+    if ((el = t.closest('[data-pf-save]'))) { saveProfileForm(el); return true; }
+    if ((el = t.closest('[data-sty]'))) { S2.edit.style = el.dataset.sty; S2.edit.accent = null; $('#sty-box').innerHTML = styleBoxHTML(); K.haptic(); return true; }
+    if ((el = t.closest('[data-sty-acc]'))) { S2.edit.accent = el.dataset.styAcc; $('#sty-box').innerHTML = styleBoxHTML(); K.haptic(); return true; }
+    if ((el = t.closest('[data-sty-save]'))) { saveStyle(el); return true; }
+    if ((el = t.closest('[data-svc-new]'))) { openServiceEditor(null); return true; }
+    if ((el = t.closest('[data-svc-edit]'))) { openServiceEditor((S2.services || []).find(s => s.id === el.dataset.svcEdit)); return true; }
+    if ((el = t.closest('[data-svc-save]'))) { saveService(el); return true; }
+    if ((el = t.closest('[data-svc-del]'))) { deleteService(el); return true; }
+    if ((el = t.closest('[data-svc-active]'))) { el.setAttribute('aria-checked', el.getAttribute('aria-checked') !== 'true'); K.haptic(); return true; }
+    if ((el = t.closest('[data-cat]'))) {
+      K.$$('[data-cat-chips] .chip', K.Sheet.el()).forEach(c => c.classList.toggle('is-active', c === el));
+      const ci = K.$('[name="category_custom"]', K.Sheet.el());
+      if (ci) ci.value = '';
+      K.haptic();
+      return true;
+    }
+    if ((el = t.closest('[data-look-new]'))) { openLookEditor(null); return true; }
+    if ((el = t.closest('[data-look-edit]'))) { openLookEditor((S2.looks || []).find(l => l.id === el.dataset.lookEdit)); return true; }
+    if ((el = t.closest('[data-look-save]'))) { saveLook(el); return true; }
+    if ((el = t.closest('[data-look-del]'))) { deleteLook(el); return true; }
+    if ((el = t.closest('[data-look-flag]'))) { el.setAttribute('aria-checked', el.getAttribute('aria-checked') !== 'true'); K.haptic(); return true; }
+    if ((el = t.closest('[data-tag-pick]'))) { const i = K.$('#look-form [name="tag"]', K.Sheet.el()); if (i) i.value = el.dataset.tagPick; K.haptic(); return true; }
+    if ((el = t.closest('[data-phf-pick]'))) {
+      if (el.disabled) return true;
+      const slot = el.closest('.phf');
+      const edit = S2.edit;
+      const label = el.textContent;
+      pickPhoto(slot.dataset.kind, url => {
+        trackUpload(url);
+        // the editor may have been closed meanwhile: then the upload is dropped
+        if (S2.edit !== edit || !slot.isConnected) { K.Backend.owner.removeMedia(url).catch(() => null); return; }
+        edit[slot.dataset.phf] = url;
+        setSlot(slot, url);
+      }, on => { el.disabled = on; el.innerHTML = on ? K.spinner() : esc(label); slot.classList.toggle('is-busy', on); });
+      return true;
+    }
+    if ((el = t.closest('[data-phf-del]'))) {
+      const slot = el.closest('.phf');
+      if (S2.edit) S2.edit[slot.dataset.phf] = '';
+      setSlot(slot, '');
+      K.haptic();
+      return true;
+    }
+    if ((el = t.closest('[data-tx-save]'))) { saveTexts(el); return true; }
+    if ((el = t.closest('[data-ac-add]'))) { S2.edit.aftercare.push({ step: '', text: '' }); $('#ac-list').innerHTML = aftercareHTML(); return true; }
+    if ((el = t.closest('[data-ac-del]'))) { S2.edit.aftercare.splice(+el.dataset.acDel, 1); $('#ac-list').innerHTML = aftercareHTML(); return true; }
+    if ((el = t.closest('[data-faq-add]'))) { S2.edit.faq.push({ q: '', a: '', extra: '' }); $('#faq-list').innerHTML = faqListHTML(); const last = $$('#faq-list [data-faq$=":q"]').pop(); if (last) last.focus(); return true; }
+    if ((el = t.closest('[data-faq-del]'))) { S2.edit.faq.splice(+el.dataset.faqDel, 1); $('#faq-list').innerHTML = faqListHTML(); return true; }
+    if ((el = t.closest('[data-faq-save]'))) { saveFaq(el); return true; }
+    // CRM
+    if ((el = t.closest('[data-ctag]'))) { toggleTag(el.dataset.ctag); return true; }
+    if ((el = t.closest('[data-ct-edit]'))) { K.Sheet.close(); setTimeout(openContactEditor, 380); return true; }
+    if ((el = t.closest('[data-ct-save]'))) { saveContacts(el); return true; }
+    if ((el = t.closest('[data-fm-new]'))) {
+      const cid = el.dataset.fmNew;
+      const bid = el.dataset.booking || null;
+      if (bid && ob.b && (!S2.client || S2.client.id !== cid)) S2.client = { id: cid, name: ob.b.client_name };
+      K.Sheet.close();
+      setTimeout(() => openFormulaEditor(cid, null, bid), 380);
+      return true;
+    }
+    if ((el = t.closest('[data-fm-edit]'))) { const f = (S2.formulas || []).find(x => x.id === el.dataset.fmEdit); const cid = S2.client.id; K.Sheet.close(); setTimeout(() => openFormulaEditor(cid, f), 380); return true; }
+    if ((el = t.closest('[data-fm-pick]'))) {
+      const [name, v] = el.dataset.fmPick.split(':');
+      S2.edit[name] = S2.edit[name] === v ? '' : v;
+      K.$$(`[data-fm-chips="${name}"] .chip`, K.Sheet.el()).forEach(c => c.classList.toggle('is-active', c.dataset.fmPick === `${name}:${S2.edit[name]}`));
+      K.haptic();
+      return true;
+    }
+    if ((el = t.closest('[data-fm-save]'))) { saveFormula(el); return true; }
+    if ((el = t.closest('[data-fm-del]'))) { deleteFormula(el); return true; }
+    return false;
+  }
+
+  function onStudioInput(t) {
+    if (t.dataset && t.dataset.ac) { const [i, k] = t.dataset.ac.split(':'); S2.edit.aftercare[+i][k] = t.value; return true; }
+    if (t.dataset && t.dataset.faq) { const [i, k] = t.dataset.faq.split(':'); S2.edit.faq[+i][k] = t.value; return true; }
+    if (t.matches && t.matches('[name="category_custom"]') && t.value) { K.$$('[data-cat-chips] .chip', K.Sheet.el()).forEach(c => c.classList.remove('is-active')); return true; }
+    return false;
+  }
+  async function onStudioChange(t) {
+    if (t.matches && t.matches('[data-patch-date]') && S2.client) {
+      try { const r = await K.Backend.owner.saveClient(S2.client.id, { patch_test_at: t.value }); S2.client = r.client; K.toast('Patch test date saved', 'ok'); } catch (e) { K.toast(err(e), 'x'); }
+      return true;
+    }
+    return false;
   }
 
   /* =========================================================
@@ -1101,7 +1872,7 @@
     }
     box.innerHTML = `
       <header class="ob__head"><span class="bstat bstat--${b.status}">${esc(statusLabel(b.status))}</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
-      <h2>${esc(b.client_name || 'Client')}</h2>
+      <h2>${esc(b.client_name || 'Client')}${tagBadges(b.client_tags)}</h2>
       <p class="ob__sub num">${esc(K.dayLabel(spot(b.start_at).off, true))} · ${timeRange(b)}${future && isActive(b) ? ` · <em>${K.countdown(b.start_at)}</em>` : ''}</p>
       ${ob.mode === 'cancel' ? `
       <div class="card mg__confirm">
@@ -1122,7 +1893,9 @@
         <div class="bk-row"><span>Booked</span><b>${esc(ago(b.created_at))} · ${b.created_by === 'master' ? 'by you' : 'online'}</b></div>
         ${b.late_cancel ? '<div class="bk-row bk-row--accent"><span>Late change</span><b>Yes</b></div>' : ''}
         ${b.cancel_reason ? `<div class="bk-row bk-row--addr"><span>Reason</span><b>${esc(b.cancel_reason)}</b></div>` : ''}
+        ${b.last_formula ? `<div class="bk-row"><span>Last time</span><b class="num">${esc(formulaLine(b.last_formula))}</b></div>` : ''}
       </div>
+      ${b.client_id && (started || b.status === 'completed') && !b.status.startsWith('cancelled') ? `<button class="btn btn--soft btn--block" data-fm-new="${esc(b.client_id)}" data-booking="${esc(b.id)}">${icon(LASH)}Write today’s lash map</button>` : ''}
       ${b.client_phone ? `
       <div class="ob__actions">
         <a class="btn btn--soft" href="${esc(telHref(b.client_phone))}">${K.I.phone}Call</a>
@@ -1374,6 +2147,7 @@
       return;
     }
     if ((el = t.closest('[data-cl-save]'))) { saveNotes(el.dataset.clSave); return; }
+    if (onStudioClick(t)) return;
     // calendar
     if ((el = t.closest('[data-push-on]'))) { if (!el.disabled) pushOn(el); return; }
     if ((el = t.closest('[data-push-off]'))) { pushOff(); return; }
@@ -1489,6 +2263,7 @@
     if (!root) return;
     const t = e.target;
     if (t.id === 'cab-q') { onSearch(t.value); return; }
+    if (onStudioInput(t)) return;
     if (t.id === 'pk-custom') {
       ob.pick.custom = t.value;
       ob.pick.min = null;
@@ -1519,6 +2294,7 @@
     if (!root) return;
     const t = e.target;
     if (t.dataset && t.dataset.rule) { saveRule(t.dataset.rule, +t.value); return; }
+    onStudioChange(t);
     if (t.matches && t.matches('[data-nb-svc]')) {
       nb.svc = t.value;
       ob.pick.slots = null;
@@ -1530,6 +2306,7 @@
   function afterRender(tab) {
     if (tab === 'today') paintPush();
     if (tab === 'requests') bindSwipes();
+    if (tab === 'services' || tab === 'looks') bindSortable();
     if (tab === 'calendar') bindDaySwipe();
     if (tab === 'today' || (tab === 'calendar' && S.cal === 'day')) {
       // bring "now" (or the first booking) into view
