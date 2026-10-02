@@ -99,9 +99,13 @@
     if (g) K.ensure(g.fromTo(root, { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.45, ease: 'power3.out', clearProps: 'transform,opacity' }));
 
     renderLoading();
+    document.addEventListener('visibilitychange', onVisible);
     try {
       S.session = await K.Backend.auth.session();
-      if (S.session) await enter();
+      if (S.session) {
+        restoreLocal(); // the dashboard from the last visit, at once
+        await enter();
+      }
       else if (S.auto) { K.setOwnerHere && K.setOwnerHere(false); close(); } // signed out meanwhile: stay in the client app
       else renderAuth();
     } catch (e) {
@@ -113,6 +117,7 @@
     if (!root) return;
     K.onCabinet && K.onCabinet(false);
     stopLive();
+    document.removeEventListener('visibilitychange', onVisible);
     document.removeEventListener('click', onClick);
     document.removeEventListener('input', onInput);
     document.removeEventListener('change', onChange);
@@ -172,19 +177,62 @@
     }
   }
 
-  /* Signed in: which studio is this account for? */
-  async function enter() {
-    renderLoading();
+  /* What the dashboard showed last time (this device, this account): shown at
+     once on the next start while the fresh data is on its way */
+  function saveLocal() {
+    if (!S.session || !S.studio || !S.known) return;
     try {
-      const list = await K.Backend.owner.studios();
-      S.studio = (list || []).find(m => m.slug === K.SLUG) || null;
+      K.store.set('cab', {
+        uid: S.session.user && S.session.user.id, at: Date.now(), studio: S.studio, sched: S.sched,
+        from: S.knownFrom, to: S.knownTo, known: [...S.known.values()]
+      });
+    } catch (e) { /* storage full: next time loads from the network */ }
+  }
+  function restoreLocal() {
+    const c = K.store.get('cab');
+    if (!c || !c.studio || c.studio.slug !== K.SLUG || !S.session || !S.session.user || c.uid !== S.session.user.id) return false;
+    S.studio = c.studio;
+    S.sched = c.sched || { hours: [], time_off: [], rules: {} };
+    applyBookings(c.known || [], c.from, c.to, true);
+    S.lastSync = Date.now(); // enter() is fetching the fresh copy right now
+    showChrome();
+    go(S.tab, true);
+    return true;
+  }
+  function showChrome() {
+    $('#cab-tabs').hidden = false;
+    $('[data-cab-new]').hidden = false;
+    $('[data-cab-menu]').hidden = false;
+  }
+  const WINDOW = () => ({ from: Date.now() - 14 * 864e5, to: Date.now() + 120 * 864e5 });
+  const windowBookings = (mid, w) => K.Backend.owner.bookings(mid, new Date(w.from).toISOString(), new Date(w.to).toISOString());
+
+  /* Signed in: which studio is this account for? Everything that doesn't depend
+     on the answer goes out at the same time (the studio id from last time) */
+  async function enter() {
+    const shown = !!S.studio;
+    if (!shown) renderLoading();
+    const guess = S.studio && S.studio.id;
+    const w = WINDOW();
+    let list, sched, books;
+    try {
+      [list, sched, books] = await Promise.all([
+        K.Backend.owner.studios(),
+        guess ? K.Backend.owner.schedule(guess).catch(() => null) : null,
+        guess ? windowBookings(guess, w).catch(() => null) : null
+      ]);
     } catch (e) {
-      renderAuth(err(e));
+      if (shown) { S.stale = true; setLiveLabel(); startLive(); return; } // keep what's on screen
+      renderEnterError(e);
       return;
     }
-    K.setOwnerHere && K.setOwnerHere(!!S.studio);
-    if (!S.studio && S.auto) { close(); return; }
-    if (!S.studio) {
+    const studio = (list || []).find(m => m.slug === K.SLUG) || null;
+    K.setOwnerHere && K.setOwnerHere(!!studio);
+    if (!studio) K.store.remove('cab');
+    if (!studio && S.auto) { close(); return; }
+    if (!studio) {
+      S.studio = null;
+      $('#cab-tabs').hidden = true;
       $('#cab-main').innerHTML = `
         <div class="cab-auth">
           <span class="cab-auth__mono">${esc(K.initials())}</span>
@@ -194,14 +242,38 @@
         </div>`;
       return;
     }
-    $('#cab-tabs').hidden = false;
-    $('[data-cab-new]').hidden = false;
-    $('[data-cab-menu]').hidden = false;
-    try { S.sched = await K.Backend.owner.schedule(S.studio.id); } catch (e) { S.sched = { hours: [], time_off: [], rules: {} }; }
-    await syncChanges(true);
+    S.studio = studio;
+    if (studio.id !== guess) {
+      [sched, books] = await Promise.all([K.Backend.owner.schedule(studio.id).catch(() => null), windowBookings(studio.id, w).catch(() => null)]);
+    }
+    S.sched = sched || S.sched || { hours: [], time_off: [], rules: {} };
+    S.stale = !books;
+    if (books) { S.lastSync = Date.now(); applyBookings(books, w.from, w.to, true); }
+    else if (!S.known) { try { await syncChanges(true); } catch (e) { /* the view says so */ } }
+    showChrome();
     startLive();
-    go(S.tab, true);
-    if (S.target) { const id = S.target; S.target = null; setTimeout(() => openBooking(id), 450); }
+    if (!shown) go(S.tab, true); else refreshView();
+    if (S.target) { const id = S.target; S.target = null; setTimeout(() => openBooking(id), shown ? 150 : 450); }
+  }
+  function renderEnterError(e) {
+    $('#cab-main').innerHTML = `
+      <div class="cab-auth">
+        <span class="cab-auth__mono">${esc(K.initials())}</span>
+        <h1>Can’t reach the studio</h1>
+        <p>${esc(err(e))}</p>
+        <button class="btn btn--primary btn--block" data-cab-reenter>Try again</button>
+      </div>`;
+  }
+
+  /* Back from the background (iOS freezes an installed app): token first,
+     then the news — what's on screen stays until the fresh data is in */
+  function onVisible() {
+    if (document.visibilityState !== 'visible' || !root || !S.studio) return;
+    K.Backend.auth.fresh().catch(() => null).then(() => {
+      if (!root || !S.studio) return;
+      syncChanges();
+      if (S.tab !== 'today' && S.tab !== 'calendar' && S.tab !== 'requests') refreshView();
+    });
   }
 
   /* =========================================================
@@ -227,24 +299,53 @@
   }
   function setLiveLabel() {
     const el = $('#cab-live');
-    if (el) el.innerHTML = S.live ? '<i class="cab-dot"></i>Live' : 'Up to date';
+    if (el) el.innerHTML = S.stale ? 'Offline — showing saved' : S.live ? '<i class="cab-dot"></i>Live' : 'Up to date';
   }
   let syncTimer = 0;
   const scheduleSync = () => { clearTimeout(syncTimer); syncTimer = setTimeout(() => syncChanges(), 350); };
 
-  // Compare with what we knew: new bookings, client cancellations, moves
-  async function syncChanges(first) {
-    if (!S.studio) return;
-    let list;
-    try {
-      const from = new Date(Date.now() - 2 * 864e5).toISOString();
-      const to = new Date(Date.now() + 120 * 864e5).toISOString();
-      list = await K.Backend.owner.bookings(S.studio.id, from, to);
-    } catch (e) { return; }
+  /* All bookings from two weeks back to four months ahead, kept in one map:
+     Today, Calendar and Requests are drawn from it (no request per view).
+     A refetch replaces only what changed; other ranges stay cached. */
+  let syncP = null;
+  function syncChanges(first) {
+    if (!S.studio) return Promise.resolve();
+    if (syncP) return syncP;
+    const w = WINDOW();
+    syncP = windowBookings(S.studio.id, w)
+      .then(list => { S.stale = false; S.lastSync = Date.now(); setLiveLabel(); applyBookings(list, w.from, w.to, first); })
+      .catch(e => { S.stale = true; setLiveLabel(); if (first && !S.known) throw e; })
+      .finally(() => { syncP = null; });
+    return syncP;
+  }
+  // merge what an action already told us (status, time…) — the next sync confirms it
+  function patchKnown(id, fields) {
+    const k = S.known && S.known.get(id);
+    if (!k || !fields) return;
+    ['status', 'start_at', 'end_at', 'cancel_reason', 'late_cancel', 'deposit_status', 'deposit_paid_at', 'completed_at', 'auto_completed']
+      .forEach(f => { if (f in fields) k[f] = fields[f]; });
+    S.pending = [...S.known.values()].filter(b => b.status === 'pending' && Date.parse(b.start_at) > Date.now());
+    S.badges.requests = S.pending.length;
+    saveLocal();
+  }
+  function applyBookings(list, from, to, first) {
     const prev = S.known;
     S.known = new Map(list.map(b => [b.id, b]));
+    S.knownFrom = from;
+    S.knownTo = to;
     S.pending = list.filter(b => b.status === 'pending' && Date.parse(b.start_at) > Date.now());
-    S.cache = {};
+    // cached ranges outside the window: drop only those a changed booking touches
+    if (prev) {
+      const moved = [];
+      list.forEach(b => { const o = prev.get(b.id); if (!o || o.updated_at !== b.updated_at) { moved.push(b.start_at); if (o) moved.push(o.start_at); } });
+      prev.forEach((o, id) => { if (!S.known.has(id)) moved.push(o.start_at); });
+      Object.keys(S.cache).forEach(key => {
+        const [off, days] = key.split(':').map(Number);
+        const a = Date.parse(dayStartIso(off));
+        const z = Date.parse(dayStartIso(off + days));
+        if (moved.some(t => { const x = Date.parse(t); return x >= a && x < z; })) delete S.cache[key];
+      });
+    }
     if (!first && prev) {
       list.forEach(b => {
         const old = prev.get(b.id);
@@ -258,7 +359,8 @@
     S.self.clear();
     S.badges.requests = S.pending.length;
     paintBadges();
-    if (!first) refreshView();
+    saveLocal();
+    if (!first && ['today', 'calendar', 'requests'].includes(S.tab)) refreshView();
   }
 
   function notify(kind, b, old) {
@@ -362,55 +464,125 @@
   /* =========================================================
      Tabs
      ========================================================= */
-  function go(tab, initial) {
+  /* Every view = a loader (network → memory) and a renderer (memory → HTML).
+     A tab shows what is in memory at once and redraws quietly when the fresh
+     data is in; a spinner only when there has never been anything to show.
+     Forms she is filling in are never redrawn under her fingers. */
+  const NO_DATA = new Error('no data yet');
+  const need = v => { if (v == null) throw NO_DATA; return v; };
+  const MEM = {};
+  const memLoad = async (k, f) => (MEM[k] = await f());
+  const loadSched = async () => { S.sched = await K.Backend.owner.schedule(S.studio.id); saveLocal(); };
+  const knownFresh = () => (S.known && Date.now() - (S.lastSync || 0) < 30000 ? null : syncChanges(true));
+  const LOAD = {
+    today: () => Promise.all([knownFresh(), loadSetup()]),
+    requests: () => knownFresh(),
+    calendar: () => loadCalendar(),
+    clients: () => memLoad('cl:' + S.q, () => K.Backend.owner.clients(S.studio.id, S.q)),
+    insights: () => memLoad('ins:' + (S.insPer || 'week'), () => K.Backend.owner.insights(S.studio.id, S.insPer || 'week')),
+    studio: () => Promise.all([loadProfile(true), loadServices(true), loadLooks(true)]),
+    profile: () => loadProfile(true),
+    style: () => loadProfile(true),
+    texts: () => loadProfile(true),
+    faq: () => loadProfile(true),
+    promo: () => loadProfile(true),
+    loyalty: () => loadProfile(true),
+    services: () => Promise.all([loadServices(true), loadProfile(true)]),
+    looks: () => Promise.all([loadLooks(true), loadServices(true)]),
+    payments: () => Promise.all([loadProfile(true), loadSched(), loadServices(true)]),
+    hours: () => (S.hrsDirty ? null : loadSched())
+  };
+  const RENDER = {
+    today: () => todayHTML(), calendar: () => calendarHTML(), requests: () => requestsHTML(), clients: () => clientsHTML(),
+    hours: () => hoursHTML(), studio: () => studioHTML(), insights: () => insightsHTML(), payments: () => paymentsHTML(),
+    profile: () => profileHTML(), style: () => styleHTML(), services: () => servicesHTML(), looks: () => looksHTML(),
+    texts: () => textsHTML(), faq: () => faqHTML(), promo: () => promoHTML(), loyalty: () => loyaltyEditHTML()
+  };
+  const EDITORS = new Set(['profile', 'style', 'texts', 'faq', 'payments', 'hours', 'promo', 'loyalty']);
+
+  async function go(tab, initial) {
     S.tab = tab;
+    S.dirty = false;
     if (tab === 'today' || tab === 'calendar') S.badges[tab] = 0;
     paintBadges();
     $$('.cab__tab').forEach(b => b.classList.toggle('is-active', b.dataset.cabTab === (PARENT[tab] || tab)));
     if (S2.edit && !['service', 'look', 'formula'].includes(S2.edit.kind)) cleanupUnsaved();
     const main = $('#cab-main');
-    main.innerHTML = `<div class="cab__view" data-view="${tab}"><div class="cab-load"><i class="spin"></i></div></div>`;
+    main.innerHTML = `<div class="cab__view" data-view="${tab}"></div>`;
     main.scrollTop = 0;
-    refreshView(true);
     if (!initial) K.haptic();
-  }
-
-  async function refreshView(animate) {
-    if (!root || !S.studio) return;
+    const shown = await paint(tab, !initial).catch(() => false);
     const view = $('.cab__view');
-    if (!view) return;
-    const tab = S.tab;
-    try {
-      let html = '';
-      if (tab === 'today') html = await todayHTML();
-      else if (tab === 'calendar') html = await calendarHTML();
-      else if (tab === 'requests') html = requestsHTML();
-      else if (tab === 'clients') html = await clientsHTML();
-      else if (tab === 'hours') html = await hoursHTML();
-      else if (tab === 'studio') html = await studioHTML();
-      else if (tab === 'insights') html = await insightsHTML();
-      else if (tab === 'payments') html = await paymentsHTML();
-      else if (tab === 'profile') html = await profileHTML();
-      else if (tab === 'style') html = await styleHTML();
-      else if (tab === 'services') html = await servicesHTML();
-      else if (tab === 'looks') html = await looksHTML();
-      else if (tab === 'texts') html = await textsHTML();
-      else if (tab === 'faq') html = await faqHTML();
-      if (!root || S.tab !== tab) return;
-      const keep = tab === 'clients' && document.activeElement && document.activeElement.id === 'cab-q';
-      if (keep) { $('#cab-clients').innerHTML = clientsListHTML(); return; }
-      view.innerHTML = html;
-      afterRender(tab);
-      if (animate) K.springIn($$('.cab__view > *'), { stagger: 0.04, y: 14, duration: 0.5 });
-    } catch (e) {
-      view.innerHTML = `<div class="cab-empty"><b>${esc(err(e))}</b><button class="btn btn--soft btn--sm" data-cab-retry>Try again</button></div>`;
-    }
+    if (!shown && view && S.tab === tab && view.__html == null) view.innerHTML = '<div class="cab-load"><i class="spin"></i></div>';
+    load(tab, !shown);
   }
 
-  async function bookingsFor(fromOff, days) {
-    const key = fromOff + ':' + days;
-    if (!S.cache[key]) S.cache[key] = await K.Backend.owner.bookings(S.studio.id, dayStartIso(fromOff), dayStartIso(fromOff + days));
-    return S.cache[key];
+  // draw the current tab from memory; false = nothing in memory yet
+  async function paint(tab, animate) {
+    const view = $('.cab__view');
+    if (!root || !view || S.tab !== tab || !RENDER[tab]) return false;
+    let html;
+    try { html = await RENDER[tab](); } catch (e) { if (e === NO_DATA) return false; throw e; }
+    if (!root || S.tab !== tab || view !== $('.cab__view')) return true;
+    if (view.__html === html) return true;
+    const first = view.__html == null;
+    const keep = !first && tab === 'clients' && document.activeElement && document.activeElement.id === 'cab-q';
+    view.__html = html;
+    if (keep) { $('#cab-clients').innerHTML = clientsListHTML(); return true; }
+    const main = $('#cab-main');
+    const y = main.scrollTop;
+    view.innerHTML = html;
+    afterRender(tab, first);
+    if (!first) main.scrollTop = y;
+    else if (animate) K.springIn($$('.cab__view > *'), { stagger: 0.04, y: 14, duration: 0.5 });
+    return true;
+  }
+
+  // fetch, then redraw quietly (not while she is editing a form)
+  async function load(tab, animate) {
+    try { await (LOAD[tab] ? LOAD[tab]() : null); } catch (e) {
+      const view = $('.cab__view');
+      if (!root || S.tab !== tab || !view) return;
+      if (view.__html == null) view.innerHTML = `<div class="cab-empty"><b>${esc(err(e))}</b><button class="btn btn--soft btn--sm" data-cab-retry>Try again</button></div>`;
+      else { S.stale = true; setLiveLabel(); }
+      return;
+    }
+    if (!root || S.tab !== tab || (EDITORS.has(tab) && S.dirty)) return;
+    try { await paint(tab, animate); } catch (e) { /* keep what's on screen */ }
+  }
+
+  // state changed here (a toggle, a day): redraw now, then refresh in the background
+  function refreshView(animate) {
+    if (!root || !S.studio) return;
+    const tab = S.tab;
+    if (EDITORS.has(tab) && S.dirty) return;
+    paint(tab, animate).catch(() => null).then(() => load(tab, animate));
+  }
+  // redraw from memory only (in-view state like hours being edited)
+  function repaint() { if (root && S.studio) paint(S.tab).catch(() => null); }
+
+  const byStart = (a, z) => Date.parse(a.start_at) - Date.parse(z.start_at);
+  function bookingsFor(fromOff, days) {
+    const a = Date.parse(dayStartIso(fromOff));
+    const z = Date.parse(dayStartIso(fromOff + days));
+    if (S.known && S.knownFrom <= a && z <= S.knownTo) {
+      return [...S.known.values()].filter(b => { const t = Date.parse(b.start_at); return t >= a && t < z; }).sort(byStart);
+    }
+    const hit = S.cache[fromOff + ':' + days];
+    if (hit) return hit;
+    throw NO_DATA;
+  }
+  function calRange() {
+    if (S.cal !== 'week') return [S.day, 1];
+    const d0 = K.studioDate(S.day);
+    return [S.day - ((d0.dow + 6) % 7), 7];
+  }
+  async function loadCalendar() {
+    const [off, days] = calRange();
+    const a = Date.parse(dayStartIso(off));
+    const z = Date.parse(dayStartIso(off + days));
+    if (S.knownFrom <= a && z <= S.knownTo) return knownFresh();
+    S.cache[off + ':' + days] = await K.Backend.owner.bookings(S.studio.id, dayStartIso(off), dayStartIso(off + days));
   }
 
   /* ---------- TODAY ---------- */
@@ -431,6 +603,7 @@
         <div><b class="num">${counted.length}</b><small>${counted.length === 1 ? 'Client' : 'Clients'}</small></div>
         <div><b class="num">${freeMin >= 60 ? Math.floor(freeMin / 60) + 'h' + (freeMin % 60 ? ' ' + (freeMin % 60) + 'm' : '') : freeMin + 'm'}</b><small>Free</small></div>
       </div>
+      ${setupHTML()}
       <div id="cab-push"></div>
       ${next ? nextClientHTML(next) : `<div class="card cab-next cab-next--none"><b>${live.length ? 'All done for today' : 'No clients today'}</b><span>${free.length ? 'Free windows are below — tap one to book a client.' : 'Enjoy the quiet.'}</span></div>`}
       ${depositsWaitingHTML()}
@@ -544,7 +717,7 @@
       <label class="cab-cx">Show cancelled<button class="switch" role="switch" aria-checked="${S.showCx}" data-cab-showcx aria-label="Show cancelled bookings"></button></label></div>`;
   }
 
-  /* ---------- CALENDAR ---------- */
+  /* ---------- CALENDAR (date + Day/Week stay pinned on top) ---------- */
   async function calendarHTML() {
     const seg = `<div class="segmented cab-seg" role="radiogroup" style="--n:2;--idx:${S.cal === 'week' ? 1 : 0}"><i class="segmented__thumb"></i>
       <button role="radio" data-cab-cal="day" aria-checked="${S.cal === 'day'}">Day</button>
@@ -552,27 +725,31 @@
     if (S.cal === 'week') {
       const d0 = K.studioDate(S.day);
       const start = S.day - ((d0.dow + 6) % 7); // Monday
-      const list = await bookingsFor(start, 7);
+      const list = bookingsFor(start, 7);
       const a = K.studioDate(start);
       const b = K.studioDate(start + 6);
       return `
-        <header class="cab-h"><h1>Calendar</h1>${seg}</header>
-        <div class="cab-nav">
-          <button class="cab__ic" data-cab-shift="-7" aria-label="Previous week">${K.I.chevL}</button>
-          <b>${K.MONTHS[a.month]} ${a.day} – ${a.month !== b.month ? K.MONTHS[b.month] + ' ' : ''}${b.day}</b>
-          <button class="cab__ic" data-cab-shift="7" aria-label="Next week">${K.I.chevR}</button>
-          ${S.day !== 0 ? '<button class="cab-today" data-cab-today>Today</button>' : ''}
+        <div class="cab-pin">
+          <header class="cab-h cab-h--row"><h1>Calendar</h1>${seg}</header>
+          <div class="cab-nav">
+            <button class="cab__ic" data-cab-shift="-7" aria-label="Previous week">${K.I.chevL}</button>
+            <b>${K.MONTHS[a.month]} ${a.day} – ${a.month !== b.month ? K.MONTHS[b.month] + ' ' : ''}${b.day}</b>
+            <button class="cab__ic" data-cab-shift="7" aria-label="Next week">${K.I.chevR}</button>
+            ${S.day !== 0 ? '<button class="cab-today" data-cab-today>Today</button>' : ''}
+          </div>
         </div>
         ${weekHTML(start, list)}`;
     }
-    const list = await bookingsFor(S.day, 1);
+    const list = bookingsFor(S.day, 1);
     return `
-      <header class="cab-h"><h1>Calendar</h1>${seg}</header>
-      <div class="cab-nav">
-        <button class="cab__ic" data-cab-shift="-1" aria-label="Previous day">${K.I.chevL}</button>
-        <b>${esc(K.dayLabel(S.day, true))}</b>
-        <button class="cab__ic" data-cab-shift="1" aria-label="Next day">${K.I.chevR}</button>
-        ${S.day !== 0 ? '<button class="cab-today" data-cab-today>Today</button>' : ''}
+      <div class="cab-pin">
+        <header class="cab-h cab-h--row"><h1>Calendar</h1>${seg}</header>
+        <div class="cab-nav">
+          <button class="cab__ic" data-cab-shift="-1" aria-label="Previous day">${K.I.chevL}</button>
+          <b>${esc(K.dayLabel(S.day, true))}</b>
+          <button class="cab__ic" data-cab-shift="1" aria-label="Next day">${K.I.chevR}</button>
+          ${S.day !== 0 ? '<button class="cab-today" data-cab-today>Today</button>' : ''}
+        </div>
       </div>
       ${tlHead('Day')}
       <div class="cab-day" data-swipe>${timelineHTML(S.day, list)}</div>
@@ -638,6 +815,7 @@
     try {
       await K.Backend.owner.setStatus(id, yes ? 'confirmed' : 'cancelled_master', yes ? null : 'Declined');
       K.haptic(yes ? [10, 30, 10] : 20);
+      patchKnown(id, { status: yes ? 'confirmed' : 'cancelled_master' });
       S.pending = S.pending.filter(b => b.id !== id);
       S.badges.requests = S.pending.length;
       paintBadges();
@@ -699,7 +877,7 @@
 
   /* ---------- CLIENTS ---------- */
   async function clientsHTML() {
-    S.clients = await K.Backend.owner.clients(S.studio.id, S.q);
+    S.clients = need(MEM['cl:' + S.q]);
     return `
       <header class="cab-h"><h1>Clients</h1></header>
       <label class="search">${K.I.search}<input id="cab-q" type="search" placeholder="Name, phone, email or tag" value="${esc(S.q)}" autocomplete="off" enterkeyhint="search"></label>
@@ -721,7 +899,7 @@
     S.q = v;
     clearTimeout(qTimer);
     qTimer = setTimeout(async () => {
-      try { S.clients = await K.Backend.owner.clients(S.studio.id, S.q); } catch (e) { return; }
+      try { S.clients = await memLoad('cl:' + S.q, () => K.Backend.owner.clients(S.studio.id, S.q)); } catch (e) { return; }
       const box = $('#cab-clients');
       if (box) box.innerHTML = clientsListHTML();
     }, 250);
@@ -784,7 +962,7 @@
   /* ---------- HOURS ---------- */
   async function hoursHTML() {
     if (!S.hrs || !S.hrsDirty) {
-      S.sched = await K.Backend.owner.schedule(S.studio.id);
+      need(S.sched);
       S.hrs = {};
       for (let d = 0; d < 7; d++) S.hrs[d] = (S.sched.hours || []).filter(h => h.weekday === d).map(h => ({ s: h.start, e: h.end }));
     }
@@ -891,6 +1069,8 @@
       K.haptic([10, 30, 10]);
       K.toast('Working hours saved', 'ok');
       K.onDataChanged();
+      S.dirty = false;
+      saveLocal();
       refreshView();
     } catch (e) { K.toast(e.code === 'hours_overlap' ? 'Two intervals on one day overlap' : err(e), 'x'); }
   }
@@ -913,6 +1093,7 @@
       K.haptic();
       K.onDataChanged();
       S.hrsDirty = false;
+      S.dirty = false;
       refreshView();
     } catch (e) { K.toast(err(e), 'x'); }
   }
@@ -931,8 +1112,8 @@
      STUDIO — she runs everything herself: profile, look, services,
      looks, texts, assistant answers. Photos go to Supabase Storage.
      ========================================================= */
-  const PARENT = { requests: 'today', hours: 'studio', services: 'studio', profile: 'studio', style: 'studio', looks: 'studio', texts: 'studio', faq: 'studio', payments: 'studio' };
-  const SUB_TITLE = { requests: 'Today', hours: 'Studio', services: 'Studio', profile: 'Studio', style: 'Studio', looks: 'Studio', texts: 'Studio', faq: 'Studio', payments: 'Studio' };
+  const PARENT = { requests: 'today', hours: 'studio', services: 'studio', profile: 'studio', style: 'studio', looks: 'studio', texts: 'studio', faq: 'studio', payments: 'studio', promo: 'studio', loyalty: 'studio' };
+  const SUB_TITLE = { requests: 'Today', hours: 'Studio', services: 'Studio', profile: 'Studio', style: 'Studio', looks: 'Studio', texts: 'Studio', faq: 'Studio', payments: 'Studio', promo: 'Studio', loyalty: 'Studio' };
   const backHTML = tab => PARENT[tab] ? `<button class="cab-back cab-back--top" data-cab-tab="${PARENT[tab]}">${K.I.chevL}${SUB_TITLE[tab]}</button>` : '';
   const S2 = { profile: null, services: null, looks: null, edit: null };
 
@@ -1022,7 +1203,9 @@
 
   /* ---------- the Studio tab ---------- */
   async function studioHTML() {
-    const [p, svcs, looks] = await Promise.all([loadProfile(true), loadServices(true), loadLooks(true)]);
+    const p = need(S2.profile);
+    const svcs = need(S2.services);
+    const looks = need(S2.looks);
     const st = p.settings || {};
     const row = (tab, ic, label, value) => `
       <button class="row row--link" data-cab-tab="${tab}">
@@ -1033,12 +1216,15 @@
       </button>`;
     return `
       <header class="cab-h"><span class="eyebrow">${esc(location.host + location.pathname.replace(/\/$/, ''))}/?m=${esc(K.SLUG)}</span><h1>Studio</h1></header>
+      ${depositWarnHTML()}
       <div class="group-label">Your page</div>
       <div class="list">
         ${row('profile', '<circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5c1-3.3 3.8-5 7-5s6 1.7 7 5"/>', 'Profile & photos', st.tagline ? '' : 'Add')}
         ${row('style', '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17M3.5 12h8.5"/>', 'Look & feel', ({ soft: 'Soft', maison: 'Maison', noir: 'Noir' })[p.style] || '')}
         ${row('services', '<path d="M10 3.5l1.8 4.9 4.9 1.8-4.9 1.8L10 16.9l-1.8-4.9-4.9-1.8 4.9-1.8z"/>', 'Services', svcs.filter(s => s.active).length)}
         ${row('looks', '<rect x="3.5" y="4" width="17" height="16" rx="4"/><circle cx="9" cy="9.5" r="1.5"/><path d="m20.5 15-4-4L7 20"/>', 'Looks', looks.length)}
+        ${row('promo', '<path d="M4 9.5h16v10H4z"/><path d="M12 9.5v10M3 6.5h18v3H3zM12 6.5c-1.5-3-5-3-5-1s3 1 5 1c2 0 5 1 5-1s-3.5-2-5 1"/>', 'Promo banner', st.promo && st.promo.on ? 'On' : 'Off')}
+        ${row('loyalty', '<rect x="3" y="5.5" width="18" height="13" rx="3"/><circle cx="8" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="16" cy="12" r="1.3"/>', 'Loyalty card', st.loyalty && st.loyalty.on ? 'On' : 'Off')}
       </div>
       <div class="group-label">Booking</div>
       <div class="list">
@@ -1061,7 +1247,7 @@
     ['reviewUrl', 'Review link (Google / Instagram)', 'https://g.page/r/…']
   ];
   async function profileHTML() {
-    const p = await loadProfile(true);
+    const p = need(S2.profile);
     const st = p.settings || {};
     S2.edit = { kind: 'profile', heroPhoto: st.heroPhoto || '', avatar: st.avatar || '', __orig: { heroPhoto: st.heroPhoto || '', avatar: st.avatar || '' } };
     return `
@@ -1076,6 +1262,17 @@
             ${k === 'parking' ? `<textarea name="${k}" rows="2" maxlength="300" placeholder="${esc(ph)}">${esc(st[k] || '')}</textarea>`
               : `<input name="${k}" maxlength="${k === 'reviewUrl' ? 300 : 120}" value="${esc(st[k] || '')}" placeholder="${esc(ph)}"${k === 'phone' ? ' type="tel" inputmode="tel"' : k === 'reviewUrl' ? ' type="url" inputmode="url" autocapitalize="off"' : ''}></label>`}
           `).join('')}
+        <div class="group-label">Numbers on your page</div>
+        <p class="cab-muted">Only what’s true — leave a field empty and that block isn’t shown.</p>
+        <div class="form-2">
+          <label class="field"><span>Rating (1–5)</span><input name="rating" type="number" inputmode="decimal" min="1" max="5" step="0.1" value="${esc(st.rating || '')}" placeholder="4.9"></label>
+          <label class="field"><span>Number of reviews</span><input name="reviewCount" type="number" inputmode="numeric" min="0" step="1" value="${esc(st.reviewCount || '')}" placeholder="—"></label>
+        </div>
+        <div class="form-2">
+          <label class="field"><span>Years of experience</span><input name="yearsExp" type="number" inputmode="numeric" min="0" max="60" step="1" value="${esc(st.yearsExp || '')}" placeholder="—"></label>
+          <label class="field"><span>Works done</span><input name="worksDone" type="number" inputmode="numeric" min="0" step="1" value="${esc(st.worksDone || '')}" placeholder="—"></label>
+        </div>
+        <label class="field"><span>Works are called</span><input name="worksLabel" maxlength="24" value="${esc(st.worksLabel || '')}" placeholder="sets done"></label>
       </form>
       <button class="btn btn--primary btn--block" data-pf-save>Save profile</button>`;
   }
@@ -1088,6 +1285,14 @@
     const settings = {};
     PROFILE_FIELDS.forEach(([k]) => { settings[k] = val(k) || null; });
     settings.instagram = ig || null;
+    const rating = val('rating') === '' ? null : +val('rating');
+    if (rating != null && !(rating >= 1 && rating <= 5)) { K.toast('The rating goes from 1 to 5', 'x'); return; }
+    const whole = n => (val(n) === '' || !(+val(n) > 0) ? null : Math.round(+val(n)));
+    settings.rating = rating;
+    settings.reviewCount = whole('reviewCount');
+    settings.yearsExp = whole('yearsExp');
+    settings.worksDone = whole('worksDone');
+    settings.worksLabel = val('worksLabel') || null;
     settings.heroPhoto = S2.edit.heroPhoto || null;
     settings.avatar = S2.edit.avatar || null;
     await busyBtn(btn, async () => {
@@ -1104,7 +1309,7 @@
   async function busyBtn(btn, work) {
     const label = btn ? btn.innerHTML : '';
     if (btn) { btn.disabled = true; btn.innerHTML = K.spinner(); }
-    try { await work(); K.haptic([10, 30, 10]); } catch (e) { K.toast(err(e), 'x'); } finally { if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = label; } }
+    try { await work(); S.dirty = false; K.haptic([10, 30, 10]); } catch (e) { K.toast(err(e), 'x'); } finally { if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = label; } }
   }
 
   /* ---------- Look & feel (style + accent, live preview) ---------- */
@@ -1114,7 +1319,7 @@
     noir: { bg: '#F2F2F7', card: '#FFFFFF', text: '#0A0A0B', font: "'Inter', system-ui, sans-serif", w: 700, r: 14 }
   };
   async function styleHTML() {
-    const p = await loadProfile(true);
+    const p = need(S2.profile);
     const st = p.settings || {};
     S2.edit = { kind: 'style', style: p.style || 'noir', accent: st.defaultAccent || null };
     return `
@@ -1162,15 +1367,16 @@
   const DURATIONS = [15, 20, 30, 40, 45, 50, 60, 75, 90, 105, 120, 135, 150, 165, 180, 210, 240, 270, 300];
   const durText = m => (m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ' ' + (m % 60) + 'm' : ''}` : m + ' min');
   async function servicesHTML() {
-    const list = await loadServices(true);
+    const list = need(S2.services);
     return `
       ${backHTML('services')}
       <header class="cab-h cab-h--row"><h1>Services</h1><button class="btn btn--primary btn--sm" data-svc-new>${icon('<path d="M12 5v14M5 12h14"/>')}Add</button></header>
+      ${depositWarnHTML()}
       ${list.length ? `<p class="cab-muted">Drag ≡ to change the order clients see. Tap to edit.</p>
       <div class="list sortable" data-sort="services">${list.map(s => `
         <div class="row svc-row${s.active ? '' : ' is-hidden'}" data-id="${esc(s.id)}">
           <button class="drag" data-drag aria-label="Drag to reorder">${icon('<path d="M5 8h14M5 12h14M5 16h14"/>')}</button>
-          <img class="svc-row__img" src="${esc(K.photoSrc({ photo: s.photo, category: s.category, title: s.name }, 160))}" alt="">
+          <img class="svc-row__img" src="${esc(K.photoSrc({ photo: s.photo, category: s.category, title: s.name }, 160))}" data-ph="${K.svcKind({ category: s.category, title: s.name })}" alt="">
           <button class="svc-row__main" data-svc-edit="${esc(s.id)}">
             <b>${esc(s.name)}</b>
             <small class="num">${esc(s.category)} · ${durText(s.duration_min)}${s.buffer_min ? ' + ' + s.buffer_min + 'm' : ''} · ${s.price_from ? 'from ' : ''}${money(s.price)}${+s.deposit ? ' · deposit ' + money(s.deposit) : ''}${s.active ? '' : ' · hidden'}</small>
@@ -1305,7 +1511,8 @@
 
   /* ---------- Looks (portfolio) ---------- */
   async function looksHTML() {
-    const [list, svcs] = await Promise.all([loadLooks(true), loadServices()]);
+    const list = need(S2.looks);
+    const svcs = need(S2.services);
     return `
       ${backHTML('looks')}
       <header class="cab-h cab-h--row"><h1>Looks</h1><button class="btn btn--primary btn--sm" data-look-new>${icon('<path d="M12 5v14M5 12h14"/>')}Add</button></header>
@@ -1387,7 +1594,7 @@
     ['No-shows', /no.?show/i, 'A missed visit without notice is charged the full deposit.']
   ];
   async function textsHTML() {
-    const st = (await loadProfile(true)).settings || {};
+    const st = need(S2.profile).settings || {};
     const pol = st.policies || [];
     const find = re => (pol.find(p => re.test(p.title)) || {}).text || '';
     S2.edit = { kind: 'texts', aftercare: (st.aftercare || []).map(a => ({ step: a.step || '', text: a.text || '' })) };
@@ -1432,7 +1639,7 @@
   const STOP = new Set('what when where which with your have does about there their this that from will would could should much many how can the and for are you our'.split(' '));
   const autoKeywords = q => [...new Set(String(q).toLowerCase().replace(/[^a-z0-9\s'-]/g, ' ').split(/\s+/).filter(w => w.length > 3 && !STOP.has(w)))].slice(0, 8);
   async function faqHTML() {
-    const st = (await loadProfile(true)).settings || {};
+    const st = need(S2.profile).settings || {};
     S2.edit = { kind: 'faq', faq: (st.faq || []).map(f => ({ q: f.q || '', a: f.a || '', extra: (f.keywords || []).filter(k => !autoKeywords(f.q).includes(k)).join(', ') })) };
     return `
       ${backHTML('faq')}
@@ -1552,10 +1759,9 @@
       dropReplaced(e.__orig.photo, e.photo);
       e.__saved = true;
       K.toast('Lash map saved', 'ok');
-      S.cache = {};
+      syncChanges(true); // "Last time" on her bookings
       const cid = e.client_id;
-      K.Sheet.close();
-      setTimeout(() => openClient(cid), 380);
+      openClient(cid);
     });
   }
   async function deleteFormula(btn) {
@@ -1565,8 +1771,7 @@
       if (S2.edit.__orig.photo) K.Backend.owner.removeMedia(S2.edit.__orig.photo).catch(() => null);
       S2.edit.__saved = true;
       const cid = S2.edit.client_id;
-      K.Sheet.close();
-      setTimeout(() => openClient(cid), 380);
+      openClient(cid);
     });
   }
 
@@ -1593,8 +1798,7 @@
       await K.Backend.owner.saveClient(cid, { name: f.elements.name.value.trim(), phone: f.elements.phone.value, email: f.elements.email.value.trim() });
       S.clients = null;
       K.toast('Contacts saved', 'ok');
-      K.Sheet.close();
-      setTimeout(() => openClient(cid), 380);
+      openClient(cid);
     });
   }
 
@@ -1651,17 +1855,16 @@
     if ((el = t.closest('[data-faq-save]'))) { saveFaq(el); return true; }
     // CRM
     if ((el = t.closest('[data-ctag]'))) { toggleTag(el.dataset.ctag); return true; }
-    if ((el = t.closest('[data-ct-edit]'))) { K.Sheet.close(); setTimeout(openContactEditor, 380); return true; }
+    if ((el = t.closest('[data-ct-edit]'))) { openContactEditor(); return true; }
     if ((el = t.closest('[data-ct-save]'))) { saveContacts(el); return true; }
     if ((el = t.closest('[data-fm-new]'))) {
       const cid = el.dataset.fmNew;
       const bid = el.dataset.booking || null;
       if (bid && ob.b && (!S2.client || S2.client.id !== cid)) S2.client = { id: cid, name: ob.b.client_name };
-      K.Sheet.close();
-      setTimeout(() => openFormulaEditor(cid, null, bid), 380);
+      openFormulaEditor(cid, null, bid);
       return true;
     }
-    if ((el = t.closest('[data-fm-edit]'))) { const f = (S2.formulas || []).find(x => x.id === el.dataset.fmEdit); const cid = S2.client.id; K.Sheet.close(); setTimeout(() => openFormulaEditor(cid, f), 380); return true; }
+    if ((el = t.closest('[data-fm-edit]'))) { const f = (S2.formulas || []).find(x => x.id === el.dataset.fmEdit); const cid = S2.client.id; openFormulaEditor(cid, f); return true; }
     if ((el = t.closest('[data-fm-pick]'))) {
       const [name, v] = el.dataset.fmPick.split(':');
       S2.edit[name] = S2.edit[name] === v ? '' : v;
@@ -1672,6 +1875,17 @@
     if ((el = t.closest('[data-fm-save]'))) { saveFormula(el); return true; }
     // deposits & payments, insights
     if ((el = t.closest('[data-dep-set]'))) { setDeposit(el.dataset.depSet, el); return true; }
+    if ((el = t.closest('[data-setup-push]'))) {
+      const card = $('#cab-push');
+      if (card) { card.scrollIntoView({ block: 'center', behavior: K.reducedMQ.matches ? 'auto' : 'smooth' }); card.classList.remove('is-nudge'); void card.offsetWidth; card.classList.add('is-nudge'); }
+      K.haptic();
+      return true;
+    }
+    if ((el = t.closest('[data-setup-install]'))) { openInstallHelp(); return true; }
+    if ((el = t.closest('[data-pr-flag], [data-ly-on]'))) { el.setAttribute('aria-checked', el.getAttribute('aria-checked') !== 'true'); K.haptic(); return true; }
+    if ((el = t.closest('[data-pr-save]'))) { savePromo(el); return true; }
+    if ((el = t.closest('[data-ly-save]'))) { saveLoyalty(el); return true; }
+    if ((el = t.closest('[data-setup-installed]'))) { K.store.set('installedSeen', true); K.Sheet.close(); refreshView(); return true; }
     if ((el = t.closest('[data-pay-save]'))) { savePayments(el); return true; }
     if ((el = t.closest('[data-ins-per]'))) { S.insPer = el.dataset.insPer; S.insSel = null; K.haptic(); refreshView(); return true; }
     if ((el = t.closest('[data-ins-bar]'))) {
@@ -1684,6 +1898,138 @@
     }
     if ((el = t.closest('[data-fm-del]'))) { deleteFormula(el); return true; }
     return false;
+  }
+
+  /* ---------- Promo banner (off until she turns it on) ---------- */
+  function promoHTML() {
+    const pr = (need(S2.profile).settings || {}).promo || {};
+    return `
+      ${backHTML('promo')}
+      <header class="cab-h"><h1>Promo banner</h1></header>
+      <p class="cab-muted">A card on your Home page that opens booking. Off by default.</p>
+      <form class="bk-form" id="pr-form" onsubmit="return false">
+        <div class="row hrs-switch"><span class="row__label">Show the banner</span><button type="button" class="switch" role="switch" aria-checked="${!!pr.on}" data-pr-flag="on"></button></div>
+        <label class="field"><span>Badge</span><input name="badge" maxlength="24" value="${esc(pr.badge || '')}" placeholder="NEW CLIENT −15%"></label>
+        <label class="field"><span>Title</span><input name="title" maxlength="60" value="${esc(pr.title || '')}" placeholder="Your first set, a little sweeter"></label>
+        <label class="field"><span>Text</span><textarea name="text" rows="2" maxlength="160" placeholder="Take 15% off any full set on your first visit.">${esc(pr.text || '')}</textarea></label>
+        <div class="row hrs-switch"><span class="row__label">New clients only<span class="row__sub">Hidden for anyone who has booked from her phone before</span></span><button type="button" class="switch" role="switch" aria-checked="${pr.newOnly !== false}" data-pr-flag="newOnly"></button></div>
+      </form>
+      <button class="btn btn--primary btn--block" data-pr-save>Save banner</button>
+      <p class="cab-muted">The discount isn’t applied automatically — honor it at checkout.</p>`;
+  }
+  async function savePromo(btn) {
+    const f = $('#pr-form');
+    const flag = k => $(`[data-pr-flag="${k}"]`).getAttribute('aria-checked') === 'true';
+    const promo = { on: flag('on'), newOnly: flag('newOnly'), badge: f.elements.badge.value.trim(), title: f.elements.title.value.trim(), text: f.elements.text.value.trim() };
+    if (promo.on && !promo.title && !promo.text) { K.toast('Add a title or a text', 'x'); return; }
+    await busyBtn(btn, async () => {
+      S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { settings: { promo } });
+      K.toast(promo.on ? 'Banner is on' : 'Banner is off', 'ok');
+      published();
+    });
+  }
+
+  /* ---------- Loyalty card: stamps from real completed visits ---------- */
+  function loyaltyEditHTML() {
+    const ly = (need(S2.profile).settings || {}).loyalty || {};
+    const total = +ly.total || 6;
+    return `
+      ${backHTML('loyalty')}
+      <header class="cab-h"><h1>Loyalty card</h1></header>
+      <p class="cab-muted">Each completed visit is a stamp. Clients see their card after their first booking — counted by their phone number.</p>
+      <form class="bk-form" id="ly-form" onsubmit="return false">
+        <div class="row hrs-switch"><span class="row__label">Loyalty card</span><button type="button" class="switch" role="switch" aria-checked="${!!ly.on}" data-ly-on></button></div>
+        <label class="field"><span>Reward on visit number</span><select class="cab-sel cab-sel--wide" name="total">${[4, 5, 6, 8, 10, 12].map(n => `<option value="${n}"${n === total ? ' selected' : ''}>${n}</option>`).join('')}</select></label>
+        <label class="field"><span>Reward</span><input name="reward" maxlength="60" value="${esc(ly.reward || '')}" placeholder="50% off your fill"></label>
+      </form>
+      <button class="btn btn--primary btn--block" data-ly-save>Save loyalty card</button>`;
+  }
+  async function saveLoyalty(btn) {
+    const f = $('#ly-form');
+    const loyalty = { on: $('[data-ly-on]').getAttribute('aria-checked') === 'true', total: +f.elements.total.value, reward: f.elements.reward.value.trim() };
+    if (loyalty.on && !loyalty.reward) { K.toast('Say what the reward is', 'x'); return; }
+    await busyBtn(btn, async () => {
+      S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { settings: { loyalty } });
+      K.toast(loyalty.on ? 'Loyalty card is on' : 'Loyalty card is off', 'ok');
+      published();
+    });
+  }
+
+  /* ---------- "Finish setting up" (Today) — until everything is in place ---------- */
+  async function loadSetup() {
+    if (K.store.get('setupDone')) return;
+    if (isStandalone()) K.store.set('installedSeen', true);
+    await Promise.all([
+      loadProfile(true), loadServices(true), loadLooks(true),
+      memLoad('push', () => K.Backend.owner.pushDevices(S.studio.id)).catch(() => null)
+    ]);
+  }
+  function setupItems() {
+    const p = S2.profile;
+    const svcs = S2.services;
+    const looks = S2.looks;
+    if (!p || !svcs || !looks) return null;
+    const st = p.settings || {};
+    const active = svcs.filter(s => s.active);
+    return [
+      { label: 'Cover and profile photo', done: !!(st.heroPhoto && st.avatar), attr: 'data-cab-tab="profile"' },
+      { label: 'A photo on every service', done: active.length > 0 && active.every(s => s.photo), attr: 'data-cab-tab="services"' },
+      { label: 'Working hours', done: ((S.sched && S.sched.hours) || []).length > 0, attr: 'data-cab-tab="hours"' },
+      { label: 'Payments & deposits', done: takesDeposits(st), attr: 'data-cab-tab="payments"' },
+      { label: 'Policies for clients', done: (st.policies || []).some(x => x && String(x.text || '').trim()), attr: 'data-cab-tab="texts"' },
+      { label: 'At least 3 looks', done: looks.length >= 3, attr: 'data-cab-tab="looks"' },
+      { label: 'Notifications on', done: (MEM.push || []).length > 0, attr: 'data-setup-push' },
+      { label: 'App on your Home Screen', done: isStandalone() || !!K.store.get('installedSeen'), attr: 'data-setup-install' }
+    ];
+  }
+  function setupHTML() {
+    if (K.store.get('setupDone')) return '';
+    const items = setupItems();
+    if (!items) return '';
+    const n = items.filter(x => x.done).length;
+    if (n === items.length) { K.store.set('setupDone', true); return ''; }
+    return `
+      <section class="card setup">
+        <div class="setup__top"><b>Finish setting up</b><span class="num">${n} of ${items.length}</span></div>
+        <span class="setup__bar"><i style="width:${Math.round((n / items.length) * 100)}%"></i></span>
+        <div class="setup__list">${items.map(x => `
+          <button class="setup__row${x.done ? ' is-done' : ''}" ${x.attr}>
+            <i class="setup__chk">${x.done ? K.I.check : ''}</i><span>${esc(x.label)}</span>${x.done ? '' : K.I.chevR}
+          </button>`).join('')}</div>
+      </section>`;
+  }
+  function openInstallHelp() {
+    K.Sheet.open(el => {
+      el.innerHTML = `
+        <div class="ob" data-sheet-scroll>
+          <header class="ob__head"><span class="eyebrow">Home Screen</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
+          <h2>Put ${esc(K.data.name)} on your Home Screen</h2>
+          <p class="ob__sub">It opens straight into this dashboard, like an app — and on iPhone that’s where notifications work.</p>
+          <ol class="a2hs__steps">${K.IS_IOS ? `
+            <li>Open this page in <b>Safari</b></li>
+            <li>Tap <b>Share</b> ${icon('<path d="M12 15V3.5M8 7.5l4-4 4 4"/><path d="M6 11v8.5h12V11"/>')}</li>
+            <li>Choose <b>Add to Home Screen</b> → <b>Add</b></li>` : `
+            <li>Open the browser menu <b>⋮</b></li>
+            <li>Choose <b>Install app</b> or <b>Add to Home screen</b></li>`}
+            <li>Open it from your Home Screen</li>
+          </ol>
+          <button class="btn btn--soft btn--block" data-setup-installed>It’s on my Home Screen</button>
+        </div>`;
+    }, { detent: 'medium' });
+  }
+  const takesDeposits = st => Object.values((st && st.payments) || {}).some(v => String(v || '').trim());
+  // deposits set on services while there is no way to pay them
+  function depositWarnHTML() {
+    const p = S2.profile;
+    const svcs = S2.services;
+    if (!p || !svcs || takesDeposits(p.settings)) return '';
+    const n = svcs.filter(s => s.active && +s.deposit > 0).length;
+    if (!n) return '';
+    return `
+      <div class="card dep-warn">
+        <span><b>Deposits are set on ${n} service${n > 1 ? 's' : ''}, but payments are off</b><small>Clients aren’t asked for them until you add a way to get paid.</small></span>
+        <button class="btn btn--primary btn--sm" data-cab-tab="payments">Turn on</button>
+      </div>`;
   }
 
   /* ---------- Deposits: what she sees and does ---------- */
@@ -1713,8 +2059,7 @@
     await busyBtn(btn, async () => {
       const r = await K.Backend.owner.setDeposit(b.id, status);
       ob.b = Object.assign({}, b, r);
-      if (S.known) S.known.set(b.id, ob.b);
-      S.cache = {};
+      patchKnown(b.id, r);
       K.toast({ paid: 'Deposit received — her booking says Confirmed', waived: 'No deposit needed for this visit', pending: 'Back to waiting for the deposit' }[status], 'ok');
       renderOb();
       refreshView();
@@ -1744,8 +2089,8 @@
     ['square', 'Square payment link', 'https://square.link/u/…']
   ];
   async function paymentsHTML() {
-    const [p, sch] = await Promise.all([loadProfile(true), K.Backend.owner.schedule(S.studio.id)]);
-    S.sched = sch;
+    const p = need(S2.profile);
+    const sch = need(S.sched);
     const pay = (p.settings || {}).payments || {};
     const r = sch.rules || {};
     const sel = (name, value, opts, fmt) => `<select class="cab-sel" data-rule="${name}">${opts.map(o => `<option value="${o}"${+o === +value ? ' selected' : ''}>${fmt(o)}</option>`).join('')}</select>`;
@@ -1785,6 +2130,7 @@
       S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { settings: { payments: Object.keys(pay).length ? pay : null } });
       K.toast(Object.keys(pay).length ? 'Saved — deposits are on' : 'Saved — no online deposits', 'ok');
       published();
+      S.dirty = false;
       refreshView();
     });
   }
@@ -1802,7 +2148,7 @@
   }
   async function insightsHTML() {
     const per = S.insPer || 'week';
-    const d = await K.Backend.owner.insights(S.studio.id, per);
+    const d = need(MEM['ins:' + per]);
     S.ins = d;
     const t = d.totals;
     const ser = d.series || [];
@@ -2119,7 +2465,9 @@
     if (ob.mode === 'cancel') renderOb();
     S.self.add(b.id);
     try {
-      ob.b = await K.Backend.owner.setStatus(b.id, status, reason || null);
+      const res = await K.Backend.owner.setStatus(b.id, status, reason || null);
+      ob.b = Object.assign({}, b, res); // keep the dashboard's fields (phone, tags…)
+      patchKnown(b.id, res);
       ob.mode = 'view';
       ob.busy = false;
       K.haptic([10, 30, 10]);
@@ -2334,23 +2682,25 @@
     if ((el = t.closest('[data-cab-demo]'))) { close(); setTimeout(() => K.demo(), 350); return; }
     if ((el = t.closest('[data-cab-signout]'))) { signOut(); return; }
     if ((el = t.closest('[data-cab-menu]'))) { openMenu(); return; }
-    if ((el = t.closest('[data-cab-retry]'))) { S.cache = {}; refreshView(true); return; }
+    if ((el = t.closest('[data-cab-retry]'))) { S.cache = {}; S.lastSync = 0; refreshView(true); return; }
+    if ((el = t.closest('[data-cab-reenter]'))) { renderLoading(); enter(); return; }
+    // anything she touches in a form: no quiet redraws until she leaves it
+    if (EDITORS.has(S.tab) && t.closest('.cab__view')) S.dirty = true;
     if ((el = t.closest('[data-cab-new]'))) { openNew(null); return; }
     if ((el = t.closest('[data-cab-new-at]'))) { const [o, m] = el.dataset.cabNewAt.split(':').map(Number); openNew({ off: o, min: m }); return; }
     if ((el = t.closest('[data-cab-new-for]'))) {
       const who = { name: el.dataset.name, phone: el.dataset.phone, email: el.dataset.email };
-      K.Sheet.close();
-      setTimeout(() => openNew(null, who), 380);
+      openNew(null, who);
       return;
     }
     if ((el = t.closest('[data-cab-b]'))) {
       const id = el.dataset.cabB;
-      if (inSheet) { K.Sheet.close(); setTimeout(() => openBooking(id), 380); } else openBooking(id);
+      if (inSheet) { openBooking(id); } else openBooking(id);
       return;
     }
     if ((el = t.closest('[data-cab-client]'))) {
       const id = el.dataset.cabClient;
-      if (inSheet) { K.Sheet.close(); setTimeout(() => openClient(id), 380); } else openClient(id);
+      if (inSheet) { openClient(id); } else openClient(id);
       return;
     }
     if ((el = t.closest('[data-cl-save]'))) { saveNotes(el.dataset.clSave); return; }
@@ -2380,7 +2730,7 @@
       S.hrs[d] = S.hrs[d] && S.hrs[d].length ? [] : [{ s: '09:00', e: '17:00' }];
       S.hrsDirty = true;
       K.haptic();
-      refreshView();
+      repaint();
       return;
     }
     if ((el = t.closest('[data-hrs-add]'))) {
@@ -2389,20 +2739,20 @@
       const s = Math.min(minOf(last.e) + 60, 22 * 60);
       S.hrs[d].push({ s: hhmm(s), e: hhmm(Math.min(s + 180, 23 * 60 + 45)) });
       S.hrsDirty = true;
-      refreshView();
+      repaint();
       return;
     }
     if ((el = t.closest('[data-hrs-del]'))) {
       const [d, i] = el.dataset.hrsDel.split(':').map(Number);
       S.hrs[d].splice(i, 1);
       S.hrsDirty = true;
-      refreshView();
+      repaint();
       return;
     }
     if ((el = t.closest('[data-hrs-save]'))) { if (!el.disabled) saveHours(); return; }
     if ((el = t.closest('[data-toff-add]'))) { addTimeOff(); return; }
     if ((el = t.closest('[data-toff-del]'))) {
-      K.Backend.owner.deleteTimeOff(el.dataset.toffDel).then(() => { K.toast('Time off removed', 'ok'); K.onDataChanged(); refreshView(); }, x => K.toast(err(x), 'x'));
+      K.Backend.owner.deleteTimeOff(el.dataset.toffDel).then(() => { K.toast('Time off removed', 'ok'); K.onDataChanged(); S.dirty = false; refreshView(); }, x => K.toast(err(x), 'x'));
       return;
     }
     if ((el = t.closest('[data-rule-auto]'))) {
@@ -2510,16 +2860,21 @@
     }
   }
 
-  function afterRender(tab) {
+  function afterRender(tab, first) {
     if (tab === 'today') paintPush();
     if (tab === 'requests') bindSwipes();
     if (tab === 'services' || tab === 'looks') bindSortable();
     if (tab === 'calendar') bindDaySwipe();
-    if (tab === 'today' || (tab === 'calendar' && S.cal === 'day')) {
-      // bring "now" (or the first booking) into view
-      const now = $('.tl__now') || $('.tl__b');
-      if (now && tab === 'calendar') { const main = $('#cab-main'); main.scrollTop = Math.max(0, now.offsetTop - 120); }
-    }
+    if (tab === 'calendar' && S.cal === 'day' && first) scrollToNow();
+  }
+  // the day opens at the current time (or the first booking, or opening time), below the pinned header
+  function scrollToNow() {
+    const main = $('#cab-main');
+    const target = $('.cab-day .tl__now') || $('.cab-day .tl__b') || $('.cab-day .tl__open');
+    if (!main || !target) return;
+    const pin = $('.cab-pin');
+    const top = target.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop;
+    main.scrollTop = Math.max(0, top - (pin ? pin.offsetHeight : 0) - 70);
   }
 
   function shiftDay(d) {
@@ -2529,6 +2884,7 @@
     if (g && box) K.ensure(g.fromTo(box, { x: d > 0 ? 40 : -40, opacity: 0 }, { x: 0, opacity: 1, duration: 0.35, ease: 'power3.out', clearProps: 'transform,opacity', delay: 0.08 }));
     K.haptic();
     refreshView();
+    requestAnimationFrame(scrollToNow);
   }
 
   // swipe left / right on the day (or week) → next / previous
@@ -2606,6 +2962,9 @@
     S.studio = null;
     K.setOwnerHere && K.setOwnerHere(false);
     S.known = null;
+    K.store.remove('cab');
+    Object.keys(MEM).forEach(k => delete MEM[k]);
+    S2.profile = S2.services = S2.looks = null;
     K.toast('Signed out', 'ok');
     renderAuth();
   }

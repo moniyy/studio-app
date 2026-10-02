@@ -84,6 +84,11 @@
     remove(k) { try { localStorage.removeItem(KEY + ':' + k); } catch (e) { /* private mode */ } }
   };
 
+  /* The master's own start — ?owner=1, or her installed app after she signed
+     in: no splash, the dashboard and its code start loading at once */
+  const OWNER_START = !!(window.StudioBackend && window.StudioBackend.configured) && (params.get('owner') === '1' ||
+    ((window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true) && store.get('ownerHere') === true));
+
   /* ?splash=clean|photo overrides splashStyle from JSON.
      &reset=1 forgets that the Welcome was seen (handy for demos), then drops
      itself from the address so a reload doesn't reset again. */
@@ -940,7 +945,7 @@
           <div class="hero__content hero__content--maison">
             <span class="hero__eyebrow">${esc(eyebrow)}</span>
             <h1 class="hero__name">${esc(data.name)}</h1>
-            <div class="hero__meta">${rating ? `<span><b class="star">★</b>&nbsp;<b class="num">${rating}</b>&nbsp;·&nbsp;<span class="num">${esc(data.reviewCount || data.reviews.length)}</span>&nbsp;reviews</span>` : ''}${data.city ? `<span>${esc(data.city)}</span>` : ''}</div>
+            <div class="hero__meta">${rating ? `<span><b class="star">★</b>&nbsp;<b class="num">${rating}</b>${reviewsCount() ? `&nbsp;·&nbsp;<span class="num">${esc(reviewsCount())}</span>&nbsp;reviews` : ''}</span>` : ''}${data.city ? `<span>${esc(data.city)}</span>` : ''}</div>
             ${firstSlot ? `<button class="hero__next" data-book data-slot="${esc(firstSlot)}">Next: ${esc(firstSlot)} ${I.arrowR}</button>` : ''}
           </div>` : `
           <div class="hero__content">
@@ -1004,8 +1009,21 @@
   }
 
   /* Everything below the hero (re-rendered on pull-to-refresh) */
-  function homeRestHTML() {
+  // "for new clients only": hidden once she has booked from this phone
+  function promoNow() {
     const p = data.promo;
+    if (!p) return null;
+    if (p.newOnly && isBuiltin() && mine().length) return null;
+    return p;
+  }
+  const reviewsCount = () => +(data.reviewCount || data.reviews.length) || 0;
+  // deposits a client can actually be asked for
+  const depositsOn = () => (isBuiltin() ? takesDeposits(data.payments) : !!data.deposit);
+  const svcDeposit = s => (isBuiltin() ? (depositsOn() && s && +s.deposit > 0 ? +s.deposit : 0) : data.deposit || 0);
+  const askAbout = () => `prices, availability, ${depositsOn() ? 'deposits ' : ''}or aftercare`.replace(', or', ' or');
+
+  function homeRestHTML() {
+    const p = promoNow();
     const x = data.extras;
     const rating = ratingText();
     const first = data.slots[0] || '';
@@ -1298,7 +1316,7 @@
         </div>
       </form>`;
 
-    const greet = bubble('bot', `Hi! I'm ${firstName()}'s assistant 💬 Ask me about prices, availability, deposits or aftercare`);
+    const greet = bubble('bot', `Hi! I'm ${firstName()}'s assistant 💬 Ask me about ${askAbout()}`);
     greet.setAttribute('data-stagger', '');
     regroup();
   }
@@ -1608,7 +1626,7 @@
         <section class="profile" data-stagger>
           <div class="profile__bg" aria-hidden="true">${bg ? `<img src="${esc(sized(safeUrl(bg), 500))}" alt="">` : ''}</div>
           <div class="profile__body">
-            <img class="profile__avatar" src="${esc(safeUrl(data.avatar))}" alt="">
+            ${data.avatar ? `<img class="profile__avatar" src="${esc(safeUrl(data.avatar))}" alt="">` : `<span class="profile__avatar profile__avatar--mono">${esc(initials())}</span>`}
             <h2>${esc(data.name)}</h2>
             <div class="profile__city">
               ${data.city ? `<span>${I.pin}${esc(data.city)}</span>` : ''}
@@ -2339,7 +2357,7 @@
       <footer class="sheet__foot">
         <div class="sheet__summary">
           <b class="num">${esc(price(s.price))}</b>
-          <span>${esc([s.duration, data.deposit ? price(data.deposit) + ' deposit' : ''].filter(Boolean).join(' · '))}</span>
+          <span>${esc([s.duration, svcDeposit(s) ? price(svcDeposit(s)) + ' deposit' : ''].filter(Boolean).join(' · '))}</span>
         </div>
         <button class="btn btn--primary" data-book data-book-service="${esc(s.id)}">Book this service</button>
       </footer>`;
@@ -2970,9 +2988,44 @@
   const errText = e => ERR_COPY[e && e.code] || 'Something went wrong — try again';
 
   /* DB profile → the same shape as masters/<slug>.json */
+  /* A studio in the database shows only what its master set in her dashboard —
+     never numbers, reviews or offers from a template. Empty field = no block. */
+  const OWN_KEYS = ['tagline', 'city', 'address', 'parking', 'phone', 'instagram', 'reviewUrl', 'heroPhoto', 'heroVideo', 'avatar',
+    'policies', 'prep', 'aftercare', 'faq', 'payments', 'defaultAccent', 'splashStyle', 'splashEmoji', 'iconDir', 'firstName'];
+  const takesDeposits = p => Object.values(p || {}).some(v => String(v || '').trim());
+  function ownSettings(base, st) {
+    st = st || {};
+    const out = {};
+    ['iconDir', 'splashStyle', 'splashEmoji', 'firstName'].forEach(k => { if (base && base[k] != null) out[k] = base[k]; });
+    OWN_KEYS.forEach(k => { if (st[k] != null && st[k] !== '') out[k] = st[k]; });
+    const num = v => (v === '' || v == null || !isFinite(+v) ? 0 : +v);
+    const rating = num(st.rating);
+    if (rating > 0 && rating <= 5) out.rating = Math.round(rating * 10) / 10;
+    const reviews = Math.round(num(st.reviewCount));
+    if (reviews > 0) out.reviewCount = reviews;
+    out.stats = [];
+    const years = Math.round(num(st.yearsExp));
+    if (years > 0) out.stats.push({ value: years, suffix: '+', label: years === 1 ? 'year' : 'years' });
+    const works = Math.round(num(st.worksDone));
+    if (works > 0) out.stats.push({ value: works, suffix: '+', label: String(st.worksLabel || '').trim() || 'clients served' });
+    if (out.rating) out.stats.push({ value: out.rating, decimals: 1, suffix: ' ★', label: 'rating' });
+    const pr = st.promo;
+    out.promo = pr && pr.on && (pr.title || pr.text) ? { badge: pr.badge || '', title: pr.title || '', text: pr.text || '', newOnly: pr.newOnly !== false } : null;
+    const ly = st.loyalty;
+    out.loyalty = ly && ly.on && +ly.total >= 3 ? { total: +ly.total, filled: 0, reward: ly.reward || '', real: true } : null;
+    // no way to pay a deposit → no word about deposits anywhere
+    if (!takesDeposits(st.payments)) {
+      const noDep = t => (String(t || '').match(/[^.!?]+[.!?]*/g) || []).filter(x => !/deposit/i.test(x)).join(' ').replace(/\s+/g, ' ').trim();
+      out.policies = (out.policies || []).filter(p => p && !/deposit/i.test(p.title || ''))
+        .map(p => Object.assign({}, p, { text: noDep(p.text) })).filter(p => p.text);
+      out.faq = (out.faq || []).filter(f => f && !/deposit/i.test(`${f.q || ''} ${f.a || ''}`));
+    }
+    return out;
+  }
+
   function mergeProfile(base, prof) {
     const m = prof.master;
-    const out = Object.assign({}, base || {}, m.settings || {});
+    const out = m.booking_engine === 'builtin' ? ownSettings(base, m.settings) : Object.assign({}, base || {}, m.settings || {});
     out.name = m.name;
     out.timezone = m.timezone;
     if (m.style) out.style = m.style;
@@ -3166,13 +3219,16 @@
     renderBkFoot();
   }
 
+  // built from the studio's real settings: deposit (only if she takes them), cancellation window, her policies
   function rulesListHTML() {
     const r = data.rules || {};
+    const dep = svcDeposit(bkService());
     const items = [];
+    if (dep) items.push(`A <b>${price(dep)} deposit</b> holds your spot — you’ll see how to send it right after booking.`);
     if (r.cancelWindow) items.push(`Free to cancel or move up to <b>${r.cancelWindow} h</b> before your visit.`);
     else items.push('Free to cancel or move any time before your visit.');
-    if (r.cancelWindow) items.push('Later changes and no-shows may be charged.');
-    data.policies.slice(0, 2).forEach(p => items.push(`<b>${esc(p.title)}.</b> ${esc(p.text)}`));
+    if (r.cancelWindow) items.push(dep ? 'Later changes and no-shows may lose the deposit.' : 'Later changes are marked as late — please give as much notice as you can.');
+    data.policies.filter(p => dep || !/deposit/i.test(p.title || '')).slice(0, 2).forEach(p => items.push(`<b>${esc(p.title)}.</b> ${esc(p.text)}`));
     return `<div class="card bk-rules"><b class="bk-rules__title">Booking policy</b><ul>${items.map(x => `<li>${x}</li>`).join('')}</ul></div>`;
   }
 
@@ -3194,6 +3250,7 @@
         <div class="bk-row"><span>Time</span><b class="num">${fmtClock(bk.min)}</b></div>
         ${s.duration ? `<div class="bk-row"><span>Duration</span><b>${esc(s.duration)}</b></div>` : ''}
         <div class="bk-row"><span>Price</span><b class="num">${esc(price(s.price))}</b></div>
+        ${svcDeposit(s) ? `<div class="bk-row bk-row--accent"><span>Deposit</span><b class="num">${esc(price(svcDeposit(s)))} · after booking</b></div>` : ''}
         <div class="bk-row"><span>Name</span><b>${esc(d.name)}</b></div>
         <div class="bk-row"><span>Phone</span><b class="num">${esc(maskPhone(d.phone))}</b></div>
       </div>
@@ -3222,7 +3279,7 @@
       action: `<button class="btn btn--primary" data-bk-next${detailsOk() ? '' : ' disabled'}>Review ${I.arrowR}</button>`
     };
     return {
-      summary: `<b class="num">${s ? esc(price(s.price)) : ''}</b><span>Pay at the studio</span>`,
+      summary: `<b class="num">${s ? esc(price(s.price)) : ''}</b><span>${svcDeposit(s) ? esc(price(svcDeposit(s))) + ' deposit after booking' : 'Pay at the studio'}</span>`,
       action: `<button class="btn btn--primary${bkx.agree ? '' : ' is-off'}" data-bk-confirm${bkx.busy ? ' disabled aria-busy="true"' : ''}${bkx.agree ? '' : ' aria-disabled="true"'}>${bkx.busy ? spinner() : 'Confirm'}</button>`
     };
   }
@@ -3419,7 +3476,8 @@
       service_id: b.service_id, service_name: b.service_name, service_photo: b.service_photo,
       price: b.price, late_cancel: !!b.late_cancel, updated_at: b.updated_at,
       deposit: +b.deposit || 0, deposit_status: b.deposit_status || 'none', deposit_due_at: b.deposit_due_at || null,
-      fill_weeks: b.fill_weeks || null, completed_at: b.completed_at || null, cancel_reason: b.cancel_reason || null
+      fill_weeks: b.fill_weeks || null, completed_at: b.completed_at || null, cancel_reason: b.cancel_reason || null,
+      client_visits: +b.client_visits || 0
     };
   }
   // opts.mine: this device made the change (so it's not news to her)
@@ -3427,19 +3485,37 @@
     const list = mine().filter(x => x.token !== b.manage_token);
     list.unshift(snapshot(b));
     store.set(MINE_KEY, list.slice(0, 20));
+    if (b.manage_token) bkCache.set(b.manage_token, { at: Date.now(), p: Promise.resolve(b) });
+  }
+
+  /* One request per booking: the answer is kept for the session (5 min), and
+     every caller asking at the same time shares the same request */
+  const bkCache = new Map();
+  function fetchBooking(token, maxAge) {
+    const c = bkCache.get(token);
+    if (c && Date.now() - c.at < (maxAge == null ? 5 * 60000 : maxAge)) return c.p;
+    const entry = { at: Date.now(), p: Backend.getBooking(token) };
+    bkCache.set(token, entry);
+    entry.p.catch(() => { if (bkCache.get(token) === entry) bkCache.delete(token); });
+    return entry.p;
   }
   const upcoming = () => mine().filter(x => ACTIVE.includes(x.status) && Date.parse(x.end_at || x.start_at) > Date.now())
     .sort((a, b) => Date.parse(a.start_at) - Date.parse(b.start_at));
 
   /* On every open: did the studio cancel or move anything? */
-  async function refreshMine() {
+  let mineP = null;
+  function refreshMine() {
+    if (!mineP) mineP = refreshMineNow().finally(() => { mineP = null; });
+    return mineP;
+  }
+  async function refreshMineNow() {
     if (!Backend.configured) return;
     const list = mine().slice(0, 10);
     if (!list.length) return;
     const news = [];
     await Promise.all(list.map(async old => {
       try {
-        const b = await Backend.getBooking(old.token);
+        const b = await fetchBooking(old.token);
         if (!b) return;
         if (ACTIVE.includes(old.status) && b.status === 'cancelled_master' && b.deposit_status === 'expired') news.push(`Your ${b.service_name} (${whenText(old.start_at)}) was released — the deposit didn’t arrive`);
         else if (ACTIVE.includes(old.status) && b.status === 'cancelled_master') news.push(`${firstName()} cancelled your ${b.service_name} on ${whenText(old.start_at)}`);
@@ -3451,6 +3527,7 @@
       } catch (e) { /* offline: try next time */ }
     }));
     syncMyBookingCard();
+    syncLoyalty();
     if (news.length) setTimeout(() => toast(news[0], 'bell'), 900);
     return news;
   }
@@ -3547,7 +3624,7 @@
     mg.busy = false;
     haptic();
     Sheet.open(el => { el.innerHTML = `<div class="mg" data-sheet-scroll>${manageSkeleton()}</div>`; }, { detent: 'large' });
-    Backend.getBooking(token).then(b => {
+    fetchBooking(token, 30000).then(b => {
       if (!b) throw new Backend.BackendError('not_found');
       mg.b = b;
       saveMine(b);
@@ -3713,8 +3790,7 @@
   }
 
   let cabinetP = null;
-  function openCabinet(opts) {
-    if (!isBuiltin()) { openOwner(opts); return; }
+  function loadCabinet() {
     if (!cabinetP) {
       cabinetP = new Promise((resolve, reject) => {
         const s = document.createElement('script');
@@ -3724,7 +3800,11 @@
         document.head.appendChild(s);
       });
     }
-    cabinetP.then(C => C.open(cabinetKit(), opts)).catch(() => toast(ERR_COPY.network, 'x'));
+    return cabinetP;
+  }
+  function openCabinet(opts) {
+    if (!isBuiltin()) { openOwner(opts); return; }
+    loadCabinet().then(C => C.open(cabinetKit(), opts)).catch(() => toast(ERR_COPY.network, 'x'));
   }
   function cabinetKit() {
     return {
@@ -4067,7 +4147,7 @@
     const candidates = [];
     const add = (score, make) => { if (score > 0) candidates.push({ score, make }); };
 
-    if (!qt.length) return { text: 'Ask me anything about prices, availability, deposits or aftercare 💕', suggest: SUGGEST.start };
+    if (!qt.length) return { text: `Ask me anything about ${askAbout()} 💕`, suggest: SUGGEST.start };
 
     // FAQ — curated keywords win most ties
     data.faq.forEach(f => {
@@ -4216,8 +4296,21 @@
 
     // Small talk
     add(has('hi', 'hello', 'hey', 'hola', 'good morning', 'good afternoon', 'good evening') ? 1 : 0, () => ({
-      text: 'Hi there! 👋 Ask me about prices, availability, deposits or aftercare.', suggest: SUGGEST.start
+      text: `Hi there! 👋 Ask me about ${askAbout()}.`, suggest: SUGGEST.start
     }));
+    // Deposits, from the real settings (studios in the database)
+    if (isBuiltin() && has('deposit', 'down payment', 'prepay', 'upfront', 'pay ahead')) {
+      const deps = data.services.filter(s => svcDeposit(s) > 0);
+      const ways = Object.keys(data.payments || {}).filter(k => String(data.payments[k] || '').trim())
+        .map(k => ({ cashapp: 'Cash App', zelle: 'Zelle', venmo: 'Venmo', paypal: 'PayPal', square: 'card' }[k] || k));
+      add(9, () => ({
+        text: deps.length
+          ? `${deps.length === data.services.length ? 'Every service' : deps.slice(0, 3).map(s => s.title).join(', ')} needs a deposit — from ${price(Math.min(...deps.map(svcDeposit)))}. You send it right after booking${ways.length ? ` (${ways.join(', ')})` : ''} and it goes toward your service 💕`
+          : 'No deposit needed — you pay at the studio 💕',
+        action: 'book',
+        suggest: SUGGEST.policy
+      }));
+    }
     add(has('thank', 'thx', 'ty', 'appreciate', 'perfect', 'awesome', 'great') ? 1.5 : 0, () => ({
       text: "You're so welcome! 💕 Anything else I can help with?", suggest: SUGGEST.fallback
     }));
@@ -5791,11 +5884,26 @@
     return `<svg viewBox="-1 -1 23 23" aria-hidden="true"><path fill-rule="evenodd" d="${eye(0, 0)}${eye(n - 7, 0)}${eye(0, n - 7)}${d}"/></svg>`;
   }
 
+  // her completed visits (the server counts them by her phone, through any of her bookings here)
+  function myVisits() {
+    const list = mine();
+    return Math.max(0, list.filter(x => x.status === 'completed').length, ...list.map(x => +x.client_visits || 0));
+  }
+  // a real studio's card shows real visits — and only to someone who has booked from this phone
+  function syncLoyalty() {
+    const box = $('.loyalty', views.home);
+    if (!data.loyalty || !data.loyalty.real) return;
+    const html = loyaltyHTML();
+    if (box && html) { const t = document.createElement('div'); t.innerHTML = html; box.replaceWith(t.firstElementChild); }
+    else if (box && !html) box.remove();
+    else if (!box && html) { const next = $('[data-next]', views.home); if (next) next.insertAdjacentHTML('afterend', html); }
+  }
   function loyaltyHTML() {
     const l = data.loyalty;
     if (!l) return '';
     const total = l.total;
-    const filled = clamp(l.filled, 0, total);
+    if (l.real && !mine().length) return '';
+    const filled = l.real ? myVisits() % total : clamp(l.filled, 0, total);
     return `
       <div class="loyalty" data-stagger>
         <button class="loyalty__card" data-loyalty aria-pressed="false" aria-label="Loyalty card: ${filled} of ${total} stamps. Tap to flip.">
@@ -5810,9 +5918,9 @@
             <span class="loyalty__foot"><span>${GIFT}${esc(l.reward || '')}</span><em>Tap to flip</em></span>
           </span>
           <span class="loyalty__face loyalty__back">
-            <span class="loyalty__qr">${fakeQr(SLUG + ':' + filled)}</span>
+            ${l.real ? '' : `<span class="loyalty__qr">${fakeQr(SLUG + ':' + filled)}</span>`}
             <span class="loyalty__terms">
-              <b>Show at your visit</b>
+              <b>${l.real ? 'How it works' : 'Show at your visit'}</b>
               <small>${esc(l.terms || `Get a stamp at every visit. Your ${total}th visit: ${l.reward || 'a reward'}.`)}</small>
               <em>Tap to flip back</em>
             </span>
@@ -6865,7 +6973,7 @@
     el.innerHTML = `
       <div class="welcome__top">
         ${data.heroPhoto ? `<div class="welcome__photo"><img src="${esc(sized(safeUrl(data.heroPhoto), 900))}" alt=""></div>` : art(splashEmoji(), 'welcome__emoji')}
-        ${rating ? `<span class="wchip wchip--a"><b class="star">★</b> <b class="num">${rating}</b> · ${esc(data.reviewCount || data.reviews.length)} reviews</span>` : ''}
+        ${rating ? `<span class="wchip wchip--a"><b class="star">★</b> <b class="num">${rating}</b>${reviewsCount() ? ` · ${esc(reviewsCount())} reviews` : ''}</span>` : ''}
         ${next ? `<span class="wchip wchip--b"><i></i>Next: ${esc(next)}</span>` : ''}
       </div>
       <div class="welcome__bottom">
@@ -6943,9 +7051,9 @@
         params.delete('booking');
         try { history.replaceState(history.state, '', location.pathname + '?' + params.toString() + location.hash); } catch (e) { /* file:// */ }
       }
-      setTimeout(() => openCabinet({ booking }), first ? 200 : 900);
+      setTimeout(() => openCabinet({ booking }), OWNER_START ? 0 : first ? 200 : 900);
     } else if (ownerHere() && isStandalone()) {
-      setTimeout(() => openCabinet({ auto: true }), first ? 200 : 500);
+      setTimeout(() => openCabinet({ auto: true }), OWNER_START ? 0 : first ? 200 : 500);
     } else if (ownerMode) setOwnerMode(true);
     syncOwnerSwitch();
     if (LOOK_PARAM) setTimeout(openLookFromLink, 650);
@@ -7116,6 +7224,15 @@
     else await splashClean(splash, short);
   }
 
+  // the master's start: no splash, no Welcome
+  function skipSplash() {
+    try { sessionStorage.setItem(KEY + ':intro', '1'); } catch (e) { /* private mode */ }
+    const splash = $('#splash');
+    if (splash) splash.remove();
+    afterSplash(true);
+    revealHome();
+  }
+
   function showError() {
     splashActive = false;
     applySettings();
@@ -7217,6 +7334,11 @@
     bindEvents();
     setupDesktop();
     registerSW();
+    if (OWNER_START) {
+      // while the studio loads: the dashboard's code, the SDK and her session
+      loadCabinet().catch(() => null);
+      Backend.auth.session().catch(() => null);
+    }
 
     try {
       // masters/<slug>.json, a studio kept in the database — or a JSON that asks
@@ -7231,6 +7353,8 @@
         else if (!raw) throw Object.assign(new Error('Unknown studio'), { http: true });
       }
       data = normalizeData(raw);
+      // no deposits here: the assistant doesn't offer to talk about them
+      if (isBuiltin() && !depositsOn()) Object.values(SUGGEST).forEach(l => l.forEach((q, i) => { if (/deposit/i.test(q)) l[i] = 'How can I pay?'; }));
     } catch (e) {
       console.error('[Studio App] Could not load master "' + SLUG + '":', e);
       // no network (and nothing in the service-worker cache) → offline screen
@@ -7268,8 +7392,8 @@
 
     if (isBuiltin()) {
       syncMyBookingCard();
-      refreshOpenings();
-      refreshMine();
+      // the dashboard goes first; the client side catches up a moment later
+      setTimeout(() => { refreshOpenings(); refreshMine(); }, OWNER_START ? 2500 : 0);
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') { refreshMine(); refreshOpenings(); }
       });
@@ -7287,7 +7411,8 @@
     }
 
     setupPWA();
-    await runSplash();
+    if (OWNER_START) skipSplash();
+    else await runSplash();
     if (MANAGE_PARAM && isBuiltin()) setTimeout(() => openManage(MANAGE_PARAM), 450);
   }
 

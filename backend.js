@@ -54,6 +54,41 @@
       .finally(() => clearTimeout(t));
   }
 
+  /* Every request: aborted after 8 s and tried once more on an abort or a
+     network error. iOS freezes an installed app in the background; on the way
+     back the first request often sits on a dead connection — the second one
+     gets a fresh socket. Only requests that are safe to repeat are repeated
+     (reads, the token refresh, create_booking with its request id); a write is
+     repeated only when it failed at once (it never reached the server). */
+  const FETCH_MS = 8000;
+  const SAFE_RPC = /^(get_\w+|create_booking|owner_(studios|bookings|booking|schedule|clients|client|services|profile|looks|insights|slots|push_devices|setup))$/;
+  function safeToRepeat(url, method) {
+    if (!method || /^(GET|HEAD)$/i.test(method)) return true;
+    const m = /\/rest\/v1\/rpc\/(\w+)/.exec(url);
+    if (m) return SAFE_RPC.test(m[1]);
+    return /\/auth\/v1\/token/.test(url);
+  }
+  async function sturdyFetch(input, init) {
+    init = init || {};
+    const url = typeof input === 'string' ? input : input.url;
+    const outer = init.signal;
+    const once = async () => {
+      const ctl = new AbortController();
+      const stop = () => ctl.abort();
+      if (outer) { if (outer.aborted) ctl.abort(); else outer.addEventListener('abort', stop, { once: true }); }
+      const t = setTimeout(stop, FETCH_MS);
+      try { return await fetch(input, Object.assign({}, init, { signal: ctl.signal })); }
+      finally { clearTimeout(t); if (outer) outer.removeEventListener('abort', stop); }
+    };
+    const t0 = Date.now();
+    try { return await once(); } catch (e) {
+      if (outer && outer.aborted) throw e; // the caller gave up itself
+      const quick = Date.now() - t0 < 1500 && e.name !== 'AbortError';
+      if (!safeToRepeat(url, init.method) && !quick) throw e;
+      return once();
+    }
+  }
+
   let clientP = null;
   function client() {
     if (!configured) return Promise.reject(new BackendError('not_configured'));
@@ -65,34 +100,65 @@
           // used to block every later request silently (only a reload helped)
           lock: (name, acquireTimeout, fn) => fn()
         },
+        global: { fetch: sturdyFetch },
         realtime: { params: { eventsPerSecond: 5 } }
       })).catch(e => { clientP = null; throw toError(e); });
     }
     return clientP;
   }
 
-  // the master's calls (her session is attached by supabase-js)
+  /* The token: refreshed before the first request after a wake-up if it runs
+     out within a minute; the SDK's refresh timer is paused while hidden. */
+  let freshP = null;
+  async function freshSession() {
+    const sb = await client();
+    const { data } = await sb.auth.getSession();
+    const s = data && data.session;
+    if (!s) return null;
+    if (s.expires_at && s.expires_at * 1000 - Date.now() < 60000) {
+      if (!freshP) freshP = withTimeout(sb.auth.refreshSession(), 18000).finally(() => { freshP = null; });
+      try { const r = await freshP; return (r.data && r.data.session) || s; } catch (e) { return s; }
+    }
+    return s;
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (!clientP) return; // this page doesn't use the SDK
+    clientP.then(sb => {
+      if (document.visibilityState === 'visible') { sb.auth.startAutoRefresh(); freshSession().catch(() => null); }
+      else sb.auth.stopAutoRefresh();
+    }).catch(() => null);
+  });
+  const jwtProblem = res => res.status === 401 || /JWT|token.*expired|PGRST30[0-9]/i.test(`${res.error.message || ''} ${res.error.code || ''}`);
+
+  // the master's calls (her session is attached by supabase-js); an expired
+  // token is refreshed and the call repeated once, quietly
   async function rpc(fn, args) {
     const sb = await client();
+    await freshSession().catch(() => null);
+    const call = () => withTimeout(sb.rpc(fn, args || {}), 2 * FETCH_MS + 2000);
     let res;
-    try { res = await withTimeout(sb.rpc(fn, args || {})); } catch (e) { throw toError(e); }
+    try {
+      res = await call();
+      if (res.error && jwtProblem(res)) {
+        await withTimeout(sb.auth.refreshSession(), 18000);
+        res = await call();
+      }
+    } catch (e) { throw toError(e); }
     if (res.error) throw toError(res.error);
     return res.data;
   }
 
-  // clients' calls: a plain fetch to the RPC — no SDK, no session, no locks,
-  // aborted after 15 s. Same answers as through supabase-js.
+  // clients' calls: a plain fetch to the RPC — no SDK, no session, no locks.
+  // Same answers as through supabase-js.
   async function publicRpc(fn, args) {
     if (!configured) throw new BackendError('not_configured');
-    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
     let res;
     try {
-      res = await withTimeout(fetch(`${cfg.supabaseUrl}/rest/v1/rpc/${fn}`, {
+      res = await withTimeout(sturdyFetch(`${cfg.supabaseUrl}/rest/v1/rpc/${fn}`, {
         method: 'POST',
         headers: { apikey: cfg.supabaseAnonKey, Authorization: 'Bearer ' + cfg.supabaseAnonKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify(args || {}),
-        signal: ctl ? ctl.signal : undefined
-      }), TIMEOUT, () => ctl && ctl.abort());
+        body: JSON.stringify(args || {})
+      }), 2 * FETCH_MS + 2000);
     } catch (e) { throw toError(e); }
     const text = await res.text();
     let body = null;
@@ -127,6 +193,8 @@
       const { data } = await sb.auth.getSession();
       return data.session || null;
     },
+    // the session, refreshed first if it is about to run out (call after a wake-up)
+    fresh: () => freshSession(),
     async signIn(email, password) {
       const sb = await client();
       const { data, error } = await withTimeout(sb.auth.signInWithPassword({ email, password }));

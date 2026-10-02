@@ -26,10 +26,12 @@ const minutes = v => {
   return (h ? Math.round(+h[1] * 60) : 0) + (m ? +m[1] : 0) || 60;
 };
 
-// everything the app shows, minus what now lives in real tables
-const settings = Object.assign({}, demo);
-['name', 'timezone', 'style', 'services', 'hours', 'slots', 'nextAvailable', 'bookingMode', 'bookingUrl', 'deposit']
-  .forEach(k => delete settings[k]);
+// only what a real master sets herself in the dashboard — no demo numbers,
+// reviews, stories, promo or loyalty progress (those stay in the demo JSON)
+const OWN = ['tagline', 'city', 'address', 'parking', 'phone', 'instagram', 'heroPhoto', 'heroVideo', 'avatar',
+  'policies', 'prep', 'aftercare', 'faq', 'splashStyle', 'splashEmoji'];
+const settings = {};
+OWN.forEach(k => { if (demo[k] != null) settings[k] = demo[k]; });
 settings.tagline = 'Lashes & brows — book online in a minute';
 let settingsJson = JSON.stringify(settings);
 // gallery / owner demo point at services by id → the new uuids
