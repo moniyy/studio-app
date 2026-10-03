@@ -3,7 +3,7 @@
 //
 // GET ?m=<slug>&o=<where the app lives, e.g. https://moniyy.github.io/studio-app/>
 // "Add to Home Screen" then installs that studio: its name, its icon and
-// start_url = <o>?m=<slug> (one app per studio: id = start_url).
+// start_url = <o><slug> — the pretty address (id stays <o>?m=<slug>, as installed before).
 import { cors, serviceClient } from '../_shared/admin.ts';
 
 const BG: Record<string, string> = { noir: '#F2F2F7', maison: '#F7F3EE', soft: '#F7F5F2' };
@@ -23,10 +23,11 @@ Deno.serve(async req => {
   const st = (m.settings || {}) as Record<string, unknown>;
   const icons = (st.icons || {}) as Record<string, string>;
   const name = String(m.name);
-  const start = `${base}?m=${encodeURIComponent(slug)}`;
+  const start = `${base}${encodeURIComponent(slug)}`;
+  const id = `${base}?m=${encodeURIComponent(slug)}`;
   const bg = BG[m.style as string] || BG.noir;
   const manifest = {
-    id: start,
+    id,
     name,
     short_name: name.length > 14 ? name.split(/\s+/).slice(0, 2).join(' ').slice(0, 14) : name,
     description: String(st.tagline || ''),

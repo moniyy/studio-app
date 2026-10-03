@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="supported-color-schemes" content="light dark">
+  <title>Reset your password</title>
+  <style>
+    @media (prefers-color-scheme: dark) {
+      .bg { background: #0B0B0C !important; }
+      .card { background: #18181B !important; }
+      .tx { color: #F4F4F5 !important; }
+      .mt { color: #A1A1AA !important; }
+      .code { background: #27272A !important; color: #FFFFFF !important; }
+    }
+  </style>
+</head>
+<body class="bg" style="margin:0;padding:0;background:#F4F1EE;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="bg" style="background:#F4F1EE;">
+    <tr><td align="center" style="padding:32px 16px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="card" style="max-width:520px;background:#FFFFFF;border-radius:24px;">
+        <tr><td style="padding:36px 32px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+          <p class="mt" style="margin:0 0 8px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#8A8580;">Studio dashboard</p>
+          <h1 class="tx" style="margin:0 0 12px;font-size:26px;line-height:1.2;color:#151515;">Reset your password</h1>
+          <p class="tx" style="margin:0 0 24px;font-size:16px;line-height:1.5;color:#151515;">Enter this code in the app — on your iPhone, in the installed app:</p>
+          <p class="code" style="margin:0 0 24px;padding:18px 0;border-radius:16px;background:#F4F1EE;text-align:center;font-size:34px;font-weight:800;letter-spacing:.3em;color:#151515;font-family:'SF Mono',Menlo,Consolas,monospace;">{{ .Token }}</p>
+          <p class="mt" style="margin:0 0 20px;font-size:15px;line-height:1.5;color:#6B6660;">Or open this link on this device:</p>
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="border-radius:999px;background:#151515;">
+            <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:14px 28px;font-size:16px;font-weight:700;color:#FFFFFF;text-decoration:none;border-radius:999px;">Choose a new password</a>
+          </td></tr></table>
+          <p class="mt" style="margin:28px 0 0;font-size:13px;line-height:1.5;color:#8A8580;">The code works for one hour. Didn’t ask for it? Ignore this email — your password stays the same.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

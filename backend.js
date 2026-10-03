@@ -24,7 +24,7 @@
     'not_active', 'too_late', 'not_bookable', 'service_not_found', 'outside_hours', 'bad_status', 'forbidden',
     'hours_overlap', 'hours_invalid', 'phone_taken', 'too_big', 'timeout', 'paused',
     // a salon
-    'has_bookings', 'owner_stays', 'team_has_staff', 'staff_not_found', 'bad_staff', 'bad_kind'];
+    'has_bookings', 'owner_stays', 'team_has_staff', 'staff_not_found', 'bad_staff', 'bad_kind', 'bad_code', 'too_soon', 'send_failed'];
   const TIMEOUT = 15000;
   function toError(e) {
     if (e instanceof BackendError) return e;
@@ -63,7 +63,7 @@
      (reads, the token refresh, create_booking with its request id); a write is
      repeated only when it failed at once (it never reached the server). */
   const FETCH_MS = 8000;
-  const SAFE_RPC = /^(get_\w+|create_booking|my_account|am_i_admin|admin_studios|admin_slug_free|owner_(studios|bookings|booking|schedule|clients|client|services|profile|looks|insights|slots|push_devices|setup|staff|staff_future|payouts))$/;
+  const SAFE_RPC = /^(get_\w+|create_booking|my_account|am_i_admin|admin_studios|admin_slug_free|admin_email_stats|owner_(studios|bookings|booking|schedule|clients|client|services|profile|looks|insights|slots|push_devices|setup|staff|staff_future|payouts|email_log))$/;
   function safeToRepeat(url, method) {
     if (!method || /^(GET|HEAD)$/i.test(method)) return true;
     const m = /\/rest\/v1\/rpc\/(\w+)/.exec(url);
@@ -205,6 +205,19 @@
       if (error) throw new BackendError(/invalid login|credentials/i.test(error.message) ? 'bad_login' : toError(error).code, error.message);
       return data.session;
     },
+    // "Forgot password": an email with a link and a 6-digit code (the code is for the
+    // installed iPhone app, where a link would open Safari instead)
+    async resetPassword(email, redirectTo) {
+      const sb = await client();
+      const { error } = await withTimeout(sb.auth.resetPasswordForEmail(email, { redirectTo }));
+      if (error) throw new BackendError(/rate|seconds|security purposes/i.test(error.message) ? 'too_soon' : /sending|smtp|mail/i.test(error.message) ? 'send_failed' : toError(error).code, error.message);
+    },
+    async verifyRecovery(email, code) {
+      const sb = await client();
+      const { data, error } = await withTimeout(sb.auth.verifyOtp({ email, token: code, type: 'recovery' }));
+      if (error) throw new BackendError(/expired|invalid|token/i.test(error.message) ? 'bad_code' : toError(error).code, error.message);
+      return data.session;
+    },
     async updatePassword(password) {
       const sb = await client();
       const { error } = await sb.auth.updateUser({ password });
@@ -288,6 +301,10 @@
     serviceStaff: (serviceId, staffIds) => rpc('owner_service_staff', { p_service_id: serviceId, p_staff_ids: staffIds }),
     setKind: (mid, kind) => rpc('owner_set_kind', { p_master_id: mid, p_kind: kind }),
     payouts: (mid, from, to) => rpc('owner_payouts', { p_master_id: mid, p_from: from, p_to: to }),
+    /* emails (Studio → Emails) */
+    emailLog: mid => rpc('owner_email_log', { p_master_id: mid, p_limit: 30 }),
+    emailPreview: (mid, kind) => invoke('send-email', { preview: kind, master_id: mid }, 20000),
+    emailTest: (mid, kind) => invoke('send-email', { test: kind, master_id: mid }, 45000),
     // her account with a temporary password + the staff row (Edge Function)
     inviteStaff: body => invoke('owner-invite-staff', body, 45000),
 
@@ -361,6 +378,8 @@
     // paid by the BSB Link: logs it, next payment date + one period of the plan
     markPaid: id => rpc('admin_mark_paid', { p_id: id }),
     undoPaid: paymentId => rpc('admin_undo_paid', { p_payment_id: paymentId }),
+    // the Gmail counter: sent in the last 24 h (of ~500), waiting for tomorrow, failed
+    emailStats: () => rpc('admin_email_stats'),
     create: body => invoke('admin-create-master', body, 60000),
     resetPassword: id => invoke('admin-master-action', { action: 'reset_password', master_id: id }),
     remove: (id, slug) => invoke('admin-master-action', { action: 'delete', master_id: id, confirm: slug })

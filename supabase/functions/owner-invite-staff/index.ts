@@ -9,6 +9,8 @@
 // Anything fails on the way → what was made is removed again.
 import { createClient } from 'npm:@supabase/supabase-js@2.117.2';
 import { cors, json, serviceClient, tempPassword } from '../_shared/admin.ts';
+import { mailConfigured, sendMail } from '../_shared/mail.ts';
+import { buildInvite, type Studio } from '../_shared/email-templates.ts';
 
 Deno.serve(async req => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -21,7 +23,7 @@ Deno.serve(async req => {
   // deno-lint-ignore no-explicit-any
   let b: any;
   try { b = await req.json(); } catch { return json({ error: 'bad_json' }, 400); }
-  const { data: m } = await admin.from('masters').select('id, name, slug, owner_id').eq('id', String(b.master_id || '')).maybeSingle();
+  const { data: m } = await admin.from('masters').select('id, name, slug, owner_id, style, accent, timezone, kind, settings').eq('id', String(b.master_id || '')).maybeSingle();
   if (!m || m.owner_id !== who.user.id) return json({ error: 'forbidden' }, 403);
 
   const email = String(b.email || '').trim().toLowerCase();
@@ -69,7 +71,20 @@ Deno.serve(async req => {
     const { data: list } = await owner.rpc('owner_staff', { p_master_id: m.id });
     // deno-lint-ignore no-explicit-any
     const staff = (list || []).find((x: any) => x.id === staffId);
-    return json({ staff, email: email || null, password, studio: { name: m.name, slug: m.slug } });
+    // her sign-in by email too (the owner also gets the message to copy)
+    let emailed = false;
+    if (email && password && mailConfigured()) {
+      const st = (m.settings || {}) as Record<string, string>;
+      const studio: Studio = { id: m.id, slug: m.slug, name: m.name, style: m.style, accent: m.accent, tz: m.timezone, kind: m.kind, address: st.address, phone: st.phone };
+      const mail = buildInvite(studio, (staff && staff.name) || b.name || '', email, password);
+      try {
+        await sendMail({ fromName: m.name, to: email, replyTo: who.user.email, subject: mail.subject, html: mail.html, text: mail.text });
+        emailed = true;
+      } catch (_) { /* the message to copy still works */ }
+      await admin.from('email_log').insert({ master_id: m.id, kind: 'invite', to_email: email, to_user: uid, subject: mail.subject,
+        status: emailed ? 'sent' : 'failed', sent_at: emailed ? new Date().toISOString() : null });
+    }
+    return json({ staff, email: email || null, password, emailed, studio: { name: m.name, slug: m.slug } });
   } catch (e) {
     if (createdStaff) await admin.from('staff').delete().eq('id', createdStaff);
     if (uid) await admin.auth.admin.deleteUser(uid);

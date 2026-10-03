@@ -2,9 +2,10 @@
 //
 // POST (Authorization: the admin's JWT)
 //   { name, masterName, email, city, timezone, phone, instagram, slug, template,
-//     style, accent, accentId, plan?, amount?, founding?, kind? ('solo' | 'team'), icons?: { i512, i192, i180 } (base64 PNG) }
+//     style, accent, accentId, plan?, amount?, founding?, kind? ('solo' | 'team'), trial_days? (14 | 30, default 30),
+//     icons?: { i512, i192, i180 } (base64 PNG) }
 // Creates: the master's account with a temporary password (must be changed at
-// the first sign-in), the studio (14-day trial), services / policies / answers /
+// the first sign-in), the studio (a 30-day trial, or 14), services / policies / answers /
 // texts from the niche template, hours Tue–Sat 10:00–18:00, default rules, and
 // stores the app icons (monogram PNGs drawn in the admin page) in Storage.
 // Anything fails on the way → everything made so far is removed again.
@@ -12,7 +13,8 @@ import { cors, json, requireAdmin, serviceClient, tempPassword } from '../_share
 import { TEMPLATES } from './templates.ts';
 
 const TZ = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Anchorage', 'Pacific/Honolulu'];
-const RESERVED = ['demo', 'admin', 'www', 'api', 'app', 'apps', 'test', 'studio', 'help', 'support', 'manifest', 'manifests', 'img', 'owner', 'login'];
+const RESERVED = ['demo', 'admin', 'www', 'api', 'app', 'apps', 'test', 'studio', 'help', 'support', 'manifest', 'manifests', 'img', 'owner', 'login',
+  'masters', 'index', 'config', 'sw', 'assets', 'static']; // + the site's own paths (pretty links)
 const clean = (v: unknown, max: number) => String(v ?? '').trim().slice(0, max);
 const b64 = (s: string) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 
@@ -29,6 +31,8 @@ Deno.serve(async req => {
   const masterName = clean(b.masterName, 40);
   const email = clean(b.email, 120).toLowerCase();
   const slug = clean(b.slug, 41).toLowerCase();
+  const trialDays = [14, 30].includes(+b.trial_days) ? +b.trial_days : 30;
+  const trialEnds = new Date(Date.now() + trialDays * 864e5).toISOString();
   const tpl = TEMPLATES[b.template];
   const style = ['noir', 'soft', 'maison'].includes(b.style) ? b.style : 'noir';
   const accent = /^#[0-9a-f]{6}$/i.test(b.accent || '') ? b.accent : null;
@@ -63,9 +67,9 @@ Deno.serve(async req => {
     const { data: m, error: me } = await admin.from('masters').insert({
       slug, name, owner_id: uid, timezone: b.timezone, style, accent, settings, booking_engine: 'builtin',
       auto_confirm: true, min_notice_hours: 2, max_days_ahead: 60, cancel_window_hours: 24, slot_step_min: 30,
-      // 14-day trial; the first payment is due the day it ends (monthly until changed in the admin)
-      status: 'trial', trial_ends_at: new Date(Date.now() + 14 * 864e5).toISOString(),
-      next_payment_at: new Date(Date.now() + 14 * 864e5).toISOString().slice(0, 10),
+      // the trial (30 days, or 14); the first payment is due the day it ends (monthly until changed in the admin)
+      status: 'trial', trial_ends_at: trialEnds,
+      next_payment_at: trialEnds.slice(0, 10),
       // the plan she pays after the trial: $29/mo by default; founding studios $19/mo forever
       billing_plan: b.founding ? 'monthly' : (['monthly', 'quarterly', 'yearly'].includes(b.plan) ? b.plan : 'monthly'),
       plan_amount: b.founding ? 19 : (b.amount !== '' && b.amount != null && isFinite(+b.amount) && +b.amount >= 0 ? +b.amount : 29),
@@ -105,7 +109,7 @@ Deno.serve(async req => {
       const { error: ie } = await admin.from('masters').update({ settings: { ...settings, icons } }).eq('id', mid);
       if (ie) throw ie;
     }
-    return json({ id: mid, slug, name, masterName, email, password, trial_ends_at: new Date(Date.now() + 14 * 864e5).toISOString() });
+    return json({ id: mid, slug, name, masterName, email, password, trial_ends_at: trialEnds, trial_days: trialDays });
   } catch (e) {
     // roll back: no half-made studios or orphan accounts
     if (mid) {

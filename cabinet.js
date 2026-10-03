@@ -115,7 +115,10 @@
     document.addEventListener('click', onClick);
     document.addEventListener('input', onInput);
     document.addEventListener('change', onChange);
-    root.addEventListener('submit', e => { if (e.target.id === 'cab-signin') { e.preventDefault(); signIn(); } });
+    root.addEventListener('submit', e => {
+      if (e.target.id === 'cab-signin') { e.preventDefault(); signIn(); }
+      if (e.target.id === 'cab-forgot') { e.preventDefault(); if (S.forgot === 'email') sendResetCode(); else saveResetPassword(); }
+    });
     ['pointerdown', 'touchend', 'keydown'].forEach(t => document.addEventListener(t, unlockAudio, true));
     K.pushOverlay(() => close(true));
     const g = K.G();
@@ -125,6 +128,8 @@
     document.addEventListener('visibilitychange', onVisible);
     try {
       S.session = await K.Backend.auth.session();
+      // she opened the link from "Reset your password": a new password first
+      if (S.session && K.recovery && !S.recoveryDone) { S.recovery = true; renderForcePassword(); return; }
       if (S.session) {
         restoreLocal(); // the dashboard from the last visit, at once
         await enter();
@@ -175,10 +180,85 @@
           <button type="button" class="pw__eye" data-pw-eye aria-label="Show password">${icon('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>')}</button></span></label>
         <button type="submit" class="btn btn--primary btn--block" data-cab-signin${S.busy ? ' disabled' : ''}>${S.busy ? K.spinner() : 'Sign in'}</button>
         ${msg ? `<p class="cab-auth__err" role="alert">${esc(msg)}</p>` : ''}
+        <button type="button" class="cab-link" data-cab-forgot>Forgot password?</button>
         ${K.data.ownerDemo ? '<button type="button" class="cab-link" data-cab-demo>See the dashboard with demo data</button>' : ''}
       </form>`;
     const f = $(S.email ? '#cab-pass' : '#cab-email');
     if (f && !K.IS_IOS) setTimeout(() => f.focus(), 350);
+  }
+
+  /* "Forgot password?": an email with a 6-digit code (and a link) → the code + a new password
+     right here — on an iPhone home-screen app a link would open Safari instead */
+  function renderForgot(step, msg) {
+    S.forgot = step;
+    $('#cab-main').innerHTML = step === 'email' ? `
+      <form class="cab-auth" id="cab-forgot" autocomplete="on" onsubmit="return false">
+        <span class="cab-auth__mono">${esc(K.initials())}</span>
+        <h1>Reset your password</h1>
+        <p>We’ll email you a 6-digit code.</p>
+        <label class="field"><span>Email</span>
+          <input id="fg-email" type="email" inputmode="email" autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="you@studio.com" value="${esc(S.email)}"></label>
+        <button type="submit" class="btn btn--primary btn--block" data-fg-send${S.busy ? ' disabled' : ''}>${S.busy ? K.spinner() : 'Send code'}</button>
+        ${msg ? `<p class="cab-auth__err" role="alert">${esc(msg)}</p>` : ''}
+        <button type="button" class="cab-link" data-fg-back>Back to sign in</button>
+      </form>` : `
+      <form class="cab-auth" id="cab-forgot" autocomplete="on" onsubmit="return false">
+        <span class="cab-auth__mono">${esc(K.initials())}</span>
+        <h1>Check your email</h1>
+        <p>We sent a 6-digit code to <b>${esc(S.email)}</b>. It works for an hour.</p>
+        <input type="email" autocomplete="username" value="${esc(S.email)}" hidden>
+        <label class="field"><span>Code</span>
+          <input id="fg-code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="123456" class="fg-code"></label>
+        <label class="field"><span>New password</span>
+          <span class="pw"><input id="fg-new" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters">
+          <button type="button" class="pw__eye" data-pw-eye aria-label="Show password">${icon('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>')}</button></span></label>
+        <button type="submit" class="btn btn--primary btn--block" data-fg-save${S.busy ? ' disabled' : ''}>${S.busy ? K.spinner() : 'Save and sign in'}</button>
+        ${msg ? `<p class="cab-auth__err" role="alert">${esc(msg)}</p>` : ''}
+        <button type="button" class="cab-link" data-fg-resend>Send a new code</button>
+        <button type="button" class="cab-link" data-fg-back>Back to sign in</button>
+      </form>`;
+    const f = $(step === 'email' ? '#fg-email' : '#fg-code');
+    if (f && !K.IS_IOS) setTimeout(() => f.focus(), 300);
+  }
+  async function sendResetCode() {
+    const email = String(($('#fg-email') || {}).value || S.email || '').trim().toLowerCase();
+    S.email = email;
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { renderForgot('email', 'Enter your email address'); return; }
+    S.busy = true;
+    if (S.forgot === 'email') renderForgot('email');
+    try {
+      await K.Backend.auth.resetPassword(email, K.link('owner=1'));
+      S.busy = false;
+      K.haptic([10, 30, 10]);
+      renderForgot('code');
+    } catch (e) {
+      S.busy = false;
+      renderForgot(S.forgot === 'code' ? 'code' : 'email', e.code === 'too_soon' ? 'A code was just sent — wait a minute before asking for a new one' : err(e));
+    }
+  }
+  async function saveResetPassword() {
+    const code = String(($('#fg-code') || {}).value || '').replace(/\D/g, '');
+    const pass = String(($('#fg-new') || {}).value || '');
+    if (code.length < 6) { renderForgot('code', 'Enter the code from the email'); return; }
+    if (pass.length < 8) { renderForgot('code', 'Use at least 8 characters for the password'); return; }
+    S.busy = true;
+    renderForgot('code');
+    try {
+      S.session = await K.Backend.auth.verifyRecovery(S.email, code);
+      await K.Backend.auth.updatePassword(pass);
+      await K.Backend.owner.passwordChanged().catch(() => null);
+      S.busy = false;
+      S.forgot = null;
+      K.haptic([10, 30, 10]);
+      K.toast('Password saved — welcome back!', 'ok');
+      renderLoading();
+      await enter();
+    } catch (e) {
+      S.busy = false;
+      renderForgot('code', e.code === 'bad_code' ? 'That code didn’t work — check the email or send a new one'
+        : /different|same/i.test(e.message || '') ? 'Pick a password different from the old one'
+        : /weak|short|least/i.test(e.message || '') ? 'Pick a stronger password' : err(e));
+    }
   }
 
   async function signIn() {
@@ -307,8 +387,8 @@
     $('#cab-main').innerHTML = `
       <form class="cab-force" id="cab-force" autocomplete="on" onsubmit="return false">
         <span class="cab-force__mono">${esc(K.initials())}</span>
-        <h1>Choose your password</h1>
-        <p>You signed in with a temporary password. Pick your own to finish setting up <b>${esc(K.data.name)}</b>.</p>
+        <h1>${S.recovery ? 'Choose a new password' : 'Choose your password'}</h1>
+        <p>${S.recovery ? `You opened the link from “Reset your password”. Pick a new one for <b>${esc(K.data.name)}</b>.` : `You signed in with a temporary password. Pick your own to finish setting up <b>${esc(K.data.name)}</b>.`}</p>
         <input type="email" autocomplete="username" value="${esc(email)}" hidden>
         <label class="field"><span>New password</span>
           <span class="pw"><input id="fp-new" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters">
@@ -331,6 +411,7 @@
       await K.Backend.auth.updatePassword(a);
       await K.Backend.owner.passwordChanged();
       root.classList.remove('is-forcepw');
+      if (S.recovery) { S.recovery = false; S.recoveryDone = true; }
       K.haptic([10, 30, 10]);
       K.toast('Password saved — welcome!', 'ok');
       renderLoading();
@@ -595,7 +676,8 @@
       memLoad(insKey(), () => K.Backend.owner.insights(S.studio.id, S.insPer || 'week', S.insStaff)),
       teamView() && !S.insStaff ? loadPayouts() : null
     ]),
-    team: () => Promise.all([loadTeam(true, true), loadServices(true)]),
+    team: () => Promise.all([loadTeam(true, true), loadServices(true), loadProfile(true)]),
+    emails: () => Promise.all([loadProfile(true), memLoad('emailLog', () => K.Backend.owner.emailLog(S.studio.id)), memLoad('push', () => K.Backend.owner.pushDevices(S.studio.id)).catch(() => null)]),
     studio: () => Promise.all([loadProfile(true), loadServices(true), loadLooks(true)]),
     profile: () => loadProfile(true),
     style: () => loadProfile(true),
@@ -613,7 +695,7 @@
     hours: () => hoursHTML(), studio: () => studioHTML(), insights: () => insightsHTML(), payments: () => paymentsHTML(),
     profile: () => profileHTML(), style: () => styleHTML(), services: () => servicesHTML(), looks: () => looksHTML(),
     texts: () => textsHTML(), faq: () => faqHTML(), promo: () => promoHTML(), loyalty: () => loyaltyEditHTML(),
-    team: () => teamHTML()
+    team: () => teamHTML(), emails: () => emailsHTML()
   };
   const EDITORS = new Set(['profile', 'style', 'texts', 'faq', 'payments', 'hours', 'promo', 'loyalty']);
 
@@ -865,14 +947,38 @@
     const marks = [];
     for (let m = from; m < to; m += 60) marks.push(`<span style="top:${((m - from) * PX).toFixed(1)}px">${K.fmtTime(m)}</span>`);
     return `
-      <div class="crew-day">
+      <div class="crew-day" data-crew-scroll>
         <div class="crew-day__axis" style="height:${((to - from) * PX).toFixed(0)}px">${marks.join('')}</div>
         ${cols.map(st => `
         <div class="crew-day__col">
-          <button class="crew-day__head" data-crew-cal="${esc(st.id)}" style="--c:${esc(st.color || '#8E8E93')}">${crewAv(st)}<b>${esc(firstOf(st.name))}</b></button>
           ${timelineHTML(off, list.filter(b => b.staff_id === st.id), { sched: S.scheds[st.id] || { hours: [], time_off: [] }, staff: st.id, from, to, bare: true })}
         </div>`).join('')}
       </div>`;
+  }
+  // the masters' names over the columns: in the pinned header, so they stay on top while the day scrolls
+  function crewHeadsHTML() {
+    return `
+      <div class="crew-heads" data-crew-heads aria-hidden="false">
+        <i class="crew-heads__axis"></i>
+        ${crew().map(st => `<button class="crew-day__head" data-crew-cal="${esc(st.id)}" style="--c:${esc(st.color || '#8E8E93')}">${crewAv(st)}<b>${esc(firstOf(st.name))}</b></button>`).join('')}
+      </div>`;
+  }
+  // the heads follow the columns sideways (and the other way round)
+  function bindCrewScroll() {
+    const day = $('[data-crew-scroll]');
+    const heads = $('[data-crew-heads]');
+    if (!day || !heads || day.dataset.bound) return;
+    day.dataset.bound = '1';
+    let lock = null;
+    const follow = (from, to) => () => {
+      if (lock && lock !== from) return;
+      lock = from;
+      to.scrollLeft = from.scrollLeft;
+      cancelAnimationFrame(follow.raf);
+      follow.raf = requestAnimationFrame(() => { lock = null; });
+    };
+    day.addEventListener('scroll', follow(day, heads), { passive: true });
+    heads.addEventListener('scroll', follow(heads, day), { passive: true });
   }
   // All · Jasmine · Mia … (the owner's calendar)
   function crewChipsHTML(attr, sel) {
@@ -931,6 +1037,7 @@
           ${S.day !== 0 ? '<button class="cab-today" data-cab-today>Today</button>' : ''}
         </div>
         ${chips}
+        ${team && !who ? crewHeadsHTML() : ''}
       </div>
       ${tlHead('Day')}
       ${team && !who ? `<div class="cab-day cab-day--crew">${crewDayHTML(S.day, all)}</div>` : `
@@ -1309,8 +1416,8 @@
      STUDIO — she runs everything herself: profile, look, services,
      looks, texts, assistant answers. Photos go to Supabase Storage.
      ========================================================= */
-  const PARENT = { requests: 'today', hours: 'studio', services: 'studio', profile: 'studio', style: 'studio', looks: 'studio', texts: 'studio', faq: 'studio', payments: 'studio', promo: 'studio', loyalty: 'studio', team: 'studio' };
-  const SUB_TITLE = { requests: 'Today', hours: 'Studio', services: 'Studio', profile: 'Studio', style: 'Studio', looks: 'Studio', texts: 'Studio', faq: 'Studio', payments: 'Studio', promo: 'Studio', loyalty: 'Studio', team: 'Studio' };
+  const PARENT = { requests: 'today', hours: 'studio', services: 'studio', profile: 'studio', style: 'studio', looks: 'studio', texts: 'studio', faq: 'studio', payments: 'studio', promo: 'studio', loyalty: 'studio', team: 'studio', emails: 'studio' };
+  const SUB_TITLE = { requests: 'Today', hours: 'Studio', services: 'Studio', profile: 'Studio', style: 'Studio', looks: 'Studio', texts: 'Studio', faq: 'Studio', payments: 'Studio', promo: 'Studio', loyalty: 'Studio', team: 'Studio', emails: 'Studio' };
   // a master's "My hours" is a tab of its own (no way back to a Studio she doesn't have)
   const backHTML = tab => PARENT[tab] && !(isStaff() && tab === 'hours') ? `<button class="cab-back cab-back--top" data-cab-tab="${PARENT[tab]}">${K.I.chevL}${SUB_TITLE[tab]}</button>` : '';
   const S2 = { profile: null, services: null, looks: null, edit: null };
@@ -1413,7 +1520,7 @@
         <span class="row__chev">${K.I.chevR}</span>
       </button>`;
     return `
-      <header class="cab-h"><span class="eyebrow">${esc(location.host + location.pathname.replace(/\/$/, ''))}/?m=${esc(K.SLUG)}</span><h1>Studio</h1></header>
+      <header class="cab-h"><span class="eyebrow">${esc(K.link().replace(/^https?:\/\//, ''))}</span><h1>Studio</h1></header>
       ${depositWarnHTML()}
       <div class="group-label">Your page</div>
       <div class="list">
@@ -1429,6 +1536,7 @@
         ${row('team', '<circle cx="9" cy="8.5" r="3.2"/><circle cx="16.5" cy="9.5" r="2.6"/><path d="M3 19.5c.8-3.2 3.2-5 6-5s5.2 1.8 6 5M15 14.6c2.6-.3 5 1.2 5.8 4.9"/>', 'Team', isTeam() ? (S.team ? crew().length + (crew().length === 1 ? ' master' : ' masters') : 'Team') : 'Solo')}
         ${row('hours', '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>', 'Hours, time off & rules')}
         ${row('payments', '<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10.5h18M7 15h4"/>', 'Payments & deposits', Object.values(st.payments || {}).some(v => String(v || '').trim()) ? 'On' : 'Off')}
+        ${row('emails', '<rect x="3" y="5.5" width="18" height="13" rx="3"/><path d="m3.5 7 8.5 6.5L20.5 7"/>', 'Emails', '')}
         ${row('texts', '<path d="M6 4h12v16H6z"/><path d="M9 8h6M9 12h6M9 16h4"/>', 'Policies & texts')}
         ${row('faq', '<path d="M20.5 11.8a8.3 8.3 0 0 1-12.2 7.3L3.5 20.5l1.4-4.6a8.3 8.3 0 1 1 15.6-4.1z"/>', 'Assistant answers', (st.faq || []).length)}
       </div>
@@ -1465,6 +1573,8 @@
 
   async function setKind(kind) {
     if (kind === (isTeam() ? 'team' : 'solo')) return;
+    // a salon shows its owner by her first name: ask for it once
+    if (kind === 'team' && !String(((S2.profile || {}).settings || {}).masterName || '').trim()) { askFirstName(); return; }
     try {
       await K.Backend.owner.setKind(S.studio.id, kind);
       S.studio.kind = kind;
@@ -1478,6 +1588,32 @@
       K.toast(e.code === 'team_has_staff' ? 'Turn off the other masters first' : err(e), 'x');
       refreshView();
     }
+  }
+
+  function askFirstName() {
+    K.haptic();
+    K.Sheet.open(el => {
+      el.innerHTML = `
+        <div class="ob" data-sheet-scroll>
+          <header class="ob__head"><span class="eyebrow">Team</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
+          <h2>Your first name</h2>
+          <p class="ob__sub">Clients see it next to your masters — in “Our team”, when they pick who they book with, and in their confirmations.</p>
+          <form class="bk-form" onsubmit="return false">
+            <label class="field"><span>Your first name</span><input id="crew-first" maxlength="40" autocomplete="given-name" placeholder="Bella"></label>
+          </form>
+          <button class="btn btn--primary btn--block" data-crew-first>Turn on Team</button>
+        </div>`;
+    }, { detent: 'medium' });
+    setTimeout(() => { const i = K.$('#crew-first', K.Sheet.el()); if (i && !K.IS_IOS) i.focus(); }, 350);
+  }
+  async function saveFirstName(btn) {
+    const v = String((K.$('#crew-first', K.Sheet.el()) || {}).value || '').trim();
+    if (!v) { K.toast('Add your first name', 'x'); return; }
+    await busyBtn(btn, async () => {
+      S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { settings: { masterName: v } });
+      K.Sheet.close();
+      await setKind('team');
+    });
   }
 
   // add / edit a master: photo, name, title, bio, color, commission, what she does (her own price / time)
@@ -1505,14 +1641,16 @@
             <div class="row"><span class="row__label">Signs in as<span class="row__sub">${esc(s.email || '')}</span></span></div>` : `
             <label class="field"><span>Her email <em>${isNew ? 'to sign in — or leave empty and add it later' : 'to give her a sign-in'}</em></span><input name="email" type="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="jasmine@gmail.com"></label>`}
             <div class="group-label">What she does</div>
-            <p class="cab-muted">Her own price or time only if it differs from the menu.</p>
-            <div class="list crew-svcs">${svcs.map(x => { const o = mine[x.id]; return `
+            <div class="list crew-svcs">${svcs.map(x => { const o = mine[x.id]; const own = o && (o.price != null || o.duration); return `
               <div class="row row--stack crew-svc">
-                <label class="tick"><input type="checkbox" data-crew-svc="${esc(x.id)}"${o ? ' checked' : ''}><i aria-hidden="true">${K.I.check}</i><span>${esc(x.name)} <small class="num">${money(x.price)} · ${durText(x.duration_min)}</small></span></label>
-                <div class="form-2 crew-svc__own">
-                  <label class="field"><span>Her price, $</span><input type="number" inputmode="decimal" min="0" step="1" data-crew-price="${esc(x.id)}" value="${esc(o && o.price != null ? +o.price : '')}" placeholder="${esc(+x.price)}"></label>
-                  <label class="field"><span>Her time</span><select class="cab-sel cab-sel--wide" data-crew-dur="${esc(x.id)}"><option value="">${durText(x.duration_min)}</option>${DURATIONS.map(m => `<option value="${m}"${o && +o.duration === m ? ' selected' : ''}>${durText(m)}</option>`).join('')}</select></label>
-                </div>
+                <label class="tick"><input type="checkbox" data-crew-svc="${esc(x.id)}"${o ? ' checked' : ''}><i aria-hidden="true">${K.I.check}</i><span>${esc(x.name)} <small class="num">${money(own && o.price != null ? o.price : x.price)} · ${durText(own && o.duration ? +o.duration : x.duration_min)}</small></span></label>
+                <details class="crew-svc__more"${own ? ' open' : ''}>
+                  <summary>Custom price or time</summary>
+                  <div class="form-2">
+                    <label class="field"><span>Her price, $</span><input type="number" inputmode="decimal" min="0" step="1" data-crew-price="${esc(x.id)}" value="${esc(o && o.price != null ? +o.price : '')}" placeholder="${esc(+x.price)}"></label>
+                    <label class="field"><span>Her time</span><select class="cab-sel cab-sel--wide" data-crew-dur="${esc(x.id)}"><option value="">${durText(x.duration_min)}</option>${DURATIONS.map(m => `<option value="${m}"${o && +o.duration === m ? ' selected' : ''}>${durText(m)}</option>`).join('')}</select></label>
+                  </div>
+                </details>
               </div>`; }).join('') || '<div class="row"><span class="row__label cab-muted">Add services first</span></div>'}</div>
           </form>
           <button class="btn btn--primary btn--block" data-crew-save>${isNew ? 'Add master' : 'Save'}</button>
@@ -1570,7 +1708,7 @@
 
   // the message with her sign-in (the temporary password is shown only now)
   function inviteText(r, name) {
-    const link = `${location.origin}${location.pathname}?m=${encodeURIComponent(K.SLUG)}&owner=1`;
+    const link = K.link('owner=1');
     return [
       `Hi ${firstOf(name) || 'there'}! 👋`,
       '',
@@ -1592,7 +1730,7 @@
         <div class="ob" data-sheet-scroll>
           <header class="ob__head"><span class="eyebrow">Invite</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
           <h2>${esc(firstOf(name))} can sign in ✨</h2>
-          <p class="ob__sub">Send her this message. The temporary password is shown only now — she picks her own at the first sign-in.</p>
+          <p class="ob__sub">${r.emailed ? `We emailed it to ${esc(r.email)} too. ` : ''}Send her this message as well. The temporary password is shown only now — she picks her own at the first sign-in.</p>
           <div class="card bk-sum crew-inv">
             <div class="bk-row"><span>Email</span><b>${esc(r.email)}</b></div>
             <div class="bk-row"><span>Temporary password</span><b class="num crew-pw">${esc(r.password)}</b></div>
@@ -1693,6 +1831,100 @@
       K.onDataChanged();
       syncChanges(true).catch(() => null);
       await paintReassign();
+    });
+  }
+
+  /* ---------- Emails (Studio → Emails): what goes to clients and to her ---------- */
+  // [settings key, title, what it is, preview kind, default]
+  const EMAILS_CLIENT = [
+    ['confirm', 'Booking confirmed', 'With an .ics calendar file and a Manage link', 'confirm', true],
+    ['changes', 'Changes & cancellations', 'Whoever moved or cancelled it', 'moved', true],
+    ['reminders', 'Reminders', '24 hours and 2 hours before', 'reminder_24', true],
+    ['deposit', 'Deposit requests', 'The ways to pay and the deadline', 'deposit', true],
+    ['review', 'How was your visit?', 'After the visit — needs a review link in Profile', 'review', true],
+    ['fill', 'Time for your fill', 'When the service’s fill reminder is due', 'fill', true]
+  ];
+  const EMAILS_ME = [
+    ['alerts', 'Booking alerts by email', 'New, cancelled and moved bookings — a backup to push', 'alert_new', null],
+    ['day', 'Your day at 8:00', 'Every morning there are bookings: today’s list', 'day', false]
+  ];
+  const EMAIL_KIND = { confirm: 'Confirmed', request: 'Request', deposit: 'Deposit', moved: 'Moved', cancelled: 'Cancelled', reminder_24: 'Reminder · 24 h', reminder_2: 'Reminder · 2 h', review: 'Review', fill: 'Fill', alert_new: 'Alert · new', alert_cancel: 'Alert · cancel', alert_move: 'Alert · move', day: 'Your day', invite: 'Invite', reset: 'Password', test: 'Test' };
+  function emailOn(key, def) {
+    const v = ((((S2.profile || {}).settings || {}).emails) || {})[key];
+    if (v === true || v === false) return v;
+    // alerts: on by itself only while this account gets no push notifications
+    if (def === null) return !(MEM.push || []).length;
+    return def;
+  }
+  async function emailsHTML() {
+    const p = need(S2.profile);
+    const log = MEM.emailLog || [];
+    const st = p.settings || {};
+    const sw = ([key, title, sub, kind, def]) => `
+      <div class="row eml-row">
+        <span class="row__label">${esc(title)}<span class="row__sub">${esc(sub)}${key === 'deposit' && !takesDeposits(st) ? ' · payments are off' : ''}${key === 'review' && !st.reviewUrl ? ' · add a review link in Profile' : ''}</span>
+          <button type="button" class="cab-link eml-pv" data-eml-preview="${kind}">Preview</button></span>
+        <button class="switch" role="switch" aria-checked="${emailOn(key, def)}" data-eml="${key}" aria-label="${esc(title)}"></button>
+      </div>`;
+    return `
+      ${backHTML('emails')}
+      <header class="cab-h"><h1>Emails</h1></header>
+      <p class="cab-muted">Sent with your studio’s name. When a client answers, the reply comes to your own email.</p>
+      <div class="group-label">To your clients</div>
+      <div class="list">${EMAILS_CLIENT.map(sw).join('')}</div>
+      <p class="cab-muted">Only to clients who left an email. “How was your visit?” and “Time for your fill” have an unsubscribe link (US rules); bookings, changes and reminders always arrive.</p>
+      <div class="group-label">To you${isTeam() ? ' and your masters' : ''}</div>
+      <div class="list">${EMAILS_ME.map(sw).join('')}</div>
+      <div class="group-label">Recently sent</div>
+      <div class="list eml-log">${log.length ? log.slice(0, 15).map(x => `
+        <div class="row"><span class="row__label">${esc(EMAIL_KIND[x.kind] || x.kind)}<span class="row__sub">${esc(x.to)} · ${esc(ago(x.sent_at || x.created_at))}</span></span>
+          <span class="eml-st eml-st--${esc(x.status)}">${esc({ sent: 'Sent', queued: 'Waiting', sending: 'Sending', failed: 'Failed', skipped: 'Skipped' }[x.status] || x.status)}</span></div>`).join('')
+        : '<div class="row"><span class="row__label cab-muted">Nothing sent yet</span></div>'}</div>`;
+  }
+  async function toggleEmail(btn) {
+    const key = btn.dataset.eml;
+    const on = btn.getAttribute('aria-checked') !== 'true';
+    // only what she set herself + this one (the rest keeps following the defaults)
+    const all = Object.assign({}, (((S2.profile || {}).settings || {}).emails) || {}, { [key]: on });
+    btn.setAttribute('aria-checked', on);
+    K.haptic();
+    try {
+      S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { settings: { emails: all } });
+      K.toast(on ? 'On' : 'Off — not sent any more', 'ok');
+    } catch (e) { btn.setAttribute('aria-checked', !on); K.toast(err(e), 'x'); }
+  }
+  async function openEmailPreview(kind) {
+    K.haptic();
+    S2.emlKind = kind;
+    K.Sheet.open(el => {
+      el.innerHTML = `
+        <div class="ob eml-sheet" data-sheet-scroll>
+          <header class="ob__head"><span class="eyebrow">Preview</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
+          <p class="ob__sub eml-subj" id="eml-subj"><i class="spin"></i></p>
+          <div class="eml-frame" id="eml-frame"></div>
+          <button class="btn btn--soft btn--block" data-eml-test>${icon('<path d="m3 11 18-8-8 18-2-8z"/>')}Send me a test</button>
+        </div>`;
+    }, { detent: 'large' });
+    try {
+      const r = await K.Backend.owner.emailPreview(S.studio.id, kind);
+      if (S2.emlKind !== kind) return;
+      const subj = K.$('#eml-subj', K.Sheet.el());
+      if (subj) subj.textContent = r.subject;
+      const box = K.$('#eml-frame', K.Sheet.el());
+      if (box) {
+        const f = document.createElement('iframe');
+        f.title = 'Email preview';
+        f.setAttribute('sandbox', '');
+        f.srcdoc = r.html;
+        box.appendChild(f);
+      }
+    } catch (e) { K.toast(err(e), 'x'); }
+  }
+  async function sendTestEmail(btn) {
+    await busyBtn(btn, async () => {
+      const r = await K.Backend.owner.emailTest(S.studio.id, S2.emlKind);
+      K.toast(`Sent to ${r.to}`, 'ok');
+      delete MEM.emailLog;
     });
   }
 
@@ -2390,6 +2622,10 @@
     if ((el = t.closest('[data-pay-copy]'))) { copyText(payoutsText(), 'Payouts copied'); return true; }
     // team
     if ((el = t.closest('[data-crew-kind]'))) { setKind(el.dataset.crewKind); return true; }
+    if ((el = t.closest('[data-crew-first]'))) { saveFirstName(el); return true; }
+    if ((el = t.closest('[data-eml]'))) { if (S.readonly) { readOnly(); return true; } toggleEmail(el); return true; }
+    if ((el = t.closest('[data-eml-preview]'))) { openEmailPreview(el.dataset.emlPreview); return true; }
+    if ((el = t.closest('[data-eml-test]'))) { if (S.readonly) { readOnly(); return true; } sendTestEmail(el); return true; }
     if ((el = t.closest('[data-crew-new]'))) { openCrewEditor(null); return true; }
     if ((el = t.closest('[data-crew-edit]'))) { openCrewEditor(crewById(el.dataset.crewEdit)); return true; }
     if ((el = t.closest('[data-crew-color]'))) {
@@ -3327,6 +3563,11 @@
       return;
     }
     if ((el = t.closest('[data-pw-save]'))) { changePassword(); return; }
+    if ((el = t.closest('[data-cab-forgot]'))) { const v = ($('#cab-email') || {}).value; if (v) S.email = v.trim().toLowerCase(); renderForgot('email'); return; }
+    if ((el = t.closest('[data-fg-send]'))) { e.preventDefault(); if (!el.disabled) sendResetCode(); return; }
+    if ((el = t.closest('[data-fg-resend]'))) { sendResetCode(); return; }
+    if ((el = t.closest('[data-fg-save]'))) { e.preventDefault(); if (!el.disabled) saveResetPassword(); return; }
+    if ((el = t.closest('[data-fg-back]'))) { S.forgot = null; renderAuth(); return; }
     if ((el = t.closest('[data-cab-demo]'))) { close(); setTimeout(() => K.demo(), 350); return; }
     if ((el = t.closest('[data-cab-signout]'))) { signOut(); return; }
     if ((el = t.closest('[data-cab-menu]'))) { openMenu(); return; }
@@ -3547,7 +3788,7 @@
     if (tab === 'today') paintPush();
     if (tab === 'requests') bindSwipes();
     if (tab === 'services' || tab === 'looks') bindSortable();
-    if (tab === 'calendar') bindDaySwipe();
+    if (tab === 'calendar') { bindDaySwipe(); bindCrewScroll(); }
     if (tab === 'calendar' && S.cal === 'day' && first) scrollToNow();
   }
   // the day opens at the current time (or the first booking, or opening time), below the pinned header
@@ -3603,7 +3844,7 @@
           <p class="ob__sub">Signed in as ${esc(email)}</p>
           <div class="list">
             <div class="row"><span class="row__label">Live updates<span class="row__sub">${S.live ? 'Connected — new bookings appear instantly' : 'Checking every 15 seconds'}</span></span></div>
-            <div class="row"><span class="row__label">Online booking link<span class="row__sub">${esc(location.origin + location.pathname + '?m=' + K.SLUG)}</span></span></div>
+            <div class="row"><span class="row__label">Online booking link<span class="row__sub">${esc(K.link())}</span></span></div>
           </div>
           <div class="group-label">Change password</div>
           <form class="bk-form" id="pw-form" autocomplete="on" onsubmit="return false">

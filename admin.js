@@ -22,9 +22,10 @@
   const $$ = (s, el) => Array.from((el || root).querySelectorAll(s));
   const esc = v => K.esc(v);
   const icon = d => K.svg(d);
-  const APP = () => location.origin + location.pathname.replace(/[^/]*$/, '');
-  const clientLink = slug => `${APP()}?m=${slug}`;
-  const ownerLink = slug => `${APP()}?m=${slug}&owner=1`;
+  // pretty links: …/studio-app/<slug> (one setting: config.baseUrl — e.g. https://satinbook.com/)
+  const APP = () => { const b = (window.STUDIO_CONFIG || {}).baseUrl; return /^https?:\/\//.test(b || '') ? b.replace(/\/?$/, '/') : location.origin + location.pathname.replace(/[^/]*$/, ''); };
+  const clientLink = slug => `${APP()}${slug}`;
+  const ownerLink = slug => `${APP()}${slug}?owner=1`;
   const TZ = [['America/New_York', 'Eastern'], ['America/Chicago', 'Central'], ['America/Denver', 'Mountain'],
     ['America/Los_Angeles', 'Pacific'], ['America/Anchorage', 'Alaska'], ['Pacific/Honolulu', 'Hawaii']];
   const NICHES = [['lashes', 'Lashes'], ['brows', 'Brows'], ['nails', 'Nails'], ['lashes-brows', 'Lashes + Brows'], ['hair', 'Hair'], ['makeup', 'Makeup']];
@@ -161,11 +162,26 @@
 
   async function renderList() {
     root.innerHTML = barHTML('') + '<main class="adm-main"><div class="adm-load"><i class="spin"></i></div></main>';
-    try { A.list = await K.Backend.admin.studios(); } catch (e) {
+    try {
+      [A.list, A.mail] = await Promise.all([K.Backend.admin.studios(), K.Backend.admin.emailStats().catch(() => null)]);
+    } catch (e) {
       $('.adm-main').innerHTML = `<div class="adm-empty"><b>${esc(errText(e))}</b><button class="btn btn--soft btn--sm" data-a-go="list">Try again</button></div>`;
       return;
     }
     paintList();
+  }
+  // Gmail sends ~500 emails a day: the last 24 hours, a warning from 400, what waits for tomorrow
+  function mailHTML() {
+    const m = A.mail;
+    if (!m) return '';
+    const warn = m.sent_24h >= 400;
+    return `
+      <section class="adm-mail${warn ? ' is-warn' : ''}">
+        <span class="adm-mail__ic">${icon('<rect x="3" y="5.5" width="18" height="13" rx="3"/><path d="m3.5 7 8.5 6.5L20.5 7"/>')}</span>
+        <span class="adm-mail__txt"><b>Emails · last 24 h: <span class="num">${m.sent_24h}</span> of ${m.limit}</b>
+          <small>${warn ? 'Close to Gmail’s daily limit — the rest will wait for tomorrow.' : 'Through the studio Gmail.'}${m.waiting ? ` · <b class="num">${m.waiting}</b> waiting for tomorrow` : ''}${m.failed_24h ? ` · <b class="num">${m.failed_24h}</b> failed` : ''}</small></span>
+        <i class="adm-mail__bar"><i style="width:${Math.min(100, Math.round((m.sent_24h / m.limit) * 100))}%"></i></i>
+      </section>`;
   }
   /* ---------- billing: the master pays through a BSB Link, marked here by hand ---------- */
   const PLANS = [['monthly', 'Monthly', 'mo'], ['quarterly', 'Quarterly', 'quarter'], ['yearly', 'Yearly', 'yr']];
@@ -189,11 +205,14 @@
   const dueSoon = () => (A.list || []).filter(s => s.next_payment_at && daysTo(s.next_payment_at) <= 7)
     .sort((x, y) => x.next_payment_at.localeCompare(y.next_payment_at));
 
+  // how long her trial was set to (14 or 30 days), from when the studio was made
+  const trialDays = s => (s.trial_ends_at && s.created_at ? Math.max(1, Math.round((Date.parse(s.trial_ends_at) - Date.parse(s.created_at)) / day)) : 30);
   function paymentMessage(s) {
     const late = daysTo(s.next_payment_at || todayISO()) < 0;
     return [
       `Hi ${s.master_name || 'there'}! 👋`,
       '',
+      ...(s.status === 'trial' && s.trial_ends_at ? [`Your ${trialDays(s)}-day free trial ${Date.parse(s.trial_ends_at) < Date.now() ? 'ended' : 'ends'} on ${fmtLong(s.trial_ends_at.slice(0, 10))}.`] : []),
       `Your ${planOf(s)[1].toLowerCase()} Studio App plan for ${s.name} ${late ? 'was due' : 'is due'} on ${fmtLong(s.next_payment_at || todayISO())}: ${money(s.plan_amount)}.`,
       '',
       `You can pay securely here: ${s.payment_link}`,
@@ -281,6 +300,7 @@
     const main = $('.adm-main');
     if (!main) return;
     main.innerHTML = `
+      ${mailHTML()}
       ${dueHTML()}
       <div class="adm-head">
         <div><h1>Studios</h1><p class="adm-muted">${all.length} studio${all.length === 1 ? '' : 's'}${soon ? ` · <b class="adm-warn-text">${soon} trial${soon > 1 ? 's' : ''} ending soon</b>` : ''}</p></div>
@@ -297,7 +317,7 @@
       <article class="adm-card${t && t.warn ? ' is-warn' : ''}${s.status === 'paused' ? ' is-paused' : ''}" data-id="${esc(s.id)}">
         <div class="adm-card__top">
           ${s.icon ? `<img class="adm-card__icon" src="${esc(s.icon)}" alt="">` : `<span class="adm-card__icon adm-card__icon--mono">${esc(mono(s.name))}</span>`}
-          <div class="adm-card__who"><b>${esc(s.name)}</b><small>${esc([s.master_name, s.owner_email].filter(Boolean).join(' · ') || 'no owner')}</small><small class="adm-link">?m=${esc(s.slug)} · <span class="adm-kind-tag">${s.kind === 'team' ? `Team · ${+s.staff_count || 1} master${+s.staff_count === 1 ? '' : 's'}` : 'Solo'}</span></small></div>
+          <div class="adm-card__who"><b>${esc(s.name)}</b><small>${esc([s.master_name, s.owner_email].filter(Boolean).join(' · ') || 'no owner')}</small><small class="adm-link">/${esc(s.slug)} · <span class="adm-kind-tag">${s.kind === 'team' ? `Team · ${+s.staff_count || 1} master${+s.staff_count === 1 ? '' : 's'}` : 'Solo'}</span></small></div>
           ${pill(s)}
         </div>
         <div class="adm-stats">
@@ -379,8 +399,9 @@
     if (!s || !(await confirmBox(`New temporary password for ${s.name}?`, `${s.owner_email || 'The master'} will have to choose a new password at the next sign-in. The old one stops working now.`, 'Reset password'))) return;
     await busy(btn, async () => {
       const r = await K.Backend.admin.resetPassword(id);
-      A.kit = { id: s.id, slug: s.slug, name: s.name, masterName: s.master_name, email: r.email || s.owner_email, password: r.password, trial_ends_at: s.status === 'trial' ? s.trial_ends_at : null, kind: s.kind };
+      A.kit = { id: s.id, slug: s.slug, name: s.name, masterName: s.master_name, email: r.email || s.owner_email, password: r.password, trial_ends_at: s.status === 'trial' ? s.trial_ends_at : null, created_at: s.created_at, kind: s.kind };
       go('kit');
+      if (r.emailed) K.toast('New password — emailed to her too', 'ok');
     });
   }
   async function deleteStudio(id) {
@@ -404,14 +425,14 @@
       .replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
   }
   function renderNew() {
-    const f = A.form || (A.form = { name: '', masterName: '', email: '', city: '', timezone: 'America/New_York', phone: '', instagram: '', slug: '', slugTouched: false, slugState: null, template: 'lashes', style: 'noir', accent: null, plan: 'monthly', amount: '29', founding: false, kind: 'solo' });
+    const f = A.form || (A.form = { name: '', masterName: '', email: '', city: '', timezone: 'America/New_York', phone: '', instagram: '', slug: '', slugTouched: false, slugState: null, template: 'lashes', style: 'noir', accent: null, plan: 'monthly', amount: '29', founding: false, kind: 'solo', trial: 30 });
     root.innerHTML = barHTML('New studio', true) + `
       <main class="adm-main">
         <form class="adm-form" id="adm-new" onsubmit="return false" autocomplete="off">
           <div class="adm-form__grid">
             <label class="field"><span>Studio name</span><input data-f="name" maxlength="60" value="${esc(f.name)}" placeholder="Bella Brows"></label>
             <label class="field"><span>App link</span>
-              <span class="adm-slug"><em>…/?m=</em><input data-f="slug" maxlength="40" value="${esc(f.slug)}" placeholder="bella-brows" autocapitalize="off" spellcheck="false"></span>
+              <span class="adm-slug"><em>…/</em><input data-f="slug" maxlength="40" value="${esc(f.slug)}" placeholder="bella-brows" autocapitalize="off" spellcheck="false"></span>
               <small class="adm-slug__state" id="adm-slug-state">${slugStateHTML()}</small></label>
             <label class="field"><span>Her first name</span><input data-f="masterName" maxlength="40" value="${esc(f.masterName)}" placeholder="Bella"></label>
             <label class="field"><span>Her email (sign-in)</span><input data-f="email" type="email" inputmode="email" maxlength="120" value="${esc(f.email)}" placeholder="bella@example.com" autocapitalize="off"></label>
@@ -434,14 +455,17 @@
               <div class="sty-acc" role="radiogroup" aria-label="Accent">${accentsHTML()}</div></div>
             <div class="adm-icon-prev"><canvas id="adm-icon" width="192" height="192" aria-label="App icon"></canvas><small>App icon</small></div>
           </div>
-          <div class="field"><span>Plan after the 14-day trial</span>
+          <div class="field"><span>Free trial</span>
+            <div class="segmented adm-trial" role="radiogroup" style="--n:2;--idx:${f.trial === 14 ? 0 : 1}"><i class="segmented__thumb"></i>
+              ${[14, 30].map(n => `<button type="button" role="radio" data-f-trial="${n}" aria-checked="${f.trial === n}">${n} days</button>`).join('')}</div></div>
+          <div class="field"><span>Plan after the ${f.trial}-day trial</span>
             <div class="adm-plan">
               <select class="cab-sel cab-sel--wide" data-f="plan"${f.founding ? ' disabled' : ''}>${PLANS.map(([v, l]) => `<option value="${v}"${v === (f.founding ? 'monthly' : f.plan) ? ' selected' : ''}>${l}</option>`).join('')}</select>
               <span class="adm-plan__amt"><em>$</em><input data-f="amount" type="number" inputmode="decimal" min="0" step="1" value="${esc(f.founding ? '19' : f.amount)}"${f.founding ? ' disabled' : ''}></span>
             </div>
             <label class="tick adm-founding"><input type="checkbox" data-f-founding${f.founding ? ' checked' : ''}><i aria-hidden="true">${K.I.check}</i><span><b>Founding price — $19/mo forever</b></span></label>
             <small class="adm-plan__sum" id="adm-plan-sum">${esc(planSummary())}</small></div>
-          <p class="adm-muted">Hours Tue–Sat 10:00–18:00 · 14-day trial · she changes everything later in her dashboard.</p>
+          <p class="adm-muted">Hours Tue–Sat 10:00–18:00 · ${f.trial}-day trial · she changes everything later in her dashboard.</p>
           <button class="btn btn--primary btn--block" data-a-create>Create studio</button>
         </form>
       </main>`;
@@ -551,10 +575,10 @@
       const r = await K.Backend.admin.create({
         name: f.name.trim(), masterName: f.masterName.trim(), email: f.email.trim(), city: f.city.trim(), timezone: f.timezone,
         phone: f.phone.trim(), instagram: f.instagram.trim(), slug: f.slug, template: f.template, style: f.style,
-        accent, accentId: f.accent, plan: f.plan, amount: f.amount, founding: !!f.founding, kind: f.kind === 'team' ? 'team' : 'solo',
+        accent, accentId: f.accent, plan: f.plan, amount: f.amount, founding: !!f.founding, kind: f.kind === 'team' ? 'team' : 'solo', trial_days: f.trial,
         icons: { i512: png64(i512), i192: png64(i192), i180: png64(i180) }
       });
-      A.kit = { id: r.id, slug: r.slug, name: r.name, masterName: r.masterName, email: r.email, password: r.password, trial_ends_at: r.trial_ends_at, kind: f.kind, fresh: true };
+      A.kit = { id: r.id, slug: r.slug, name: r.name, masterName: r.masterName, email: r.email, password: r.password, trial_ends_at: r.trial_ends_at, trial_days: r.trial_days || f.trial, kind: f.kind, fresh: true };
       A.form = null;
       A.list = null;
       K.toast(`${r.name} is ready`, 'ok');
@@ -569,6 +593,7 @@
       `Hi ${name}! 👋`,
       '',
       `Your booking app for ${k.name} is ready ✨`,
+      ...(k.trial_ends_at ? ['', `It’s free for ${k.trial_days || trialDays(k)} days — your trial runs until ${fmtLong(k.trial_ends_at.slice(0, 10))}.`] : []),
       '',
       'Set it up in 5 minutes:',
       `1. On your iPhone, open this link in Safari: ${ownerLink(k.slug)}`,
@@ -704,7 +729,7 @@
     if ((el = t.closest('[data-a-del]'))) { deleteStudio(el.dataset.aDel); return; }
     if ((el = t.closest('[data-a-kit]'))) {
       const s = byId(el.dataset.aKit);
-      if (s) { A.kit = { id: s.id, slug: s.slug, name: s.name, masterName: s.master_name, email: s.owner_email, password: null, trial_ends_at: s.status === 'trial' ? s.trial_ends_at : null, kind: s.kind }; go('kit'); }
+      if (s) { A.kit = { id: s.id, slug: s.slug, name: s.name, masterName: s.master_name, email: s.owner_email, password: null, trial_ends_at: s.status === 'trial' ? s.trial_ends_at : null, created_at: s.created_at, kind: s.kind }; go('kit'); }
       return;
     }
     if ((el = t.closest('[data-a-copy]'))) { copy(el.dataset.aCopy); return; }
@@ -713,6 +738,7 @@
     // the new-studio form
     if ((el = t.closest('[data-f-tpl]'))) { A.form.template = el.dataset.fTpl; $$('[data-f-tpl]').forEach(c => c.classList.toggle('is-active', c === el)); return; }
     if ((el = t.closest('[data-f-kind]')) && A.form) { A.form.kind = el.dataset.fKind; K.haptic(); renderNew(); return; }
+    if ((el = t.closest('[data-f-trial]')) && A.form) { A.form.trial = +el.dataset.fTrial; K.haptic(); renderNew(); return; }
     if ((el = t.closest('[data-f-style]'))) {
       A.form.style = el.dataset.fStyle;
       A.form.accent = null;

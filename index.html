@@ -5,17 +5,19 @@
   <!-- Supabase keys (gitignored; the Pages workflow writes it) — first, so the line below can use them -->
   <script src="./config.js"></script>
   <!-- Per-master install: before anything else, point the manifest at this studio's own one
-       (start_url = ./?m=<slug>), so "Add to Home Screen" opens the studio it was added from.
+       (start_url = …/<slug>), so "Add to Home Screen" opens the studio it was added from.
        Studios in the database: made on the fly by the manifest Edge Function (no file per
-       studio in the repo). The demo: manifests/demo.webmanifest. No ?m → the last studio → demo. -->
+       studio in the repo). The demo: manifests/demo.webmanifest. The studio: the pretty path
+       (…/bella-brows), an old ?m= link, or the last studio opened here → demo. -->
   <script>
     (function () {
       var ok = /^[a-z0-9][a-z0-9_-]{0,60}$/, m = (new URLSearchParams(location.search).get('m') || '').trim().toLowerCase();
+      var base = location.origin + location.pathname.replace(/[^/]*$/, ''), tail = location.pathname.replace(/^.*\//, '').toLowerCase();
+      if (!ok.test(m) && ok.test(tail) && tail !== 'index.html') m = tail;
       if (!ok.test(m)) { try { m = localStorage.getItem('studio-app:last') || ''; } catch (e) { m = ''; } }
       if (!ok.test(m)) m = 'demo';
       var c = window.STUDIO_CONFIG || {}, href = './manifests/' + m + '.webmanifest';
       if (m !== 'demo' && /^https:\/\//.test(c.supabaseUrl || '') && !/YOUR-/i.test(c.supabaseUrl)) {
-        var base = location.origin + location.pathname.replace(/[^/]*$/, '');
         href = c.supabaseUrl.replace(/\/$/, '') + '/functions/v1/manifest?m=' + encodeURIComponent(m) + '&o=' + encodeURIComponent(base);
       }
       document.write('<link rel="manifest" href="' + href + '">');

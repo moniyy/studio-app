@@ -6,6 +6,8 @@
 //                                                    and the accounts of its master (and her team)
 // Status, billing and notes are saved with the admin_save_studio RPC instead.
 import { cors, json, requireAdmin, serviceClient, tempPassword } from '../_shared/admin.ts';
+import { mailConfigured, sendMail } from '../_shared/mail.ts';
+import { buildReset, type Studio } from '../_shared/email-templates.ts';
 
 const FOLDERS = ['app', 'services', 'cover', 'avatar', 'looks', 'formulas', 'team', 'misc'];
 
@@ -19,7 +21,7 @@ Deno.serve(async req => {
   // deno-lint-ignore no-explicit-any
   let b: any;
   try { b = await req.json(); } catch { return json({ error: 'bad_json' }, 400); }
-  const { data: m } = await admin.from('masters').select('id, slug, owner_id').eq('id', String(b.master_id || '')).maybeSingle();
+  const { data: m } = await admin.from('masters').select('id, slug, name, owner_id, style, accent, timezone, kind, settings').eq('id', String(b.master_id || '')).maybeSingle();
   if (!m) return json({ error: 'not_found' }, 404);
 
   if (b.action === 'reset_password') {
@@ -28,7 +30,18 @@ Deno.serve(async req => {
     const { data: u, error } = await admin.auth.admin.updateUserById(m.owner_id, { password });
     if (error) return json({ error: 'auth_error', message: error.message }, 500);
     await admin.from('owner_accounts').upsert({ user_id: m.owner_id, must_change_password: true, temp_password_at: new Date().toISOString() });
-    return json({ email: u.user?.email || '', password });
+    // by email too (the admin also gets it to copy)
+    const to = u.user?.email || '';
+    let emailed = false;
+    if (to && mailConfigured()) {
+      const st = (m.settings || {}) as Record<string, string>;
+      const studio: Studio = { id: m.id, slug: m.slug, name: m.name, style: m.style, accent: m.accent, tz: m.timezone, kind: m.kind, address: st.address, phone: st.phone };
+      const mail = buildReset(studio, to, password);
+      try { await sendMail({ fromName: m.name, to, subject: mail.subject, html: mail.html, text: mail.text }); emailed = true; } catch (_) { /* still shown to copy */ }
+      await admin.from('email_log').insert({ master_id: m.id, kind: 'reset', to_email: to, to_user: m.owner_id, subject: mail.subject,
+        status: emailed ? 'sent' : 'failed', sent_at: emailed ? new Date().toISOString() : null });
+    }
+    return json({ email: to, password, emailed });
   }
 
   if (b.action === 'delete') {

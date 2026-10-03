@@ -75,7 +75,7 @@ Deno.serve(async req => {
     // the owner and the booking's master — not the account that did it
     ownerId = m.owner_id;
     recipients = [m.owner_id, bk.staff && bk.staff.user_id].filter((x, i, a) => x && a.indexOf(x) === i && x !== input.actor);
-    const url = `./?m=${encodeURIComponent(m.slug)}&owner=1&booking=${bk.id}`;
+    const url = `./${encodeURIComponent(m.slug)}?owner=1&booking=${bk.id}`;
     masterId = bk.master_id;
     switch (input.kind) {
       case 'new':
@@ -114,7 +114,7 @@ Deno.serve(async req => {
     message = {
       title: 'Notifications are on ✓',
       body: `You’ll hear about new bookings and cancellations at ${st.name} right here.`,
-      url: `./?m=${encodeURIComponent(st.slug)}&owner=1`,
+      url: `./${encodeURIComponent(st.slug)}?owner=1`,
       tag: 'test'
     };
   }

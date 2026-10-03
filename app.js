@@ -13,17 +13,34 @@
         so saved theme / accent / text size never flash.
      --------------------------------------------------------- */
   const params = new URLSearchParams(location.search);
-  // ?m=slug → that studio; no ?m → the last studio opened on this device → demo
-  // (an installed app or an old bookmark without ?m still opens "her" studio)
+  // the app's root: "/studio-app/" on GitHub Pages, "/" on a domain of its own
+  const ROOT = location.pathname.replace(/[^/]*$/, '');
+  // which studio: a pretty address (/studio-app/bella-brows), an old ?m=bella-brows link,
+  // the last studio opened on this device (an installed app, an old bookmark) → demo
   const SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,60}$/;
+  const tail = (() => { try { return decodeURIComponent(location.pathname.slice(ROOT.length)).toLowerCase(); } catch (e) { return ''; } })();
   const rawSlug = (params.get('m') || '').trim().toLowerCase()
+    || (SLUG_RE.test(tail) && tail !== 'index.html' ? tail : '')
     || (() => { try { return localStorage.getItem('studio-app:last') || ''; } catch (e) { return ''; } })();
   const SLUG = SLUG_RE.test(rawSlug) ? rawSlug : 'demo';
+  // the address always shows the studio as a path: /studio-app/bella-brows?owner=1
   // (the admin page belongs to no studio: its address stays ?admin=1)
-  if (params.get('m') !== SLUG && params.get('admin') !== '1') {
-    params.set('m', SLUG);
-    try { history.replaceState(history.state, '', location.pathname + '?' + params.toString() + location.hash); } catch (e) { /* file:// */ }
+  if (params.get('admin') !== '1' && /^https?:$/.test(location.protocol)) {
+    params.delete('m');
+    const q = params.toString();
+    const want = ROOT + encodeURIComponent(SLUG) + (q ? '?' + q : '') + location.hash;
+    if (location.pathname + location.search + location.hash !== want) {
+      try { history.replaceState(history.state, '', want); } catch (e) { /* not allowed here */ }
+    }
   }
+  // the link in a "Reset your password" email (…#access_token=…&type=recovery): the
+  // dashboard then asks for a new password (read now — the SDK clears the address)
+  const RECOVERY = /(^|[#&])type=recovery(&|$)/.test(location.hash);
+  // where links point (emails, QR cards, sharing): one setting — config.baseUrl
+  // (e.g. https://satinbook.com/); without it, wherever this copy of the app lives
+  const CFG = window.STUDIO_CONFIG || {};
+  const APP_BASE = /^https?:\/\//.test(CFG.baseUrl || '') ? String(CFG.baseUrl).replace(/\/?$/, '/') : location.origin + ROOT;
+  const studioUrl = (query, slug) => APP_BASE + encodeURIComponent(slug || SLUG) + (query ? '?' + query : '');
   const KEY = 'studio-app:' + SLUG;
 
   /* Visual style: "soft" (original), "maison" (serif, champagne) or "noir"
@@ -96,6 +113,11 @@
      itself from the address so a reload doesn't reset again. */
   const SPLASH_PARAM = ['clean', 'photo'].includes(params.get('splash')) ? params.get('splash') : null;
   const LOOK_PARAM = params.get('look') || null; // ?look=<id> opens that look right away
+  const BOOK_PARAM = params.get('book') || null; // ?book=<service id> opens the booking on it
+  if (params.has('book')) {
+    params.delete('book');
+    try { const q = params.toString(); history.replaceState(history.state, '', location.pathname + (q ? '?' + q : '') + location.hash); } catch (e) { /* file:// */ }
+  }
   // ?manage=<token> opens that booking on any device (and remembers it here)
   const MANAGE_PARAM = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.get('manage') || '')
     ? params.get('manage').toLowerCase() : null;
@@ -341,6 +363,12 @@
   const visited = new Set(['home']);
   // the master's first name from her profile — or the studio's whole name, never a guess
   const firstName = () => String(data.masterName || data.firstName || data.name || 'the artist').trim();
+  // a salon speaks as the studio (assistant, menu); a solo studio as its master
+  const brandName = () => (isTeam() ? String(data.name || '').trim() : firstName());
+  // the master of this booking (a salon), else the studio's master
+  const masterOf = b => (isTeam() ? (b && b.staff_name ? firstWord(b.staff_name) : String(data.name || '').trim()) : firstName());
+  // while booking: the master she chose; "Any available" → the studio until one is assigned
+  const bkWho = () => (isTeam() && bk.staff && staffById(bk.staff) ? firstWord(staffById(bk.staff).name) : isTeam() ? String(data.name || '').trim() : firstName());
 
   function normalizeData(d) {
     d = d && typeof d === 'object' ? d : {};
@@ -351,7 +379,7 @@
       includes: arr(s && s.includes).filter(Boolean),
       minutes: durationMinutes(s && s.duration)
     }));
-    // gallery = looks: [{id, photo, tag, title, serviceId, before, isNew, popular}]
+    // gallery = looks: [{id, photo, tag, title, serviceId, staffId, before, isNew, popular}]
     // (plain URL strings and {photo, tag} from older JSON are accepted too)
     const slug = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     const ids = new Set();
@@ -367,6 +395,7 @@
         photo: g.photo,
         tag: String(g.tag || ''),
         serviceId: String(g.serviceId || ''),
+        staffId: String(g.staffId || ''), // a salon: whose work it is
         before: g.before || '',
         isNew: !!g.isNew,
         popular: !!g.popular
@@ -1005,7 +1034,7 @@
               ${data.slots.slice(0, 6).map((s, i) => `<button class="slot${i === 0 ? ' is-first' : ''}" data-book data-slot="${esc(s)}">${esc(s)}</button>`).join('')}
             </div>` : ''}
             <div class="next__actions">
-              <button class="btn btn--primary" data-book${first ? ` data-slot="${esc(first)}"` : ''}>Book</button>
+              <button class="btn btn--primary" data-book>Book</button>
               <button class="btn btn--soft" data-go="ask">Ask</button>
             </div>
           </section>`;
@@ -1182,7 +1211,7 @@
           <div class="empty" id="svc-empty" hidden>
             ${art('sparkles')}
             <strong>No services found</strong>
-            <span>Try another word — or ask ${esc(firstName())}’s assistant.</span>
+            <span>Try another word — or ask ${esc(brandName())}’s assistant.</span>
           </div>
         </div>`
     });
@@ -1304,7 +1333,7 @@
         <div class="card assistant" data-stagger>
           <span class="assistant__avatar"><img src="${esc(safeUrl(data.avatar))}" alt=""></span>
           <span class="assistant__text">
-            <strong>${esc(firstName())}’s assistant</strong>
+            <strong>${esc(brandName())}’s assistant</strong>
             <span class="eyebrow">Replies instantly · 24/7</span>
           </span>
           ${art('speech-balloon', 'assistant__art')}
@@ -1321,7 +1350,7 @@
         </div>
       </form>`;
 
-    const greet = bubble('bot', `Hi! I'm ${firstName()}'s assistant 💬 Ask me about ${askAbout()}`);
+    const greet = bubble('bot', `Hi! I'm ${brandName()}'s assistant 💬 Ask me about ${askAbout()}`);
     greet.setAttribute('data-stagger', '');
     regroup();
   }
@@ -2572,6 +2601,8 @@
     }
     if (!isTeam() && !(opts.reschedule)) bk.staff = null;
     if (bk.off == null) bk.off = 0;
+    // a time she tapped herself (a chip on Home / in the chat): no Time step if it is still free
+    bkx.picked = !!opts.slot && bk.min != null && !opts.reschedule;
     bk.step = !bk.service ? 0 : ix('who') > 0 && bk.staff === undefined ? ix('who') : ix('time');
     if (bk.service) rememberService(bk.service);
     haptic();
@@ -2605,7 +2636,7 @@
   // "Everything Aria offers — prices from $45." (the lowest numeric price)
   function pricesFrom() {
     const nums = data.services.map(x => +String(x.price).replace(/[^\d.]/g, '')).filter(n => isFinite(n) && n > 0);
-    return `Everything ${firstName()} offers${nums.length ? ' — prices from ' + price(Math.min(...nums)) : ''}.`;
+    return `Everything ${brandName()} offers${nums.length ? ' — prices from ' + price(Math.min(...nums)) : ''}.`;
   }
 
   function renderBkService() {
@@ -2624,6 +2655,28 @@
             <span class="pick__check">${I.check}</span>
           </button>`).join('')}
       </div>`;
+  }
+
+  /* After the service (and the master): Who if not chosen yet; then Time — unless she
+     tapped a time on Home and it is still free (with this master): straight to Details */
+  function advanceFromChoice() {
+    if (ix('who') > 0 && bk.staff === undefined) { goStep(ix('who'), true); return; }
+    if (!isBuiltin() || !bkx.picked || bk.min == null) { goStep(ix('time'), true); return; }
+    const svc = bk.service;
+    const staff = bk.staff || null;
+    const want = { off: bk.off, min: bk.min };
+    loadOpenings(svc, null, false, staff).then(c => {
+      if (!Sheet.isOpen() || bk.service !== svc || (bk.staff || null) !== staff) return;
+      bk.cache = c;
+      bk.cacheKey = cacheKey(svc, staff);
+      const x = builtinTimes(want.off).find(o => o.min === want.min);
+      if (x) { bk.off = want.off; bk.min = want.min; bk.iso = x.iso; goStep(ix('details'), true); return; }
+      bkx.picked = false;
+      bk.min = null;
+      bk.iso = null;
+      bkx.notice = staff ? `${firstWord((staffById(staff) || {}).name)} isn’t free at that time — here’s when she is.` : 'That time isn’t open anymore — here’s what is.';
+      goStep(ix('time'), true);
+    }, () => goStep(ix('time'), true));
   }
 
   /* Who: "Any available" first, then the masters who do this service */
@@ -2822,7 +2875,7 @@
       ${saved.length ? `
       <button class="bk-saved" data-share-saved>
         <span class="bk-saved__thumbs">${saved.slice(0, 3).map(x => `<img src="${esc(sized(safeUrl(x.photo), 120))}" alt="">`).join('')}</span>
-        <span class="bk-saved__text">Show ${esc(firstName())} your saved looks (${saved.length})</span>
+        <span class="bk-saved__text">Show ${esc(bkWho())} your saved looks (${saved.length})</span>
         ${I.chevR}
       </button>` : ''}`;
   }
@@ -3098,6 +3151,8 @@
     phone_taken: 'Another client already has this phone',
     too_big: 'That’s too much text or too large a photo',
     forbidden: 'This account can’t change that studio',
+    too_soon: 'A code was just sent — wait a minute before asking again',
+    send_failed: 'The email didn’t go out — try again in a minute',
     // a salon
     email_taken: 'That email already has an account — use another one',
     has_login: 'She already has a sign-in',
@@ -3182,6 +3237,8 @@
         isOwner: !!st.is_owner,
         services: (st.services || []).map(x => ({ id: x.id, price: x.price != null ? +x.price : null, duration: x.duration != null ? +x.duration : null }))
       }));
+      // the owner without a photo of her own in the team: her profile photo
+      out.staff.forEach(st => { if (st.isOwner && !st.photo && out.avatar) st.photo = out.avatar; });
       // opening hours = everyone's hours together (overlapping ones merged)
       const ints = {};
       (prof.hours || []).forEach(h => { (ints[h.weekday] = ints[h.weekday] || []).push([h.start, h.end]); });
@@ -3207,7 +3264,7 @@
   const OPEN_TTL = 60000;
   // per service and master ("*" = any available)
   const cacheKey = (svcId, staffId) => `${svcId}|${staffId || '*'}`;
-  const dropOpenings = svcId => Object.keys(openCache).forEach(k => { if (k.startsWith(svcId + '|')) delete openCache[k]; });
+  const dropAllOpenings = () => Object.keys(openCache).forEach(k => delete openCache[k]);
   function openingsDays() { return Math.min(60, ((data.rules && data.rules.maxDays) || 60) + 1); }
   function cachedOpenings(svcId, staffId) {
     const c = openCache[cacheKey(svcId, staffId)];
@@ -3346,7 +3403,7 @@
     const pane = $('#bk-p' + ix('details'));
     pane.innerHTML = `
       <h2 class="bk-title">Your details</h2>
-      <p class="bk-sub">So ${esc(firstName())} knows who’s coming. We never share them.</p>
+      <p class="bk-sub">So ${esc(bkWho())} knows who’s coming. We never share them.</p>
       <form class="bk-form" id="bk-form" autocomplete="on" novalidate>
         <label class="field"><span>Name</span>
           <input name="name" autocomplete="name" autocapitalize="words" enterkeyhint="next" maxlength="80" value="${esc(d.name)}" placeholder="First and last name"></label>
@@ -3354,7 +3411,7 @@
           <input name="phone" type="tel" inputmode="tel" autocomplete="tel" enterkeyhint="next" maxlength="24" value="${esc(maskPhone(d.phone))}" placeholder="(404) 555-0123"></label>
         <label class="field"><span>Email <em>optional</em></span>
           <input name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" enterkeyhint="next" maxlength="120" value="${esc(d.email)}" placeholder="you@example.com"></label>
-        <label class="field"><span>Note for ${esc(firstName())} <em>optional</em></span>
+        <label class="field"><span>Note for ${esc(bkWho())} <em>optional</em></span>
           <textarea name="note" rows="3" maxlength="500" placeholder="Allergies, a look you love, anything else">${esc(d.note)}</textarea></label>
         <label class="tick"><input type="checkbox" name="remember"${d.remember ? ' checked' : ''}><i aria-hidden="true">${I.check}</i><span>Remember me on this device</span></label>
       </form>`;
@@ -3392,7 +3449,7 @@
     const d = bkx.details;
     pane.innerHTML = `
       <h2 class="bk-title">Review</h2>
-      <p class="bk-sub">${data.rules && data.rules.autoConfirm ? 'One tap and the time is yours.' : `${esc(firstName())} confirms every request personally.`}</p>
+      <p class="bk-sub">${data.rules && data.rules.autoConfirm ? 'One tap and the time is yours.' : `${esc(bkWho())} confirms every request personally.`}</p>
       ${lookRefHTML()}
       <div class="card bk-sum">
         <div class="bk-sum__svc">
@@ -3473,7 +3530,7 @@
       if (d.remember) store.set(ME_KEY, { name: d.name.trim(), phone: d.phone, email: (d.email || '').trim(), remember: true });
       else store.remove(ME_KEY);
       saveMine(res);
-      dropOpenings(s.id);
+      dropAllOpenings(); // her time is taken for every service (Home's "Next available" too)
       done = true;
       bkx.busy = false;
       bkx.reqKey = null;
@@ -3499,7 +3556,7 @@
     try {
       const res = await Backend.rescheduleBooking(bkx.token, bk.iso);
       saveMine(res, { mine: true });
-      Object.keys(openCache).forEach(k => delete openCache[k]);
+      dropAllOpenings();
       bkx.busy = false;
       done = true;
       showBookedDone(res, { moved: true });
@@ -3520,7 +3577,8 @@
       haptic([20, 40, 20]);
       toast(ERR_COPY.slot_taken, 'x');
       bkx.notice = 'That time was just taken — here’s what’s still open.';
-      if (bk.service) dropOpenings(bk.service);
+      dropAllOpenings();
+      refreshOpenings();
       bk.cache = null;
       bk.min = null;
       bk.iso = null;
@@ -3542,7 +3600,7 @@
     const sub = dep && !moved
       ? `Your time is reserved — send the ${esc(price(+b.deposit))} deposit to hold it.`
       : pending
-        ? `${esc(firstName())} will confirm soon — you’ll see it in My bookings.`
+        ? `${esc(masterOf(b))} will confirm soon — you’ll see it in My bookings.`
         : `See you ${esc(whenText(b.start_at).replace(' · ', ' at '))}.`;
     const content = Sheet.content();
     content.innerHTML = `
@@ -3617,8 +3675,8 @@
             <span class="dep__m"><b>${esc(o.name)}</b><small>${esc(o.handle)}</small></span>
             ${o.url ? `<a class="btn btn--primary btn--sm" href="${esc(o.url)}" ${ext} data-dep-pay="${esc(o.id)}">Pay</a>` : ''}
             <button class="btn btn--soft btn--sm" data-dep-copy="${esc(o.copy)}">Copy</button>
-          </div>`).join('') || `<p class="dep__none">Ask ${esc(firstName())} how to send it.</p>`}</div>
-        <p class="dep__note">Add your name to the payment note. Once ${esc(firstName())} gets it, this changes to Confirmed.</p>
+          </div>`).join('') || `<p class="dep__none">Ask ${esc(masterOf(b))} how to send it.</p>`}</div>
+        <p class="dep__note">Add your name to the payment note. Once ${esc(masterOf(b))} gets it, this changes to Confirmed.</p>
       </div>`;
   }
 
@@ -3679,10 +3737,10 @@
         const b = await fetchBooking(old.token);
         if (!b) return;
         if (ACTIVE.includes(old.status) && b.status === 'cancelled_master' && b.deposit_status === 'expired') news.push(`Your ${b.service_name} (${whenText(old.start_at)}) was released — the deposit didn’t arrive`);
-        else if (ACTIVE.includes(old.status) && b.status === 'cancelled_master') news.push(`${firstName()} cancelled your ${b.service_name} on ${whenText(old.start_at)}`);
-        else if (old.deposit_status === 'pending' && b.deposit_status === 'paid' && ACTIVE.includes(b.status)) news.push(`${firstName()} got your deposit — you’re all set ✨`);
-        else if (ACTIVE.includes(b.status) && old.start_at !== b.start_at && Date.parse(old.start_at) !== Date.parse(b.start_at)) news.push(`${firstName()} moved your ${b.service_name} to ${whenText(b.start_at)}`);
-        else if (old.status === 'pending' && b.status === 'confirmed') news.push(`${firstName()} confirmed your ${b.service_name} — ${whenText(b.start_at)}`);
+        else if (ACTIVE.includes(old.status) && b.status === 'cancelled_master') news.push(`${masterOf(b)} cancelled your ${b.service_name} on ${whenText(old.start_at)}`);
+        else if (old.deposit_status === 'pending' && b.deposit_status === 'paid' && ACTIVE.includes(b.status)) news.push(`${masterOf(b)} got your deposit — you’re all set ✨`);
+        else if (ACTIVE.includes(b.status) && old.start_at !== b.start_at && Date.parse(old.start_at) !== Date.parse(b.start_at)) news.push(`${masterOf(b)} moved your ${b.service_name} to ${whenText(b.start_at)}`);
+        else if (old.status === 'pending' && b.status === 'confirmed') news.push(`${masterOf(b)} confirmed your ${b.service_name} — ${whenText(b.start_at)}`);
         const all = mine().map(x => (x.token === old.token ? snapshot(b) : x));
         store.set(MINE_KEY, all);
       } catch (e) { /* offline: try next time */ }
@@ -3745,7 +3803,7 @@
       return `
         <div class="mybk card after">
           <div class="mybk__top"><span class="eyebrow">Your last visit</span>${x('r:' + done.token)}</div>
-          <div class="after__main"><span class="after__em" aria-hidden="true">✨</span><span><b>How was your visit?</b><small>${esc(done.service_name)} · ${esc(whenText(done.start_at))}. A quick review means the world to ${esc(firstName())}.</small></span></div>
+          <div class="after__main"><span class="after__em" aria-hidden="true">✨</span><span><b>How was your visit?</b><small>${esc(done.service_name)} · ${esc(whenText(done.start_at))}. A quick review means the world to ${esc(masterOf(done))}.</small></span></div>
           <div class="mybk__actions">
             ${rv ? `<a class="btn btn--primary btn--sm" href="${esc(safeUrl(rv.url))}" ${ext} data-after-review="${esc(done.token)}">${esc(rv.label)}</a>` : ''}
             ${svc ? `<button class="btn btn--soft btn--sm" data-book data-book-service="${esc(svc.id)}"${sameStaffAttr(done)}>Book again</button>` : ''}
@@ -3820,9 +3878,9 @@
         </div>
       </div>
       ${b.status === 'cancelled_master' && b.deposit_status === 'expired' ? `<div class="sheet__note mg__note--bad">${I.x}<span>The deposit didn’t arrive in time, so this time went back to the calendar. Book again whenever you like.</span></div>`
-        : b.status === 'cancelled_master' ? `<div class="sheet__note mg__note--bad">${I.x}<span>${esc(firstName())} cancelled this appointment${b.cancel_reason ? `: “${esc(b.cancel_reason)}”` : ''}. Sorry for the change — pick a new time whenever you like.</span></div>` : ''}
+        : b.status === 'cancelled_master' ? `<div class="sheet__note mg__note--bad">${I.x}<span>${esc(masterOf(b))} cancelled this appointment${b.cancel_reason ? `: “${esc(b.cancel_reason)}”` : ''}. Sorry for the change — pick a new time whenever you like.</span></div>` : ''}
       ${depositHTML(b)}
-      ${b.status === 'pending' && !depositDue(b) ? `<div class="sheet__note">${I.clock}<span>${esc(firstName())} hasn’t confirmed yet — you’ll see it here as soon as it’s confirmed.</span></div>` : ''}
+      ${b.status === 'pending' && !depositDue(b) ? `<div class="sheet__note">${I.clock}<span>${esc(masterOf(b))} hasn’t confirmed yet — you’ll see it here as soon as it’s confirmed.</span></div>` : ''}
       <div class="card bk-sum">
         <div class="bk-row"><span>Name</span><b>${esc(b.client_name || '')}</b></div>
         ${b.staff_name ? `<div class="bk-row"><span>With</span><b>${esc(b.staff_name)}</b></div>` : ''}
@@ -3868,7 +3926,7 @@
       mg.confirming = false;
       mg.busy = false;
       saveMine(b, { mine: true });
-      Object.keys(openCache).forEach(k => delete openCache[k]);
+      dropAllOpenings();
       syncMyBookingCard();
       refreshOpenings();
       renderManage(true);
@@ -3898,7 +3956,7 @@
     downloadIcs({ off: spot.off, min: spot.min, minutes, title: b.service_name, uid: b.id || token, manage: token });
   }
 
-  const manageUrl = token => `${location.origin}${location.pathname}?m=${encodeURIComponent(SLUG)}&manage=${token}`;
+  const manageUrl = token => studioUrl('manage=' + token);
 
   /* More → My bookings */
   function myBookingsHTML() {
@@ -3918,7 +3976,7 @@
     return `
       ${up.length ? `<div class="group-label" data-stagger>Upcoming</div><div class="list" data-stagger>${up.map(row).join('')}</div>` : ''}
       ${past.length ? `<div class="group-label" data-stagger>Past & cancelled</div><div class="list" data-stagger>${past.slice(0, 12).map(row).join('')}</div>` : ''}
-      <p class="sub-intro" data-stagger>Booked on another phone? Open the link from your confirmation there, or ask ${esc(firstName())} to resend it.</p>`;
+      <p class="sub-intro" data-stagger>Booked on another phone? Open the link from your confirmation there, or ask ${esc(brandName())} to resend it.</p>`;
   }
 
   /* ---------- Owner: real dashboard (cabinet.js) or the demo ---------- */
@@ -3977,12 +4035,15 @@
       demo: () => { if (data.ownerDemo) openOwner(); else toast('No demo data for this studio', 'x'); },
       setOwnerHere,
       onCabinet: open => { cabOpen = open; syncOwnerSwitch(); },
-      onDataChanged: () => { Object.keys(openCache).forEach(k => delete openCache[k]); refreshOpenings(); },
+      onDataChanged: () => { dropAllOpenings(); refreshOpenings(); },
       reloadStudio,
       // theme: 'light' / 'dark' (maison shades differ per theme); default = what is on screen now
       accentsFor: (st, theme) => (st === 'maison' ? ACCENTS_MAISON : st === 'noir' ? ACCENTS_NOIR : ACCENTS_SOFT).map(a => ({ id: a.id, name: a.name, color: accentFor(a, theme) })),
       theme: () => resolvedTheme(),
-      photoSrc, svcKind
+      photoSrc, svcKind,
+      // a link to this studio: link() → …/bella-brows, link('owner=1') → …/bella-brows?owner=1
+      link: (query, slug) => studioUrl(query, slug), appBase: APP_BASE,
+      recovery: RECOVERY
     };
   }
 
@@ -4307,7 +4368,7 @@
       const n = tokens(t).join(' ');
       return n && q.includes(' ' + n + ' ');
     });
-    const name = firstName();
+    const name = brandName();
     const candidates = [];
     const add = (score, make) => { if (score > 0) candidates.push({ score, make }); };
 
@@ -4675,7 +4736,7 @@
     let answer;
     try { answer = await Promise.resolve(getAnswer(question)); } catch (e) { answer = null; }
     if (!answer || typeof answer !== 'object') {
-      answer = { text: `Great question! ${firstName()} will reply personally 💕`, action: data.instagram ? 'instagram' : null };
+      answer = { text: `Great question! ${brandName()} will reply personally 💕`, action: data.instagram ? 'instagram' : null };
     }
     const left = typingMs(answer) - (performance.now() - t0);
     if (left > 0) await wait(left);
@@ -5600,7 +5661,7 @@
         $$('[data-bk-svc]', Sheet.el()).forEach(b => b.classList.toggle('is-selected', b === el));
         popIn($('.pick__check', el), { from: 0.4 });
         renderBkFoot();
-        setTimeout(() => { if (Sheet.isOpen() && stepKey(bk.step) === 'service') goStep(bk.step + 1, true); }, 260);
+        setTimeout(() => { if (Sheet.isOpen() && stepKey(bk.step) === 'service') advanceFromChoice(); }, 260);
         return;
       }
       if ((el = t.closest('[data-bk-staff]'))) {
@@ -5609,7 +5670,7 @@
         popIn($('.pick__check', el), { from: 0.4 });
         haptic();
         renderBkFoot();
-        setTimeout(() => { if (Sheet.isOpen() && stepKey(bk.step) === 'who') goStep(bk.step + 1, true); }, 260);
+        setTimeout(() => { if (Sheet.isOpen() && stepKey(bk.step) === 'who') advanceFromChoice(); }, 260);
         return;
       }
       if ((el = t.closest('[data-team-member]'))) { openStaff(el.dataset.teamMember); return; }
@@ -5670,7 +5731,11 @@
       if ((el = t.closest('[data-bk-move]'))) { if (!el.disabled) moveBooking(); return; }
       if ((el = t.closest('[data-bk-step]'))) { if (!el.disabled) goStep(+el.dataset.bkStep, true); return; }
       if ((el = t.closest('[data-bk-back]'))) { goStep(bk.step - 1, true); return; }
-      if ((el = t.closest('[data-bk-next]'))) { if (!el.disabled) goStep(bk.step + 1, true); return; }
+      if ((el = t.closest('[data-bk-next]'))) {
+        if (el.disabled) return;
+        if (['service', 'who'].includes(stepKey(bk.step))) advanceFromChoice(); else goStep(bk.step + 1, true);
+        return;
+      }
 
       if ((el = t.closest('[data-ics]'))) { downloadIcs(); return; }
       if ((el = t.closest('[data-bk-continue]'))) { continueBooking(); return; }
@@ -6456,7 +6521,7 @@
   }
 
   /* "Invite a friend" */
-  const appLink = () => new URL(params.has('m') ? './?m=' + encodeURIComponent(SLUG) : './', location.href).href;
+  const appLink = () => studioUrl();
   function inviteHTML() {
     const r = data.referral;
     if (!r) return '';
@@ -6741,7 +6806,7 @@
 
   /* The two slides after the Welcome screen ("Get started") */
   function showOnboarding(onDone) {
-    const name = firstName();
+    const name = brandName();
     const svc = data.services[1] || data.services[0];
     const slides = [
       {
@@ -7490,7 +7555,7 @@
      --------------------------------------------------------- */
   async function setupPWA() {
     const abs = u => new URL(u, location.href).href;
-    const startUrl = abs(params.has('m') ? './?m=' + encodeURIComponent(SLUG) : './');
+    const startUrl = studioUrl();
     // Icons are real PNG files made by tools/make-icon.js (opaque, iOS-safe).
     // A master can have their own set: "iconDir": "img/<slug>/" in their JSON.
     const dir = String(data.iconDir || './img/').replace(/\/?$/, '/');
@@ -7506,7 +7571,7 @@
     void startUrl;
     void icons;
     // a studio without its own manifests/<slug>.webmanifest (made by tools/make-manifest.js):
-    // drop the broken link — iOS then installs the current address (?m=<slug>) with the title below
+    // drop the broken link — iOS then installs the current address (…/<slug>) with the title below
     // the manifest comes from the database (functions/v1/manifest) or a file (demo)
     const link = $('link[rel="manifest"]');
     if (link && !/\/manifests\/|\/functions\/v1\/manifest/.test(link.href)) link.remove();
@@ -7655,6 +7720,8 @@
     if (OWNER_START) skipSplash();
     else await runSplash();
     if (MANAGE_PARAM && isBuiltin()) setTimeout(() => openManage(MANAGE_PARAM), 450);
+    // ?book=<service> (the button in “Time for your fill”): the booking sheet on that service
+    else if (BOOK_PARAM && data.services.some(s => s.id === BOOK_PARAM)) setTimeout(() => openBooking({ service: BOOK_PARAM }), 450);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

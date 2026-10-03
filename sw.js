@@ -3,7 +3,7 @@
      (so edits on GitHub Pages show up right away).
    - Photos, 3D icons, fonts, QR lib: cache first. */
 
-const VERSION = 'studio-app-v23';
+const VERSION = 'studio-app-v24';
 const SHELL_CACHE = VERSION + '-shell';
 const MEDIA_CACHE = VERSION + '-media';
 const MEDIA_LIMIT = 120;
@@ -65,6 +65,12 @@ async function networkFirst(req) {
   const cache = await caches.open(SHELL_CACHE);
   try {
     const res = await fetch(req);
+    // a pretty address (…/bella-brows) is the app itself: GitHub answers it with 404.html —
+    // the app's own page instead, straight away (it reads the studio from the address)
+    if (req.mode === 'navigate' && res.status === 404) {
+      const page = (await cache.match('./index.html')) || (await fetch('./index.html').catch(() => null));
+      if (page && page.ok) return page;
+    }
     if (res.ok) cache.put(req, res.clone());
     return res;
   } catch (err) {
@@ -101,7 +107,7 @@ async function trim(cache) {
 
 /* ---------- Push notifications for the master ----------
    Payload (JSON, from the send-push Edge Function):
-   { title, body, url: "./?m=<slug>&owner=1&booking=<id>", tag, booking } */
+   { title, body, url: "./<slug>?owner=1&booking=<id>", tag, booking } */
 self.addEventListener('push', event => {
   let d = {};
   try { d = event.data ? event.data.json() : {}; } catch (e) { d = { body: event.data ? event.data.text() : '' }; }
