@@ -40,6 +40,7 @@
     invalid_template: 'Pick a niche',
     forbidden: 'This is for the platform admin only',
     confirm_mismatch: 'The link you typed doesn’t match',
+    invalid_link: 'The payment link should start with https://',
     network: 'Connection problem — try again',
     timeout: 'Connection problem — try again'
   };
@@ -166,6 +167,85 @@
     }
     paintList();
   }
+  /* ---------- billing: the master pays through a BSB Link, marked here by hand ---------- */
+  const PLANS = [['monthly', 'Monthly', 'mo'], ['quarterly', 'Quarterly', 'quarter'], ['yearly', 'Yearly', 'yr']];
+  const planOf = s => PLANS.find(p => p[0] === s.billing_plan) || PLANS[0];
+  const money = v => (v == null || v === '' ? '—' : '$' + (+v).toFixed(+v % 1 ? 2 : 0));
+  const amountText = s => (s.plan_amount != null ? `${money(s.plan_amount)} / ${planOf(s)[2]}` : '—');
+  const todayISO = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const daysTo = iso => Math.round((Date.parse(iso + 'T12:00:00Z') - Date.parse(todayISO() + 'T12:00:00Z')) / day);
+  const fmtLong = iso => new Date(iso + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+  const dueText = iso => { const d = daysTo(iso); return d < 0 ? `overdue ${-d} day${d === -1 ? '' : 's'}` : d === 0 ? 'due today' : d === 1 ? 'due tomorrow' : `due in ${d} days`; };
+  // the same as the database: the end of the month is kept (Jan 31 + 1 month → Feb 28)
+  function addMonths(iso, n) {
+    const [y, m, d] = iso.split('-').map(Number);
+    const t = new Date(Date.UTC(y, m - 1 + n, 1));
+    const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+    t.setUTCDate(Math.min(d, last));
+    return t.toISOString().slice(0, 10);
+  }
+  const nextAfterPaid = s => addMonths(s.next_payment_at || todayISO(), { monthly: 1, quarterly: 3, yearly: 12 }[planOf(s)[0]]);
+  // due within 7 days, or already late
+  const dueSoon = () => (A.list || []).filter(s => s.next_payment_at && daysTo(s.next_payment_at) <= 7)
+    .sort((x, y) => x.next_payment_at.localeCompare(y.next_payment_at));
+
+  function paymentMessage(s) {
+    const late = daysTo(s.next_payment_at || todayISO()) < 0;
+    return [
+      `Hi ${s.master_name || 'there'}! 👋`,
+      '',
+      `Your ${planOf(s)[1].toLowerCase()} Studio App plan for ${s.name} ${late ? 'was due' : 'is due'} on ${fmtLong(s.next_payment_at || todayISO())}: ${money(s.plan_amount)}.`,
+      '',
+      `You can pay securely here: ${s.payment_link}`,
+      '',
+      'Thank you for being with us! 💕'
+    ].join('\n');
+  }
+  function copyPaymentMessage(id) {
+    const s = byId(id);
+    if (!s) return;
+    if (!s.payment_link || s.plan_amount == null) {
+      K.toast('Add the payment link and the amount first', 'x');
+      const d = $(`.adm-card[data-id="${id}"] details`);
+      if (d) { d.open = true; d.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+      return;
+    }
+    copy(paymentMessage(s), 'Payment message copied');
+  }
+  async function markPaid(id, btn) {
+    const s = byId(id);
+    if (!s) return;
+    const from = s.next_payment_at ? fmtDate(s.next_payment_at) : 'today';
+    const yes = await confirmBox(`Mark ${s.plan_amount != null ? money(s.plan_amount) + ' ' : ''}paid for ${s.name}?`,
+      `Next payment moves from <b>${esc(from)}</b> to <b>${esc(fmtDate(nextAfterPaid(s)))}</b> (${esc(planOf(s)[1].toLowerCase())}).${s.status === 'trial' ? ' Trial → Active.' : ''}`, 'Mark paid');
+    if (!yes) return;
+    await busy(btn, async () => {
+      const row = await K.Backend.admin.markPaid(id);
+      A.list = A.list.map(x => (x.id === id ? row : x));
+      paintList();
+      K.toast(`Paid — next payment ${fmtDate(row.next_payment_at)}`, 'ok');
+    });
+  }
+
+  function dueHTML() {
+    const list = dueSoon();
+    const total = list.reduce((sum, s) => sum + (+s.plan_amount || 0), 0);
+    return `
+      <section class="adm-due">
+        <div class="adm-due__head"><h2>Payments due this week</h2>${list.length ? `<span class="num">${list.length} · ${money(total)}</span>` : ''}</div>
+        ${list.length ? list.map(s => {
+          const late = daysTo(s.next_payment_at) < 0;
+          return `
+          <div class="adm-due__row${late ? ' is-late' : ''}">
+            ${s.icon ? `<img class="adm-due__icon" src="${esc(s.icon)}" alt="">` : `<span class="adm-due__icon adm-card__icon--mono">${esc(mono(s.name))}</span>`}
+            <span class="adm-due__who"><b>${esc(s.name)}</b><small><em>${esc(dueText(s.next_payment_at))}</em> · ${esc(fmtDate(s.next_payment_at))} · ${esc(amountText(s))}${s.status === 'paused' ? ' · paused' : ''}</small></span>
+            <button class="btn btn--soft btn--sm" data-a-paymsg="${esc(s.id)}">Copy payment message</button>
+            <button class="btn btn--primary btn--sm" data-a-paid="${esc(s.id)}">Mark paid</button>
+          </div>`;
+        }).join('') : '<p class="adm-muted">Nothing due in the next 7 days ✓</p>'}
+      </section>`;
+  }
+
   function paintList() {
     const all = A.list || [];
     const q = A.q.trim().toLowerCase();
@@ -174,6 +254,7 @@
     const main = $('.adm-main');
     if (!main) return;
     main.innerHTML = `
+      ${dueHTML()}
       <div class="adm-head">
         <div><h1>Studios</h1><p class="adm-muted">${all.length} studio${all.length === 1 ? '' : 's'}${soon ? ` · <b class="adm-warn-text">${soon} trial${soon > 1 ? 's' : ''} ending soon</b>` : ''}</p></div>
         <label class="search adm-search">${K.I.search}<input type="search" data-a-q placeholder="Name, link, email" value="${esc(A.q)}" autocomplete="off"></label>
@@ -184,6 +265,7 @@
     const t = trialInfo(s);
     const done = (s.setup || []).filter(Boolean).length;
     const total = (s.setup || []).length || 8;
+    const late = s.next_payment_at && daysTo(s.next_payment_at) < 0;
     return `
       <article class="adm-card${t && t.warn ? ' is-warn' : ''}${s.status === 'paused' ? ' is-paused' : ''}" data-id="${esc(s.id)}">
         <div class="adm-card__top">
@@ -195,8 +277,12 @@
           <div><small>Setup</small><b class="num">${done}/${total}</b><i class="adm-meter"><i style="width:${Math.round((done / total) * 100)}%"></i></i></div>
           <div><small>Last sign-in</small><b>${esc(ago(s.last_sign_in_at))}</b></div>
           <div><small>Bookings · 30 days</small><b class="num">${s.bookings_30d || 0}</b></div>
-          <div><small>Next payment</small><b>${esc(fmtDate(s.next_payment_at))}</b></div>
-          <div><small>Per month</small><b class="num">${s.monthly_price != null ? '$' + (+s.monthly_price).toFixed(+s.monthly_price % 1 ? 2 : 0) : '—'}</b></div>
+          <div><small>Plan</small><b class="num">${esc(money(s.plan_amount))}</b><small>${s.plan_amount != null ? 'per ' + ({ mo: 'month', quarter: 'quarter', yr: 'year' })[planOf(s)[2]] : 'not set'}</small></div>
+        </div>
+        <div class="adm-bill${late ? ' is-late' : ''}">
+          <span class="adm-bill__when"><small>Next payment</small><b>${s.next_payment_at ? `${esc(fmtDate(s.next_payment_at))} · ${esc(dueText(s.next_payment_at))}` : 'Not set'}</b>${s.last_paid_at ? `<small>Last paid ${esc(fmtDate(s.last_paid_at))}</small>` : ''}</span>
+          <button class="btn btn--soft btn--sm" data-a-paymsg="${esc(s.id)}">Copy payment message</button>
+          <button class="btn btn--primary btn--sm" data-a-paid="${esc(s.id)}">Mark paid</button>
         </div>
         <label class="adm-notes"><span>Notes</span><textarea rows="2" maxlength="4000" data-a-notes="${esc(s.id)}" placeholder="Only you see these">${esc(s.admin_notes || '')}</textarea></label>
         <details class="adm-edit">
@@ -204,8 +290,10 @@
           <div class="adm-edit__grid">
             <label class="field"><span>Status</span><select class="cab-sel cab-sel--wide" data-a-field="status">${['trial', 'active', 'paused'].map(v => `<option value="${v}"${v === s.status ? ' selected' : ''}>${v.charAt(0).toUpperCase() + v.slice(1)}</option>`).join('')}</select></label>
             <label class="field"><span>Trial ends</span><input type="date" data-a-field="trial_ends_at" value="${esc((s.trial_ends_at || '').slice(0, 10))}"></label>
+            <label class="field"><span>Plan</span><select class="cab-sel cab-sel--wide" data-a-field="billing_plan">${PLANS.map(([v, l]) => `<option value="${v}"${v === planOf(s)[0] ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
+            <label class="field"><span>Amount per period, $</span><input type="number" inputmode="decimal" min="0" step="1" data-a-field="plan_amount" value="${s.plan_amount != null ? esc(+s.plan_amount) : ''}" placeholder="39"></label>
             <label class="field"><span>Next payment</span><input type="date" data-a-field="next_payment_at" value="${esc(s.next_payment_at || '')}"></label>
-            <label class="field"><span>Per month, $</span><input type="number" inputmode="decimal" min="0" step="1" data-a-field="monthly_price" value="${s.monthly_price != null ? esc(+s.monthly_price) : ''}" placeholder="39"></label>
+            <label class="field adm-edit__wide"><span>Payment link (BSB Link)</span><input type="url" inputmode="url" data-a-field="payment_link" value="${esc(s.payment_link || '')}" placeholder="https://…" autocapitalize="off" spellcheck="false"></label>
           </div>
           <button class="btn btn--primary btn--sm" data-a-billing="${esc(s.id)}">Save</button>
         </details>
@@ -223,18 +311,24 @@
   function replaceStudio(row) {
     if (!row || !A.list) return;
     A.list = A.list.map(s => (s.id === row.id ? row : s));
-    const el = $(`.adm-card[data-id="${row.id}"]`);
-    if (el) el.outerHTML = cardHTML(row);
+    paintList(); // the card and "Payments due this week"
   }
 
   async function saveBilling(id, btn) {
     const card = $(`.adm-card[data-id="${id}"]`);
     const v = k => (($(`[data-a-field="${k}"]`, card) || {}).value || '').trim();
-    const p = { status: v('status'), trial_ends_at: v('trial_ends_at') ? v('trial_ends_at') + 'T23:59:00' : '', next_payment_at: v('next_payment_at'), monthly_price: v('monthly_price') };
+    const link = v('payment_link');
+    if (link && !/^https:\/\/\S+$/.test(link)) { K.toast('The payment link should start with https://', 'x'); return; }
+    const p = {
+      status: v('status'), trial_ends_at: v('trial_ends_at') ? v('trial_ends_at') + 'T23:59:00' : '', next_payment_at: v('next_payment_at'),
+      billing_plan: v('billing_plan'), plan_amount: v('plan_amount'), payment_link: link
+    };
     await busy(btn, async () => { replaceStudio(await K.Backend.admin.save(id, p)); K.toast('Saved', 'ok'); });
   }
   let notesTimer = 0;
   function saveNotes(id, text) {
+    // kept here at once: a redraw before the save never loses what she typed
+    A.list = (A.list || []).map(s => (s.id === id ? Object.assign({}, s, { admin_notes: text }) : s));
     clearTimeout(notesTimer);
     notesTimer = setTimeout(async () => {
       try {
@@ -562,6 +656,8 @@
     if ((el = t.closest('[data-a-signout]'))) { signOut(); return; }
     if ((el = t.closest('[data-a-go]'))) { e.preventDefault(); go(el.dataset.aGo); return; }
     if ((el = t.closest('[data-a-billing]'))) { saveBilling(el.dataset.aBilling, el); return; }
+    if ((el = t.closest('[data-a-paymsg]'))) { copyPaymentMessage(el.dataset.aPaymsg); return; }
+    if ((el = t.closest('[data-a-paid]'))) { markPaid(el.dataset.aPaid, el); return; }
     if ((el = t.closest('[data-a-pause]'))) { togglePause(el.dataset.aPause, el); return; }
     if ((el = t.closest('[data-a-reset]'))) { resetPassword(el.dataset.aReset, el); return; }
     if ((el = t.closest('[data-a-del]'))) { deleteStudio(el.dataset.aDel); return; }

@@ -42,6 +42,12 @@ insert into public.admins (user_id) select id from auth.users where email = '<yo
 приложение, кабинет «как мастер» (только просмотр), **Reset password** (новый временный пароль), **Pause** (клиентки
 видят «This studio’s app is taking a short break», запись закрыта), **Delete** (подтверждение вводом ссылки).
 
+**Оплата вручную (BSB Link).** У каждой студии в «Status & billing»: ссылка на оплату, тариф (Monthly / Quarterly /
+Yearly), сумма за период и дата следующей оплаты (у новой студии — день окончания Trial). **Copy payment message** —
+готовое сообщение мастеру на английском со ссылкой, суммой и датой; **Mark paid** — платёж записывается в журнал
+(`studio_payments`), дата следующей оплаты сдвигается на период тарифа (Trial становится Active). На главной админки —
+**Payments due this week**: всё, что нужно оплатить в ближайшие 7 дней, и просроченное (красным).
+
 Функции (один раз): `npx supabase functions deploy admin-create-master --use-api --no-verify-jwt`,
 то же для `admin-master-action` и `manifest` (они сами проверяют вызывающего; manifest — публичный).
 

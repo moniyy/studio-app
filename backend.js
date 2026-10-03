@@ -329,6 +329,8 @@
     studios: () => rpc('admin_studios'),
     slugFree: slug => rpc('admin_slug_free', { p_slug: slug }),
     save: (id, p) => rpc('admin_save_studio', { p_id: id, p }),
+    // paid by the BSB Link: logs it, next payment date + one period of the plan
+    markPaid: id => rpc('admin_mark_paid', { p_id: id }),
     create: body => invoke('admin-create-master', body, 60000),
     resetPassword: id => invoke('admin-master-action', { action: 'reset_password', master_id: id }),
     remove: (id, slug) => invoke('admin-master-action', { action: 'delete', master_id: id, confirm: slug })

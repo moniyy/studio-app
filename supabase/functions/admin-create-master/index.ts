@@ -63,7 +63,9 @@ Deno.serve(async req => {
     const { data: m, error: me } = await admin.from('masters').insert({
       slug, name, owner_id: uid, timezone: b.timezone, style, accent, settings, booking_engine: 'builtin',
       auto_confirm: true, min_notice_hours: 2, max_days_ahead: 60, cancel_window_hours: 24, slot_step_min: 30,
-      status: 'trial', trial_ends_at: new Date(Date.now() + 14 * 864e5).toISOString()
+      // 14-day trial; the first payment is due the day it ends (monthly until changed in the admin)
+      status: 'trial', trial_ends_at: new Date(Date.now() + 14 * 864e5).toISOString(),
+      next_payment_at: new Date(Date.now() + 14 * 864e5).toISOString().slice(0, 10), billing_plan: 'monthly'
     }).select('id').single();
     if (me) throw me;
     mid = m.id;
