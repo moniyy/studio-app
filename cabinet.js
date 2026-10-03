@@ -192,6 +192,7 @@
     const c = K.store.get('cab');
     if (!c || !c.studio || c.studio.slug !== K.SLUG || !S.session || !S.session.user || c.uid !== S.session.user.id) return false;
     S.studio = c.studio;
+    S.readonly = c.studio.mine === false;
     S.sched = c.sched || { hours: [], time_off: [], rules: {} };
     applyBookings(c.known || [], c.from, c.to, true);
     S.lastSync = Date.now(); // enter() is fetching the fresh copy right now
@@ -214,12 +215,13 @@
     if (!shown) renderLoading();
     const guess = S.studio && S.studio.id;
     const w = WINDOW();
-    let list, sched, books;
+    let list, sched, books, acct;
     try {
-      [list, sched, books] = await Promise.all([
+      [list, sched, books, acct] = await Promise.all([
         K.Backend.owner.studios(),
         guess ? K.Backend.owner.schedule(guess).catch(() => null) : null,
-        guess ? windowBookings(guess, w).catch(() => null) : null
+        guess ? windowBookings(guess, w).catch(() => null) : null,
+        K.Backend.owner.account().catch(() => null)
       ]);
     } catch (e) {
       if (shown) { S.stale = true; setLiveLabel(); startLive(); return; } // keep what's on screen
@@ -227,7 +229,12 @@
       return;
     }
     const studio = (list || []).find(m => m.slug === K.SLUG) || null;
-    K.setOwnerHere && K.setOwnerHere(!!studio);
+    // the platform admin may open any studio's dashboard — to look, never to change
+    S.readonly = !!studio && studio.mine === false;
+    root.classList.toggle('is-readonly', S.readonly);
+    // a studio made in the admin: her own password first (no Studio / Client view switch yet)
+    if (studio && !S.readonly && acct && acct.must_change_password) { S.studio = studio; renderForcePassword(); return; }
+    K.setOwnerHere && K.setOwnerHere(!!studio && !S.readonly);
     if (!studio) K.store.remove('cab');
     if (!studio && S.auto) { close(); return; }
     if (!studio) {
@@ -255,6 +262,50 @@
     if (!shown) go(S.tab, true); else refreshView();
     if (S.target) { const id = S.target; S.target = null; setTimeout(() => openBooking(id), shown ? 150 : 450); }
   }
+  /* First sign-in with the temporary password from the admin: choose her own (noir screen) */
+  function renderForcePassword(msg) {
+    $('#cab-tabs').hidden = true;
+    $('[data-cab-new]').hidden = true;
+    $('[data-cab-menu]').hidden = true;
+    root.classList.add('is-forcepw');
+    const email = (S.session && S.session.user && S.session.user.email) || '';
+    $('#cab-main').innerHTML = `
+      <form class="cab-force" id="cab-force" autocomplete="on" onsubmit="return false">
+        <span class="cab-force__mono">${esc(K.initials())}</span>
+        <h1>Choose your password</h1>
+        <p>You signed in with a temporary password. Pick your own to finish setting up <b>${esc(K.data.name)}</b>.</p>
+        <input type="email" autocomplete="username" value="${esc(email)}" hidden>
+        <label class="field"><span>New password</span>
+          <span class="pw"><input id="fp-new" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters">
+          <button type="button" class="pw__eye" data-pw-eye aria-label="Show password">${icon('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>')}</button></span></label>
+        <label class="field"><span>Repeat it</span><input id="fp-new2" type="password" autocomplete="new-password" placeholder="The same password"></label>
+        <button type="submit" class="btn btn--block cab-force__go" data-fp-save>Save and continue</button>
+        ${msg ? `<p class="cab-auth__err" role="alert">${esc(msg)}</p>` : ''}
+        <button type="button" class="cab-link cab-force__out" data-cab-signout>Sign out</button>
+      </form>`;
+    const f = $('#fp-new');
+    if (f && !K.IS_IOS) setTimeout(() => f.focus(), 350);
+  }
+  async function saveForcedPassword(btn) {
+    const a = ($('#fp-new') || {}).value || '';
+    const b = ($('#fp-new2') || {}).value || '';
+    if (a.length < 8) { renderForcePassword('Use at least 8 characters'); return; }
+    if (a !== b) { renderForcePassword('The passwords don’t match'); return; }
+    if (btn) { btn.disabled = true; btn.innerHTML = K.spinner(); }
+    try {
+      await K.Backend.auth.updatePassword(a);
+      await K.Backend.owner.passwordChanged();
+      root.classList.remove('is-forcepw');
+      K.haptic([10, 30, 10]);
+      K.toast('Password saved — welcome!', 'ok');
+      renderLoading();
+      S.studio = null;
+      await enter();
+    } catch (e) {
+      renderForcePassword(/different|same/i.test(e.message || '') ? 'Pick a password different from the temporary one' : /weak|short|least/i.test(e.message || '') ? 'Pick a stronger password' : err(e));
+    }
+  }
+
   function renderEnterError(e) {
     $('#cab-main').innerHTML = `
       <div class="cab-auth">
@@ -299,7 +350,7 @@
   }
   function setLiveLabel() {
     const el = $('#cab-live');
-    if (el) el.innerHTML = S.stale ? 'Offline — showing saved' : S.live ? '<i class="cab-dot"></i>Live' : 'Up to date';
+    if (el) el.innerHTML = S.readonly ? 'Admin view · read only' : S.stale ? 'Offline — showing saved' : S.live ? '<i class="cab-dot"></i>Live' : 'Up to date';
   }
   let syncTimer = 0;
   const scheduleSync = () => { clearTimeout(syncTimer); syncTimer = setTimeout(() => syncChanges(), 350); };
@@ -598,6 +649,7 @@
     const d = K.studioDate(0);
     return `
       <header class="cab-h"><span class="eyebrow">${K.DAY_NAMES[d.dow]}, ${K.MONTHS[d.month]} ${d.day}</span><h1>Today</h1></header>
+      ${S.studio && S.studio.status === 'paused' ? '<div class="card dep-warn"><span><b>Your app is paused</b><small>Clients see a short-break page and can’t book right now. Reach out to turn it back on.</small></span></div>' : ''}
       <div class="cab-stats card">
         <div><b class="num">${money(revenue)}</b><small>Revenue</small></div>
         <div><b class="num">${counted.length}</b><small>${counted.length === 1 ? 'Client' : 'Clients'}</small></div>
@@ -809,6 +861,7 @@
   }
 
   async function decide(id, yes) {
+    if (S.readonly) { readOnly(); refreshView(); return; }
     const card = $(`[data-req="${id}"]`);
     if (card) card.classList.add(yes ? 'is-yes' : 'is-no');
     S.self.add(id);
@@ -1238,6 +1291,7 @@
 
   /* ---------- Profile & photos ---------- */
   const PROFILE_FIELDS = [
+    ['masterName', 'Your first name', 'Aria'],
     ['tagline', 'Subtitle', 'Lashes & brows that wake up ready'],
     ['city', 'City', 'Atlanta, GA'],
     ['address', 'Address', '1080 Peachtree St NE, Suite 4B'],
@@ -1463,6 +1517,7 @@
       const h = e.target.closest('[data-drag]');
       if (!h) return;
       e.preventDefault();
+      if (S.readonly) { readOnly(); return; }
       const row = h.closest('[data-id]');
       const rows = () => [...box.querySelectorAll('[data-id]')];
       const startY = e.clientY;
@@ -1875,17 +1930,23 @@
     if ((el = t.closest('[data-fm-save]'))) { saveFormula(el); return true; }
     // deposits & payments, insights
     if ((el = t.closest('[data-dep-set]'))) { setDeposit(el.dataset.depSet, el); return true; }
-    if ((el = t.closest('[data-setup-push]'))) {
-      const card = $('#cab-push');
-      if (card) { card.scrollIntoView({ block: 'center', behavior: K.reducedMQ.matches ? 'auto' : 'smooth' }); card.classList.remove('is-nudge'); void card.offsetWidth; card.classList.add('is-nudge'); }
+    if ((el = t.closest('[data-setup-push]'))) { openPushSheet(); return true; }
+    if ((el = t.closest('[data-setup-install]'))) { openInstallHelp(); return true; }
+    if ((el = t.closest('[data-setup-installed]'))) {
+      K.store.set('installedSeen', true);
+      K.Backend.owner.markInstalled(S.studio.id).catch(() => null);
+      K.Sheet.close();
+      refreshView();
+      return true;
+    }
+    if ((el = t.closest('[data-pr-flag], [data-ly-on]'))) {
+      if (S.readonly) { readOnly(); return true; }
+      el.setAttribute('aria-checked', el.getAttribute('aria-checked') !== 'true');
       K.haptic();
       return true;
     }
-    if ((el = t.closest('[data-setup-install]'))) { openInstallHelp(); return true; }
-    if ((el = t.closest('[data-pr-flag], [data-ly-on]'))) { el.setAttribute('aria-checked', el.getAttribute('aria-checked') !== 'true'); K.haptic(); return true; }
     if ((el = t.closest('[data-pr-save]'))) { savePromo(el); return true; }
     if ((el = t.closest('[data-ly-save]'))) { saveLoyalty(el); return true; }
-    if ((el = t.closest('[data-setup-installed]'))) { K.store.set('installedSeen', true); K.Sheet.close(); refreshView(); return true; }
     if ((el = t.closest('[data-pay-save]'))) { savePayments(el); return true; }
     if ((el = t.closest('[data-ins-per]'))) { S.insPer = el.dataset.insPer; S.insSel = null; K.haptic(); refreshView(); return true; }
     if ((el = t.closest('[data-ins-bar]'))) {
@@ -1955,14 +2016,36 @@
     });
   }
 
+  /* ---------- Read-only (the platform admin looking at a studio) ---------- */
+  const RO_BLOCK = ['[data-pf-save]', '[data-sty-save]', '[data-sty]', '[data-sty-acc]', '[data-svc-new]', '[data-svc-save]', '[data-svc-del]',
+    '[data-look-new]', '[data-look-save]', '[data-look-del]', '[data-tx-save]', '[data-faq-save]', '[data-faq-add]', '[data-pay-save]',
+    '[data-pr-save]', '[data-ly-save]', '[data-hrs-save]', '[data-hrs-toggle]', '[data-hrs-add]', '[data-hrs-del]', '[data-toff-add]',
+    '[data-toff-del]', '[data-rule-auto]', '[data-ob-set]', '[data-ob-cancel]', '[data-ob-move]', '[data-dep-set]', '[data-req-yes]',
+    '[data-req-no]', '[data-cab-new]', '[data-cab-new-at]', '[data-cab-new-for]', '[data-fm-new]', '[data-fm-save]', '[data-fm-del]',
+    '[data-ct-edit]', '[data-ct-save]', '[data-ctag]', '[data-cl-save]', '[data-phf-pick]', '[data-phf-del]', '[data-push-on]',
+    '[data-push-off]', '[data-push-test]', '[data-pw-save]', '[data-drag]', '[data-setup-push]', '[data-setup-installed]'].join(',');
+  let roToast = 0;
+  function readOnly() {
+    if (Date.now() - roToast < 1500) return;
+    roToast = Date.now();
+    K.toast('Read only — this is the admin view', 'x');
+  }
+
   /* ---------- "Finish setting up" (Today) — until everything is in place ---------- */
   async function loadSetup() {
     if (K.store.get('setupDone')) return;
-    if (isStandalone()) K.store.set('installedSeen', true);
+    if (isStandalone() && !S.readonly) {
+      K.store.set('installedSeen', true);
+      // tell the admin's list too (once per device)
+      if (!K.store.get('installedSent')) K.Backend.owner.markInstalled(S.studio.id).then(() => K.store.set('installedSent', true)).catch(() => null);
+    }
+    // each part on its own: one slow answer never hides the whole card
     await Promise.all([
-      loadProfile(true), loadServices(true), loadLooks(true),
-      memLoad('push', () => K.Backend.owner.pushDevices(S.studio.id)).catch(() => null)
+      loadProfile(true).catch(() => null), loadServices(true).catch(() => null), loadLooks(true).catch(() => null),
+      S.readonly ? null : memLoad('push', () => K.Backend.owner.pushDevices(S.studio.id)).catch(() => null)
     ]);
+    // Today was drawn before these arrived: put the card in now
+    if (S.tab === 'today') repaint();
   }
   function setupItems() {
     const p = S2.profile;
@@ -1978,8 +2061,8 @@
       { label: 'Payments & deposits', done: takesDeposits(st), attr: 'data-cab-tab="payments"' },
       { label: 'Policies for clients', done: (st.policies || []).some(x => x && String(x.text || '').trim()), attr: 'data-cab-tab="texts"' },
       { label: 'At least 3 looks', done: looks.length >= 3, attr: 'data-cab-tab="looks"' },
-      { label: 'Notifications on', done: (MEM.push || []).length > 0, attr: 'data-setup-push' },
-      { label: 'App on your Home Screen', done: isStandalone() || !!K.store.get('installedSeen'), attr: 'data-setup-install' }
+      { label: 'Notifications on', done: (MEM.push || []).length > 0 || (S.push && S.push.state === 'on'), attr: 'data-setup-push' },
+      { label: 'App on your Home Screen', done: isStandalone() || !!K.store.get('installedSeen') || !!S.studio.app_installed, attr: 'data-setup-install' }
     ];
   }
   function setupHTML() {
@@ -1997,6 +2080,17 @@
             <i class="setup__chk">${x.done ? K.I.check : ''}</i><span>${esc(x.label)}</span>${x.done ? '' : K.I.chevR}
           </button>`).join('')}</div>
       </section>`;
+  }
+  // "Notifications on" in the checklist: the same controls as the Today card, in a sheet
+  async function openPushSheet() {
+    K.Sheet.open(el => {
+      el.innerHTML = `
+        <div class="ob" data-sheet-scroll>
+          <header class="ob__head"><span class="eyebrow">Notifications</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
+          <div id="cab-push-sheet"><div class="cab-load"><i class="spin"></i></div></div>
+        </div>`;
+    }, { detent: 'medium' });
+    paintPush();
   }
   function openInstallHelp() {
     K.Sheet.open(el => {
@@ -2252,14 +2346,21 @@
   }
 
   async function paintPush() {
-    const box = $('#cab-push');
-    if (!box) return;
+    const sheetBox = K.Sheet.isOpen() && K.$('#cab-push-sheet', K.Sheet.el());
+    if (!$('#cab-push') && !sheetBox) return;
     let st;
     try { st = await pushState(); } catch (e) { st = { state: 'unsupported' }; }
     S.push = st;
-    if (st.state === 'on') saveSub(st.sub, true); // keep the server copy fresh
+    if (S.readonly) st = { state: 'nokey' };
+    if (st.state === 'on' && !S.readonly) {
+      saveSub(st.sub, true); // keep the server copy fresh
+      if (!(MEM.push || []).length) { MEM.push = [{ device_label: deviceLabel() }]; if (S.tab === 'today') repaint(); }
+    }
+    // while "Finish setting up" is on Today it carries the notifications step — no second card
     const b2 = $('#cab-push');
-    if (b2) b2.innerHTML = pushCardHTML(st);
+    if (b2) b2.innerHTML = $('.setup') ? '' : pushCardHTML(st);
+    const b3 = K.Sheet.isOpen() && K.$('#cab-push-sheet', K.Sheet.el());
+    if (b3) b3.innerHTML = pushCardHTML(st) || '<p class="cab-muted">Notifications aren’t set up for this app yet.</p>';
   }
 
   const BELL = '<path d="M6 9.5a6 6 0 1 1 12 0c0 5 2 6.5 2 6.5H4s2-1.5 2-6.5z"/><path d="M10 19.5a2 2 0 0 0 4 0"/>';
@@ -2566,6 +2667,7 @@
   const nb = { svc: null, name: '', phone: '', email: '', note: '', step: 'time', sugg: [] };
 
   function openNew(at, who) {
+    if (S.readonly) { readOnly(); return; }
     nb.svc = nb.svc && K.data.services.some(s => s.id === nb.svc) ? nb.svc : (K.data.services[0] && K.data.services[0].id);
     Object.assign(nb, { name: '', phone: '', email: '', note: '', step: 'time', sugg: [] }, who || {});
     ob.mode = 'new';
@@ -2670,6 +2772,9 @@
     if (!t.closest('.cab') && !inSheet) return;
 
     if ((el = t.closest('[data-cab-close]'))) { close(); return; }
+    if ((el = t.closest('[data-fp-save]'))) { e.preventDefault(); saveForcedPassword(el); return; }
+    // the admin's view: looking is fine, changing is not
+    if (S.readonly && t.closest(RO_BLOCK)) { e.preventDefault(); e.stopPropagation(); readOnly(); return; }
     if ((el = t.closest('[data-cab-tab]'))) { go(el.dataset.cabTab); return; }
     if ((el = t.closest('[data-pw-eye]'))) {
       const inp = el.parentElement.querySelector('input');
@@ -2850,6 +2955,7 @@
   function onChange(e) {
     if (!root) return;
     const t = e.target;
+    if (S.readonly && t.closest && t.closest('.cab, .sheet') && (t.dataset.rule || t.matches('[data-patch-date]'))) { readOnly(); repaint(); return; }
     if (t.dataset && t.dataset.rule) { saveRule(t.dataset.rule, +t.value); return; }
     onStudioChange(t);
     if (t.matches && t.matches('[data-nb-svc]')) {

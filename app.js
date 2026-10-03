@@ -86,7 +86,8 @@
 
   /* The master's own start — ?owner=1, or her installed app after she signed
      in: no splash, the dashboard and its code start loading at once */
-  const OWNER_START = !!(window.StudioBackend && window.StudioBackend.configured) && (params.get('owner') === '1' ||
+  const ADMIN = params.get('admin') === '1';
+  const OWNER_START = !ADMIN && !!(window.StudioBackend && window.StudioBackend.configured) && (params.get('owner') === '1' ||
     ((window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true) && store.get('ownerHere') === true));
 
   /* ?splash=clean|photo overrides splashStyle from JSON.
@@ -337,7 +338,8 @@
   let app, tabbar, sub, views = {};
   const state = { tab: null, category: 'All', query: '', lookFilter: 'All' };
   const visited = new Set(['home']);
-  const firstName = () => (data.firstName || String(data.name || '').split(/\s+/)[0] || 'the artist');
+  // the master's first name from her profile — or the studio's whole name, never a guess
+  const firstName = () => String(data.masterName || data.firstName || data.name || 'the artist').trim();
 
   function normalizeData(d) {
     d = d && typeof d === 'object' ? d : {};
@@ -2981,6 +2983,7 @@
     timeout: 'Connection problem — try again',
     outside_hours: 'That time is outside your booking hours',
     bad_code: 'That code didn’t work — check the email or send a new one',
+    paused: 'This studio isn’t taking bookings right now',
     phone_taken: 'Another client already has this phone',
     too_big: 'That’s too much text or too large a photo',
     forbidden: 'This account can’t change that studio'
@@ -2991,7 +2994,7 @@
   /* A studio in the database shows only what its master set in her dashboard —
      never numbers, reviews or offers from a template. Empty field = no block. */
   const OWN_KEYS = ['tagline', 'city', 'address', 'parking', 'phone', 'instagram', 'reviewUrl', 'heroPhoto', 'heroVideo', 'avatar',
-    'policies', 'prep', 'aftercare', 'faq', 'payments', 'defaultAccent', 'splashStyle', 'splashEmoji', 'iconDir', 'firstName'];
+    'policies', 'prep', 'aftercare', 'faq', 'payments', 'defaultAccent', 'splashStyle', 'splashEmoji', 'iconDir', 'firstName', 'masterName', 'icons'];
   const takesDeposits = p => Object.values(p || {}).some(v => String(v || '').trim());
   function ownSettings(base, st) {
     st = st || {};
@@ -3031,6 +3034,7 @@
     if (m.style) out.style = m.style;
     if (m.accent) out.brandAccent = m.accent;
     out.bookingEngine = m.booking_engine;
+    out.status = m.status || 'active';
     out.masterId = m.id;
     // made-up dashboard numbers are for the demo only; real studios have Insights
     if (m.booking_engine === 'builtin') out.ownerDemo = null;
@@ -5688,16 +5692,22 @@
           (e.target.closest('.send') || e.target.closest('[data-ask]'))) e.preventDefault();
     });
 
-    // On-screen keyboard: hide the tab bar while typing
+    // On-screen keyboard: while she types, the tab bars (client and dashboard) and
+    // the floating buttons step aside instead of riding on top of the keyboard
     const coarse = window.matchMedia('(pointer: coarse)');
-    app.addEventListener('focusin', e => {
-      if (coarse.matches && e.target.tagName === 'INPUT') app.classList.add('kb-open');
+    const typing = el => !!el && (el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable ||
+      (el.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|reset|range|color|file|image)$/i.test(el.type)));
+    let kbTimer = 0;
+    const kbSync = () => {
+      const vv = window.visualViewport;
+      const squeezed = !!vv && vv.height < window.innerHeight * 0.78; // the keyboard took the bottom of the screen
+      app.classList.toggle('kb-open', coarse.matches && (typing(document.activeElement) || squeezed));
+    };
+    document.addEventListener('focusin', e => {
+      if (coarse.matches && typing(e.target)) { clearTimeout(kbTimer); app.classList.add('kb-open'); }
     });
-    app.addEventListener('focusout', () => {
-      setTimeout(() => {
-        if (!document.activeElement || document.activeElement.tagName !== 'INPUT') app.classList.remove('kb-open');
-      }, 50);
-    });
+    document.addEventListener('focusout', () => { clearTimeout(kbTimer); kbTimer = setTimeout(kbSync, 120); });
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', () => { clearTimeout(kbTimer); kbTimer = setTimeout(kbSync, 60); });
     if (window.visualViewport) {
       const vv = window.visualViewport;
       const desk = window.matchMedia('(min-width: 760px)');
@@ -7224,6 +7234,48 @@
     else await splashClean(splash, short);
   }
 
+  /* ?admin=1 — the platform owner's page (admin.js): no studio, no splash */
+  function startAdmin() {
+    const splash = $('#splash');
+    if (splash) splash.remove();
+    splashActive = false;
+    app.classList.remove('is-splash');
+    tabbar.hidden = true;
+    document.documentElement.classList.add('is-admin'); // full screen on a computer too, no phone frame
+    adoptStyle('noir');
+    applySettings();
+    document.title = 'Studio App · Admin';
+    const s = document.createElement('script');
+    s.src = './admin.js';
+    s.onload = () => window.StudioAdmin.open({
+      $, $$, esc, svg, I, toast, haptic, spinner, Backend, IS_IOS,
+      accentsFor: st => (st === 'maison' ? ACCENTS_MAISON : st === 'noir' ? ACCENTS_NOIR : ACCENTS_SOFT).map(a => ({ id: a.id, name: a.name, color: accentFor(a, 'light') }))
+    });
+    s.onerror = () => toast(ERR_COPY.network, 'x');
+    document.head.appendChild(s);
+  }
+
+  function showPaused() {
+    splashActive = false;
+    applySettings();
+    app.classList.remove('is-splash');
+    const splash = $('#splash');
+    if (splash) splash.remove();
+    tabbar.hidden = true;
+    const box = document.createElement('div');
+    box.className = 'error-state paused-state';
+    box.innerHTML = `
+      ${data.avatar ? `<img class="paused-state__avatar" src="${esc(safeUrl(data.avatar))}" alt="">` : `<span class="paused-state__mono">${esc(initials())}</span>`}
+      <h1>${esc(data.name)}</h1>
+      <p>This studio’s app is taking a short break.</p>
+      <p class="paused-state__sub">Online booking is unavailable for now — please check back soon.</p>
+      <div class="paused-state__acts">
+        ${data.phone ? `<a class="btn btn--soft" href="${esc(telUrl())}">${I.phone}Call</a>` : ''}
+        ${data.instagram ? `<a class="btn btn--soft" href="${esc(igUrl())}" ${ext}>${I.ig}Instagram</a>` : ''}
+      </div>`;
+    app.appendChild(box);
+  }
+
   // the master's start: no splash, no Welcome
   function skipSplash() {
     try { sessionStorage.setItem(KEY + ':intro', '1'); } catch (e) { /* private mode */ }
@@ -7263,16 +7315,18 @@
       { src: abs(dir + 'icon-512.png'), sizes: '512x512', type: 'image/png', purpose: 'any' },
       { src: abs(dir + 'icon-maskable-512.png'), sizes: '512x512', type: 'image/png', purpose: 'maskable' }
     ];
-    const touchIcon = abs(dir + 'apple-touch-icon.png');
+    // a studio made in the admin has its own monogram icons in Storage
+    const touchIcon = (data.icons && (data.icons.i180 || data.icons.i512)) || abs(dir + 'apple-touch-icon.png');
 
     const manifest = { short_name: data.name.length > 14 ? data.name.split(/\s+/).slice(0, 2).join(' ') : data.name };
     void startUrl;
     void icons;
     // a studio without its own manifests/<slug>.webmanifest (made by tools/make-manifest.js):
     // drop the broken link — iOS then installs the current address (?m=<slug>) with the title below
+    // the manifest comes from the database (functions/v1/manifest) or a file (demo)
     const link = $('link[rel="manifest"]');
-    if (link && !/\/manifests\//.test(link.href)) link.remove();
-    else if (link) fetch(link.href, { method: 'HEAD' }).then(r => { if (!r.ok) link.remove(); }).catch(() => { /* offline */ });
+    if (link && !/\/manifests\/|\/functions\/v1\/manifest/.test(link.href)) link.remove();
+    else if (link && /\/manifests\//.test(link.href)) fetch(link.href, { method: 'HEAD' }).then(r => { if (!r.ok) link.remove(); }).catch(() => { /* offline */ });
 
     const touch = $('link[rel="apple-touch-icon"]');
     if (touch) touch.href = touchIcon;
@@ -7334,6 +7388,7 @@
     bindEvents();
     setupDesktop();
     registerSW();
+    if (ADMIN) { startAdmin(); return; }
     if (OWNER_START) {
       // while the studio loads: the dashboard's code, the SDK and her session
       loadCabinet().catch(() => null);
@@ -7373,6 +7428,8 @@
     applyMotion();
     applySettings();
     document.title = data.name;
+    // paused by the platform: clients get a short-break page (the master still gets her dashboard)
+    if (isBuiltin() && data.status === 'paused' && !OWNER_START) { showPaused(); return; }
 
     watchImages();
     renderHome();

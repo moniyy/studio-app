@@ -17,6 +17,34 @@
 
 ## Как добавить нового мастера
 
+### Обычный путь — админка `?admin=1` (5 минут, без файлов в репозитории)
+
+`https://moniyy.github.io/studio-app/?admin=1` → вход email + пароль. Пускает только аккаунты из таблицы `admins`
+(проверка в базе и в Edge Functions, не только в интерфейсе). Добавить админа (SQL Editor):
+```sql
+insert into public.admins (user_id) select id from auth.users where email = '<your email>';
+```
+
+1. **New studio** — один экран: название, имя и email мастера, город и часовой пояс (US), телефон, Instagram;
+   ссылка `?m=<slug>` придумывается из названия и сразу проверяется на занятость; ниша (Lashes / Brows / Nails /
+   Lashes + Brows / Hair / Makeup) — готовые услуги с типичными для США длительностями и ценами, правила, ответы
+   ассистента, «Before your visit» и уход; стиль и акцент (видна будущая иконка приложения).
+2. **Create studio** — Edge Function `admin-create-master` создаёт аккаунт мастера с временным паролем, студию
+   (14 дней Trial), услуги, часы Вт–Сб 10:00–18:00, правила и иконку-монограмму (PNG в Storage).
+3. **Welcome kit** — ссылка для клиенток, ссылка входа мастера, временный пароль (показывается один раз, Copy),
+   QR-карточка для печати и готовое сообщение мастеру на английском.
+4. Мастер открывает ссылку → **Add to Home Screen** → входит → сразу выбирает свой пароль → проходит
+   «Finish setting up». На экране «Домой» — её название и её иконка: manifest отдаёт функция `manifest`
+   (из базы), `apple-touch-icon` и название подставляются из базы.
+
+Список студий: прогресс настройки (n/8), последний вход, записи за 30 дней, статус Trial / Active / Paused
+(за 3 дня до конца Trial карточка подсвечена), дата следующей оплаты, сумма в месяц, заметки. Действия: открыть
+приложение, кабинет «как мастер» (только просмотр), **Reset password** (новый временный пароль), **Pause** (клиентки
+видят «This studio’s app is taking a short break», запись закрыта), **Delete** (подтверждение вводом ссылки).
+
+Функции (один раз): `npx supabase functions deploy admin-create-master --use-api --no-verify-jwt`,
+то же для `admin-master-action` и `manifest` (они сами проверяют вызывающего; manifest — публичный).
+
 ### Вариант A — запись через ссылку мастера (без базы)
 
 1. Скопируйте `masters/demo.json` в `masters/<slug>.json`, где `<slug>` — короткое имя латиницей, например `bella-nails`
@@ -33,7 +61,7 @@
 4. `git add . && git commit -m "Add bella-nails" && git push`
 5. Ссылка для клиенток: `https://moniyy.github.io/studio-app/?m=<slug>`
 
-### Вариант B — своя запись (builtin, нужна Supabase)
+### Вариант B — своя запись вручную через SQL (если админка недоступна)
 
 1. Откройте `supabase/new-master.sql`, поменяйте название, email мастера, часовой пояс, услуги и часы.
 2. Supabase → **SQL Editor** → вставьте → **Run**. Мастер создан, услуги и часы — в базе.
@@ -221,6 +249,7 @@ node tools/make-icon.js --master bella-nails # для мастера → img/bel
 | --- | --- |
 | `?m=slug` | какой мастер (`masters/slug.json` и/или студия в базе) |
 | `&owner=1` | кабинет мастера (вход по email); для демо-мастеров — демо-кабинет |
+| `?admin=1` | админка владельца платформы (только для аккаунтов из `admins`) |
 | `&manage=<token>` | открыть свою запись (ссылка из подтверждения) |
 | `&style=noir` / `maison` / `soft` | стиль приложения (запоминается) |
 | `&splash=clean` / `&splash=photo` | вариант заставки |
@@ -229,7 +258,7 @@ node tools/make-icon.js --master bella-nails # для мастера → img/bel
 
 ## Файлы
 
-- `index.html`, `app.css`, `app.js` — приложение; `backend.js` — работа с Supabase; `cabinet.js` — кабинет мастера
+- `index.html`, `app.css`, `app.js` — приложение; `backend.js` — работа с Supabase; `cabinet.js` — кабинет мастера; `admin.js` — админка
 - `config.example.js` → `config.js` — ключи Supabase (не в репозитории)
 - `masters/*.json` — данные мастеров
 - `supabase/` — миграции, тестовые данные, шаблон нового мастера

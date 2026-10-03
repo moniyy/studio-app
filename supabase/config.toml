@@ -418,3 +418,14 @@ enabled = true
 # or a signed-in master (her JWT, verified through owner_studios)
 [functions.send-push]
 verify_jwt = false
+
+# The admin functions check the caller themselves (an admin's JWT, see _shared/admin.ts);
+# the manifest is public — browsers fetch it without any headers
+[functions.admin-create-master]
+verify_jwt = false
+
+[functions.admin-master-action]
+verify_jwt = false
+
+[functions.manifest]
+verify_jwt = false

@@ -2,15 +2,23 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <!-- Per-master install: before anything else, point the manifest at this
-       master's own file (start_url = ./?m=<slug>), so "Add to Home Screen" opens
-       the studio it was added from. No ?m → the last studio opened here → demo. -->
+  <!-- Supabase keys (gitignored; the Pages workflow writes it) — first, so the line below can use them -->
+  <script src="./config.js"></script>
+  <!-- Per-master install: before anything else, point the manifest at this studio's own one
+       (start_url = ./?m=<slug>), so "Add to Home Screen" opens the studio it was added from.
+       Studios in the database: made on the fly by the manifest Edge Function (no file per
+       studio in the repo). The demo: manifests/demo.webmanifest. No ?m → the last studio → demo. -->
   <script>
     (function () {
       var ok = /^[a-z0-9][a-z0-9_-]{0,60}$/, m = (new URLSearchParams(location.search).get('m') || '').trim().toLowerCase();
       if (!ok.test(m)) { try { m = localStorage.getItem('studio-app:last') || ''; } catch (e) { m = ''; } }
       if (!ok.test(m)) m = 'demo';
-      document.write('<link rel="manifest" href="./manifests/' + m + '.webmanifest">');
+      var c = window.STUDIO_CONFIG || {}, href = './manifests/' + m + '.webmanifest';
+      if (m !== 'demo' && /^https:\/\//.test(c.supabaseUrl || '') && !/YOUR-/i.test(c.supabaseUrl)) {
+        var base = location.origin + location.pathname.replace(/[^/]*$/, '');
+        href = c.supabaseUrl.replace(/\/$/, '') + '/functions/v1/manifest?m=' + encodeURIComponent(m) + '&o=' + encodeURIComponent(base);
+      }
+      document.write('<link rel="manifest" href="' + href + '">');
     })();
   </script>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
@@ -35,8 +43,7 @@
   <!-- GSAP drives the spring animations (deferred: it runs before app init) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.13.0/gsap.min.js" defer></script>
   <!-- Loaded in <head> on purpose: the first lines apply saved theme / accent / text size before the first paint. -->
-  <!-- Supabase keys (gitignored; the Pages workflow writes it) + the data layer -->
-  <script src="./config.js"></script>
+  <!-- the data layer -->
   <script src="./backend.js"></script>
   <script src="./app.js"></script>
 </head>

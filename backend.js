@@ -22,7 +22,7 @@
   }
   const KNOWN = ['slot_taken', 'invalid_phone', 'invalid_email', 'invalid_name', 'too_many', 'not_found',
     'not_active', 'too_late', 'not_bookable', 'service_not_found', 'outside_hours', 'bad_status', 'forbidden',
-    'hours_overlap', 'hours_invalid', 'phone_taken', 'too_big', 'timeout'];
+    'hours_overlap', 'hours_invalid', 'phone_taken', 'too_big', 'timeout', 'paused'];
   const TIMEOUT = 15000;
   function toError(e) {
     if (e instanceof BackendError) return e;
@@ -61,7 +61,7 @@
      (reads, the token refresh, create_booking with its request id); a write is
      repeated only when it failed at once (it never reached the server). */
   const FETCH_MS = 8000;
-  const SAFE_RPC = /^(get_\w+|create_booking|owner_(studios|bookings|booking|schedule|clients|client|services|profile|looks|insights|slots|push_devices|setup))$/;
+  const SAFE_RPC = /^(get_\w+|create_booking|my_account|am_i_admin|admin_studios|admin_slug_free|owner_(studios|bookings|booking|schedule|clients|client|services|profile|looks|insights|slots|push_devices|setup))$/;
   function safeToRepeat(url, method) {
     if (!method || /^(GET|HEAD)$/i.test(method)) return true;
     const m = /\/rest\/v1\/rpc\/(\w+)/.exec(url);
@@ -265,6 +265,10 @@
     saveClient: (id, p) => rpc('owner_save_client', { p_client_id: id, p }),
     saveFormula: (mid, f) => rpc('owner_save_formula', { p_master_id: mid, p: f }),
     deleteFormula: id => rpc('owner_delete_formula', { p_id: id }),
+    // her account: a studio made in the admin starts with a temporary password
+    account: () => rpc('my_account'),
+    passwordChanged: () => rpc('owner_password_changed'),
+    markInstalled: mid => rpc('owner_mark_installed', { p_master_id: mid }),
     // 'paid' (received) · 'waived' (not needed) · 'pending' (undo)
     setDeposit: (id, status) => rpc('owner_set_deposit', { p_booking_id: id, p_status: status }),
     insights: (mid, period) => rpc('owner_insights', { p_master_id: mid, p_period: period || 'week' }),
@@ -305,5 +309,30 @@
     }
   };
 
-  window.StudioBackend = Object.assign({ configured, client, BackendError, auth, owner, vapidPublicKey: cfg.vapidPublicKey || '' }, publicApi);
+  /* ---------- the platform admin (?admin=1) ---------- */
+  // Edge Functions answer {error: 'slug_taken'…} with a non-2xx status: that code becomes the error
+  async function invoke(fn, body, ms) {
+    const sb = await client();
+    await freshSession().catch(() => null);
+    let res;
+    try { res = await withTimeout(sb.functions.invoke(fn, { body }), ms || 30000); } catch (e) { throw toError(e); }
+    if (res.error) {
+      let code = 'unknown';
+      let msg = res.error.message;
+      try { const j = await res.error.context.json(); code = j.error || code; msg = j.message || msg; } catch (e) { if (/fetch|network/i.test(msg || '')) code = 'network'; }
+      throw new BackendError(code, msg);
+    }
+    return res.data;
+  }
+  const admin = {
+    isAdmin: () => rpc('am_i_admin'),
+    studios: () => rpc('admin_studios'),
+    slugFree: slug => rpc('admin_slug_free', { p_slug: slug }),
+    save: (id, p) => rpc('admin_save_studio', { p_id: id, p }),
+    create: body => invoke('admin-create-master', body, 60000),
+    resetPassword: id => invoke('admin-master-action', { action: 'reset_password', master_id: id }),
+    remove: (id, slug) => invoke('admin-master-action', { action: 'delete', master_id: id, confirm: slug })
+  };
+
+  window.StudioBackend = Object.assign({ configured, client, BackendError, auth, owner, admin, vapidPublicKey: cfg.vapidPublicKey || '' }, publicApi);
 })();
