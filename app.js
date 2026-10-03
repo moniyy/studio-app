@@ -19,7 +19,8 @@
   const rawSlug = (params.get('m') || '').trim().toLowerCase()
     || (() => { try { return localStorage.getItem('studio-app:last') || ''; } catch (e) { return ''; } })();
   const SLUG = SLUG_RE.test(rawSlug) ? rawSlug : 'demo';
-  if (params.get('m') !== SLUG) {
+  // (the admin page belongs to no studio: its address stays ?admin=1)
+  if (params.get('m') !== SLUG && params.get('admin') !== '1') {
     params.set('m', SLUG);
     try { history.replaceState(history.state, '', location.pathname + '?' + params.toString() + location.hash); } catch (e) { /* file:// */ }
   }
@@ -3821,7 +3822,9 @@
       onCabinet: open => { cabOpen = open; syncOwnerSwitch(); },
       onDataChanged: () => { Object.keys(openCache).forEach(k => delete openCache[k]); refreshOpenings(); },
       reloadStudio,
-      accentsFor: st => (st === 'maison' ? ACCENTS_MAISON : st === 'noir' ? ACCENTS_NOIR : ACCENTS_SOFT).map(a => ({ id: a.id, name: a.name, color: accentFor(a) })),
+      // theme: 'light' / 'dark' (maison shades differ per theme); default = what is on screen now
+      accentsFor: (st, theme) => (st === 'maison' ? ACCENTS_MAISON : st === 'noir' ? ACCENTS_NOIR : ACCENTS_SOFT).map(a => ({ id: a.id, name: a.name, color: accentFor(a, theme) })),
+      theme: () => resolvedTheme(),
       photoSrc, svcKind
     };
   }

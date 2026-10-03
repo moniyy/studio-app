@@ -331,6 +331,7 @@
     save: (id, p) => rpc('admin_save_studio', { p_id: id, p }),
     // paid by the BSB Link: logs it, next payment date + one period of the plan
     markPaid: id => rpc('admin_mark_paid', { p_id: id }),
+    undoPaid: paymentId => rpc('admin_undo_paid', { p_payment_id: paymentId }),
     create: body => invoke('admin-create-master', body, 60000),
     resetPassword: id => invoke('admin-master-action', { action: 'reset_password', master_id: id }),
     remove: (id, slug) => invoke('admin-master-action', { action: 'delete', master_id: id, confirm: slug })

@@ -1367,15 +1367,16 @@
   }
 
   /* ---------- Look & feel (style + accent, live preview) ---------- */
+  // the preview's colors per style and theme (as the client app draws them)
   const STYLE_LOOK = {
-    soft: { bg: '#F7F5F2', card: '#FFFFFF', text: '#16161A', font: "'Plus Jakarta Sans', system-ui, sans-serif", w: 800, r: 16 },
-    maison: { bg: '#F7F3EE', card: '#FFFFFF', text: '#2A211C', font: "'Fraunces', Georgia, serif", w: 400, r: 14 },
-    noir: { bg: '#F2F2F7', card: '#FFFFFF', text: '#0A0A0B', font: "'Inter', system-ui, sans-serif", w: 700, r: 14 }
+    soft: { font: "'Plus Jakarta Sans', system-ui, sans-serif", w: 800, r: 16, light: { bg: '#F7F5F2', card: '#FFFFFF', text: '#16161A' }, dark: { bg: '#0E0E11', card: '#1C1C21', text: '#F4F4F6' } },
+    maison: { font: "'Fraunces', Georgia, serif", w: 400, r: 14, light: { bg: '#F7F3EE', card: '#FFFFFF', text: '#2A211C' }, dark: { bg: '#0F0D0C', card: '#1E1A17', text: '#F2EAE0' } },
+    noir: { font: "'Inter', system-ui, sans-serif", w: 700, r: 14, light: { bg: '#F2F2F7', card: '#FFFFFF', text: '#0A0A0B' }, dark: { bg: '#000000', card: '#1C1C1E', text: '#F5F5F7' } }
   };
   async function styleHTML() {
     const p = need(S2.profile);
     const st = p.settings || {};
-    S2.edit = { kind: 'style', style: p.style || 'noir', accent: st.defaultAccent || null };
+    S2.edit = { kind: 'style', style: p.style || 'noir', accent: st.defaultAccent || null, pv: (K.theme && K.theme()) === 'dark' ? 'dark' : 'light' };
     return `
       ${backHTML('style')}
       <header class="cab-h"><h1>Look & feel</h1></header>
@@ -1385,30 +1386,47 @@
   }
   function styleBoxHTML() {
     const e = S2.edit;
-    const list = K.accentsFor(e.style);
+    const list = K.accentsFor(e.style, e.pv);
     if (!e.accent || !list.some(a => a.id === e.accent)) e.accent = list[0].id;
     const acc = list.find(a => a.id === e.accent).color;
     const L = STYLE_LOOK[e.style];
+    const C = L[e.pv] || L.light;
     const name = (S2.profile && S2.profile.name) || K.data.name;
+    const st = (S2.profile && S2.profile.settings) || {};
+    const rating = +st.rating > 0 ? `★ ${(+st.rating).toFixed(1)} · ` : ''; // only her real rating
+    // text on the accent: dark on light accents, white on deep ones (as the app does)
+    const rgb = [1, 3, 5].map(i => parseInt(acc.slice(i, i + 2), 16) / 255).map(c => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+    const onAcc = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2] > 0.45 ? '#111111' : '#FFFFFF';
     return `
-      <div class="segmented" role="radiogroup" style="--n:3;--idx:${['soft', 'maison', 'noir'].indexOf(e.style)}"><i class="segmented__thumb"></i>
-        ${['soft', 'maison', 'noir'].map(x => `<button role="radio" data-sty="${x}" aria-checked="${x === e.style}">${x.charAt(0).toUpperCase() + x.slice(1)}</button>`).join('')}
+      <div class="sty-block">
+        <span class="sty-label">Style</span>
+        <div class="segmented" role="radiogroup" style="--n:3;--idx:${['soft', 'maison', 'noir'].indexOf(e.style)}"><i class="segmented__thumb"></i>
+          ${['soft', 'maison', 'noir'].map(x => `<button role="radio" data-sty="${x}" aria-checked="${x === e.style}">${x.charAt(0).toUpperCase() + x.slice(1)}</button>`).join('')}
+        </div>
       </div>
-      <div class="sty-acc" role="radiogroup" aria-label="Accent">
-        ${list.map(a => `<button class="swatch" role="radio" data-sty-acc="${a.id}" aria-checked="${a.id === e.accent}" aria-label="${esc(a.name)}" style="--c:${a.color}">${K.I.check}</button>`).join('')}
+      <div class="sty-block">
+        <span class="sty-label">Accent</span>
+        <div class="sty-acc" role="radiogroup" aria-label="Accent">
+          ${list.map(a => `<button class="swatch" role="radio" data-sty-acc="${a.id}" aria-checked="${a.id === e.accent}" aria-label="${esc(a.name)}" style="--c:${a.color}">${K.I.check}</button>`).join('')}
+        </div>
       </div>
-      <div class="sty-prev" style="--pb:${L.bg};--pc:${L.card};--pt:${L.text};--pa:${acc};--pf:${L.font};--pw:${L.w};--pr:${L.r}px">
-        <div class="sty-prev__hero"><span>${esc(name)}</span><small>★ 4.9 · Book in two taps</small></div>
+      <div class="sty-block">
+        <span class="sty-label sty-label--row">Preview
+          <span class="segmented sty-pv" role="radiogroup" aria-label="Preview theme" style="--n:2;--idx:${e.pv === 'dark' ? 1 : 0}"><i class="segmented__thumb"></i>
+            <button role="radio" data-sty-pv="light" aria-checked="${e.pv !== 'dark'}">Light</button><button role="radio" data-sty-pv="dark" aria-checked="${e.pv === 'dark'}">Dark</button></span></span>
+      <div class="sty-prev sty-prev--${e.pv}" style="--pb:${C.bg};--pc:${C.card};--pt:${C.text};--pa:${acc};--pon:${onAcc};--pf:${L.font};--pw:${L.w};--pr:${L.r}px">
+        <div class="sty-prev__hero"><span>${esc(name)}</span><small>${rating}Book in two taps</small></div>
         <div class="sty-prev__card">
           <b>Next available</b><span class="sty-prev__time">Today 3:30 PM</span>
           <div class="sty-prev__chips"><i class="on">3:30 PM</i><i>5:00 PM</i><i>Tomorrow</i></div>
           <span class="sty-prev__btn">Book</span>
         </div>
+      </div>
       </div>`;
   }
   async function saveStyle(btn) {
     const e = S2.edit;
-    const acc = K.accentsFor(e.style).find(a => a.id === e.accent);
+    const acc = K.accentsFor(e.style, 'light').find(a => a.id === e.accent); // the brand color is the light one
     await busyBtn(btn, async () => {
       S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { style: e.style, accent: /^#[0-9a-f]{6}$/i.test(acc && acc.color) ? acc.color : null, settings: { defaultAccent: e.accent } });
       K.toast('Look saved — clients see it now', 'ok');
@@ -1862,6 +1880,7 @@
     if ((el = t.closest('[data-pf-save]'))) { saveProfileForm(el); return true; }
     if ((el = t.closest('[data-sty]'))) { S2.edit.style = el.dataset.sty; S2.edit.accent = null; $('#sty-box').innerHTML = styleBoxHTML(); K.haptic(); return true; }
     if ((el = t.closest('[data-sty-acc]'))) { S2.edit.accent = el.dataset.styAcc; $('#sty-box').innerHTML = styleBoxHTML(); K.haptic(); return true; }
+    if ((el = t.closest('[data-sty-pv]'))) { S2.edit.pv = el.dataset.styPv; $('#sty-box').innerHTML = styleBoxHTML(); K.haptic(); return true; }
     if ((el = t.closest('[data-sty-save]'))) { saveStyle(el); return true; }
     if ((el = t.closest('[data-svc-new]'))) { openServiceEditor(null); return true; }
     if ((el = t.closest('[data-svc-edit]'))) { openServiceEditor((S2.services || []).find(s => s.id === el.dataset.svcEdit)); return true; }

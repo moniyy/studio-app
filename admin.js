@@ -223,8 +223,35 @@
       const row = await K.Backend.admin.markPaid(id);
       A.list = A.list.map(x => (x.id === id ? row : x));
       paintList();
-      K.toast(`Paid — next payment ${fmtDate(row.next_payment_at)}`, 'ok');
+      undoBar(`Marked paid · next ${fmtDate(row.next_payment_at)}`, async () => {
+        const back = await K.Backend.admin.undoPaid(row.payment_id);
+        A.list = A.list.map(x => (x.id === id ? back : x));
+        paintList();
+        K.toast('Undone — the payment is removed', 'ok');
+      });
     });
+  }
+  // "Marked paid · Undo" for 10 seconds
+  let undoTimer = 0;
+  function undoBar(text, undo) {
+    clearTimeout(undoTimer);
+    const old = document.querySelector('.adm-undo');
+    if (old) old.remove();
+    const bar = document.createElement('div');
+    bar.className = 'adm-undo';
+    bar.setAttribute('role', 'status');
+    bar.innerHTML = `<span>${esc(text)}</span><button type="button">Undo</button><i class="adm-undo__time" aria-hidden="true"></i>`;
+    root.appendChild(bar);
+    const done = () => { clearTimeout(undoTimer); bar.classList.add('is-out'); setTimeout(() => bar.remove(), 300); };
+    bar.querySelector('button').addEventListener('click', async ev => {
+      ev.stopPropagation();
+      const b = ev.currentTarget;
+      b.disabled = true;
+      b.innerHTML = K.spinner();
+      try { await undo(); } catch (e) { K.toast(errText(e), 'x'); }
+      done();
+    });
+    undoTimer = setTimeout(done, 10000);
   }
 
   function dueHTML() {
@@ -277,7 +304,7 @@
           <div><small>Setup</small><b class="num">${done}/${total}</b><i class="adm-meter"><i style="width:${Math.round((done / total) * 100)}%"></i></i></div>
           <div><small>Last sign-in</small><b>${esc(ago(s.last_sign_in_at))}</b></div>
           <div><small>Bookings · 30 days</small><b class="num">${s.bookings_30d || 0}</b></div>
-          <div><small>Plan</small><b class="num">${esc(money(s.plan_amount))}</b><small>${s.plan_amount != null ? 'per ' + ({ mo: 'month', quarter: 'quarter', yr: 'year' })[planOf(s)[2]] : 'not set'}</small></div>
+          <div><small>Plan</small><b class="num">${esc(money(s.plan_amount))}</b><small>${s.plan_amount != null ? 'per ' + ({ mo: 'month', quarter: 'quarter', yr: 'year' })[planOf(s)[2]] : 'not set'}${s.founding ? ' · <em class="adm-founding-tag">Founding</em>' : ''}</small></div>
         </div>
         <div class="adm-bill${late ? ' is-late' : ''}">
           <span class="adm-bill__when"><small>Next payment</small><b>${s.next_payment_at ? `${esc(fmtDate(s.next_payment_at))} · ${esc(dueText(s.next_payment_at))}` : 'Not set'}</b>${s.last_paid_at ? `<small>Last paid ${esc(fmtDate(s.last_paid_at))}</small>` : ''}</span>
@@ -377,7 +404,7 @@
       .replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
   }
   function renderNew() {
-    const f = A.form || (A.form = { name: '', masterName: '', email: '', city: '', timezone: 'America/New_York', phone: '', instagram: '', slug: '', slugTouched: false, slugState: null, template: 'lashes', style: 'noir', accent: null });
+    const f = A.form || (A.form = { name: '', masterName: '', email: '', city: '', timezone: 'America/New_York', phone: '', instagram: '', slug: '', slugTouched: false, slugState: null, template: 'lashes', style: 'noir', accent: null, plan: 'monthly', amount: '29', founding: false, kind: 'solo' });
     root.innerHTML = barHTML('New studio', true) + `
       <main class="adm-main">
         <form class="adm-form" id="adm-new" onsubmit="return false" autocomplete="off">
@@ -402,6 +429,13 @@
               <div class="sty-acc" role="radiogroup" aria-label="Accent">${accentsHTML()}</div></div>
             <div class="adm-icon-prev"><canvas id="adm-icon" width="192" height="192" aria-label="App icon"></canvas><small>App icon</small></div>
           </div>
+          <div class="field"><span>Plan after the 14-day trial</span>
+            <div class="adm-plan">
+              <select class="cab-sel cab-sel--wide" data-f="plan"${f.founding ? ' disabled' : ''}>${PLANS.map(([v, l]) => `<option value="${v}"${v === (f.founding ? 'monthly' : f.plan) ? ' selected' : ''}>${l}</option>`).join('')}</select>
+              <span class="adm-plan__amt"><em>$</em><input data-f="amount" type="number" inputmode="decimal" min="0" step="1" value="${esc(f.founding ? '19' : f.amount)}"${f.founding ? ' disabled' : ''}></span>
+            </div>
+            <label class="tick adm-founding"><input type="checkbox" data-f-founding${f.founding ? ' checked' : ''}><i aria-hidden="true">${K.I.check}</i><span><b>Founding price — $19/mo forever</b></span></label>
+            <small class="adm-plan__sum" id="adm-plan-sum">${esc(planSummary())}</small></div>
           <p class="adm-muted">Hours Tue–Sat 10:00–18:00 · 14-day trial · she changes everything later in her dashboard.</p>
           <button class="btn btn--primary btn--block" data-a-create>Create studio</button>
         </form>
@@ -512,7 +546,8 @@
       const r = await K.Backend.admin.create({
         name: f.name.trim(), masterName: f.masterName.trim(), email: f.email.trim(), city: f.city.trim(), timezone: f.timezone,
         phone: f.phone.trim(), instagram: f.instagram.trim(), slug: f.slug, template: f.template, style: f.style,
-        accent, accentId: f.accent, icons: { i512: png64(i512), i192: png64(i192), i180: png64(i180) }
+        accent, accentId: f.accent, plan: f.plan, amount: f.amount, founding: !!f.founding,
+        icons: { i512: png64(i512), i192: png64(i192), i180: png64(i180) }
       });
       A.kit = { id: r.id, slug: r.slug, name: r.name, masterName: r.masterName, email: r.email, password: r.password, trial_ends_at: r.trial_ends_at, fresh: true };
       A.form = null;
@@ -688,6 +723,14 @@
       return;
     }
     if ((el = t.closest('[data-a-create]'))) { createStudio(el); }
+    if ((el = t.closest('[data-f-founding]')) && A.form) {
+      A.form.founding = el.checked;
+      const plan = $('[data-f="plan"]');
+      const amt = $('[data-f="amount"]');
+      plan.disabled = amt.disabled = el.checked;
+      if (el.checked) { plan.value = 'monthly'; amt.value = '19'; } else { plan.value = A.form.plan; amt.value = A.form.amount; }
+      paintPlanSum();
+    }
   }
   function onInput(e) {
     if (!root || !root.contains(e.target)) return;
@@ -697,6 +740,7 @@
     const k = t.dataset && t.dataset.f;
     if (!k || !A.form) return;
     A.form[k] = t.value;
+    if (k === 'amount') paintPlanSum();
     if (k === 'name') {
       if (!A.form.slugTouched) { A.form.slug = slugify(t.value); const s = $('[data-f="slug"]'); if (s) s.value = A.form.slug; checkSlug(); }
       drawPreview();
@@ -712,8 +756,17 @@
   function onChange(e) {
     if (!root || !root.contains(e.target)) return;
     const t = e.target;
-    if (t.dataset && t.dataset.f && A.form) A.form[t.dataset.f] = t.value;
+    if (t.dataset && t.dataset.f && A.form) { A.form[t.dataset.f] = t.value; if (t.dataset.f === 'plan') paintPlanSum(); }
   }
+  // "$29 / month after the trial" under the plan fields
+  function planSummary() {
+    const f = A.form;
+    if (!f) return '';
+    if (f.founding) return '$19 / month, forever (founding price)';
+    const p = PLANS.find(x => x[0] === f.plan) || PLANS[0];
+    return `${money(f.amount === '' ? 0 : f.amount)} / ${{ mo: 'month', quarter: 'quarter', yr: 'year' }[p[2]]} after the trial`;
+  }
+  function paintPlanSum() { const el = $('#adm-plan-sum'); if (el) el.textContent = planSummary(); }
 
   window.StudioAdmin = { open };
 })();
