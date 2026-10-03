@@ -2,7 +2,7 @@
 //
 // POST (Authorization: the admin's JWT)
 //   { name, masterName, email, city, timezone, phone, instagram, slug, template,
-//     style, accent, accentId, plan?, amount?, founding?, icons?: { i512, i192, i180 } (base64 PNG) }
+//     style, accent, accentId, plan?, amount?, founding?, kind? ('solo' | 'team'), icons?: { i512, i192, i180 } (base64 PNG) }
 // Creates: the master's account with a temporary password (must be changed at
 // the first sign-in), the studio (14-day trial), services / policies / answers /
 // texts from the niche template, hours Tue–Sat 10:00–18:00, default rules, and
@@ -69,7 +69,9 @@ Deno.serve(async req => {
       // the plan she pays after the trial: $29/mo by default; founding studios $19/mo forever
       billing_plan: b.founding ? 'monthly' : (['monthly', 'quarterly', 'yearly'].includes(b.plan) ? b.plan : 'monthly'),
       plan_amount: b.founding ? 19 : (b.amount !== '' && b.amount != null && isFinite(+b.amount) && +b.amount >= 0 ? +b.amount : 29),
-      founding: !!b.founding
+      founding: !!b.founding,
+      // a salon: she adds her masters in the dashboard (Studio → Team)
+      kind: b.kind === 'team' ? 'team' : 'solo'
     }).select('id').single();
     if (me) throw me;
     mid = m.id;

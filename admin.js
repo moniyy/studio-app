@@ -297,7 +297,7 @@
       <article class="adm-card${t && t.warn ? ' is-warn' : ''}${s.status === 'paused' ? ' is-paused' : ''}" data-id="${esc(s.id)}">
         <div class="adm-card__top">
           ${s.icon ? `<img class="adm-card__icon" src="${esc(s.icon)}" alt="">` : `<span class="adm-card__icon adm-card__icon--mono">${esc(mono(s.name))}</span>`}
-          <div class="adm-card__who"><b>${esc(s.name)}</b><small>${esc([s.master_name, s.owner_email].filter(Boolean).join(' · ') || 'no owner')}</small><small class="adm-link">?m=${esc(s.slug)}</small></div>
+          <div class="adm-card__who"><b>${esc(s.name)}</b><small>${esc([s.master_name, s.owner_email].filter(Boolean).join(' · ') || 'no owner')}</small><small class="adm-link">?m=${esc(s.slug)} · <span class="adm-kind-tag">${s.kind === 'team' ? `Team · ${+s.staff_count || 1} master${+s.staff_count === 1 ? '' : 's'}` : 'Solo'}</span></small></div>
           ${pill(s)}
         </div>
         <div class="adm-stats">
@@ -379,7 +379,7 @@
     if (!s || !(await confirmBox(`New temporary password for ${s.name}?`, `${s.owner_email || 'The master'} will have to choose a new password at the next sign-in. The old one stops working now.`, 'Reset password'))) return;
     await busy(btn, async () => {
       const r = await K.Backend.admin.resetPassword(id);
-      A.kit = { id: s.id, slug: s.slug, name: s.name, masterName: s.master_name, email: r.email || s.owner_email, password: r.password, trial_ends_at: s.status === 'trial' ? s.trial_ends_at : null };
+      A.kit = { id: s.id, slug: s.slug, name: s.name, masterName: s.master_name, email: r.email || s.owner_email, password: r.password, trial_ends_at: s.status === 'trial' ? s.trial_ends_at : null, kind: s.kind };
       go('kit');
     });
   }
@@ -420,6 +420,11 @@
             <label class="field"><span>Phone</span><input data-f="phone" type="tel" inputmode="tel" maxlength="30" value="${esc(f.phone)}" placeholder="(512) 555-0123"></label>
             <label class="field"><span>Instagram</span><input data-f="instagram" maxlength="60" value="${esc(f.instagram)}" placeholder="@bellabrows" autocapitalize="off"></label>
           </div>
+          <div class="field"><span>Studio type</span>
+            <div class="segmented adm-kind" role="radiogroup" style="--n:2;--idx:${f.kind === 'team' ? 1 : 0}"><i class="segmented__thumb"></i>
+              <button type="button" role="radio" data-f-kind="solo" aria-checked="${f.kind !== 'team'}">Solo</button>
+              <button type="button" role="radio" data-f-kind="team" aria-checked="${f.kind === 'team'}">Team</button></div>
+            <small class="adm-muted">${f.kind === 'team' ? 'A salon: she adds her masters in Studio → Team, each with her own sign-in.' : 'One master — she works alone.'}</small></div>
           <div class="field"><span>Niche — services, policies, answers and texts to start from</span>
             <div class="chips-wrap">${NICHES.map(([v, l]) => `<button type="button" class="chip${v === f.template ? ' is-active' : ''}" data-f-tpl="${v}">${l}</button>`).join('')}</div></div>
           <div class="adm-form__look">
@@ -546,10 +551,10 @@
       const r = await K.Backend.admin.create({
         name: f.name.trim(), masterName: f.masterName.trim(), email: f.email.trim(), city: f.city.trim(), timezone: f.timezone,
         phone: f.phone.trim(), instagram: f.instagram.trim(), slug: f.slug, template: f.template, style: f.style,
-        accent, accentId: f.accent, plan: f.plan, amount: f.amount, founding: !!f.founding,
+        accent, accentId: f.accent, plan: f.plan, amount: f.amount, founding: !!f.founding, kind: f.kind === 'team' ? 'team' : 'solo',
         icons: { i512: png64(i512), i192: png64(i192), i180: png64(i180) }
       });
-      A.kit = { id: r.id, slug: r.slug, name: r.name, masterName: r.masterName, email: r.email, password: r.password, trial_ends_at: r.trial_ends_at, fresh: true };
+      A.kit = { id: r.id, slug: r.slug, name: r.name, masterName: r.masterName, email: r.email, password: r.password, trial_ends_at: r.trial_ends_at, kind: f.kind, fresh: true };
       A.form = null;
       A.list = null;
       K.toast(`${r.name} is ready`, 'ok');
@@ -571,6 +576,7 @@
       `3. Sign in with ${k.email}${k.password ? ` and this temporary password: ${k.password}` : ' (ask me for a temporary password)'}`,
       '4. Choose your own password when the app asks.',
       '5. On the Today screen, follow “Finish setting up” — photos, services, hours, payments.',
+      ...(k.kind === 'team' ? ['6. Studio → Team: add your masters — each one gets her own sign-in and sees only her own bookings.'] : []),
       '',
       `Your clients book here (put it in your Instagram bio): ${clientLink(k.slug)}`
     ].join('\n');
@@ -698,7 +704,7 @@
     if ((el = t.closest('[data-a-del]'))) { deleteStudio(el.dataset.aDel); return; }
     if ((el = t.closest('[data-a-kit]'))) {
       const s = byId(el.dataset.aKit);
-      if (s) { A.kit = { id: s.id, slug: s.slug, name: s.name, masterName: s.master_name, email: s.owner_email, password: null, trial_ends_at: s.status === 'trial' ? s.trial_ends_at : null }; go('kit'); }
+      if (s) { A.kit = { id: s.id, slug: s.slug, name: s.name, masterName: s.master_name, email: s.owner_email, password: null, trial_ends_at: s.status === 'trial' ? s.trial_ends_at : null, kind: s.kind }; go('kit'); }
       return;
     }
     if ((el = t.closest('[data-a-copy]'))) { copy(el.dataset.aCopy); return; }
@@ -706,6 +712,7 @@
     if ((el = t.closest('[data-a-print]'))) { window.print(); return; }
     // the new-studio form
     if ((el = t.closest('[data-f-tpl]'))) { A.form.template = el.dataset.fTpl; $$('[data-f-tpl]').forEach(c => c.classList.toggle('is-active', c === el)); return; }
+    if ((el = t.closest('[data-f-kind]')) && A.form) { A.form.kind = el.dataset.fKind; K.haptic(); renderNew(); return; }
     if ((el = t.closest('[data-f-style]'))) {
       A.form.style = el.dataset.fStyle;
       A.form.accent = null;

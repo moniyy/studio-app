@@ -429,3 +429,7 @@ verify_jwt = false
 
 [functions.manifest]
 verify_jwt = false
+
+# checks the caller itself: the studio owner's JWT
+[functions.owner-invite-staff]
+verify_jwt = false

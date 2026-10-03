@@ -3,11 +3,11 @@
 // POST (Authorization: the admin's JWT)
 //   { action: 'reset_password', master_id }       → { email, password } (shown once)
 //   { action: 'delete', master_id, confirm: slug } → removes the studio, its photos
-//                                                    and the master's account
+//                                                    and the accounts of its master (and her team)
 // Status, billing and notes are saved with the admin_save_studio RPC instead.
 import { cors, json, requireAdmin, serviceClient, tempPassword } from '../_shared/admin.ts';
 
-const FOLDERS = ['app', 'services', 'cover', 'avatar', 'looks', 'formulas', 'misc'];
+const FOLDERS = ['app', 'services', 'cover', 'avatar', 'looks', 'formulas', 'team', 'misc'];
 
 Deno.serve(async req => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -37,7 +37,9 @@ Deno.serve(async req => {
       const { data: objs } = await admin.storage.from('studio-media').list(`${m.id}/${f}`, { limit: 1000 });
       if (objs && objs.length) await admin.storage.from('studio-media').remove(objs.map(o => `${m.id}/${f}/${o.name}`));
     }
-    const { error } = await admin.from('masters').delete().eq('id', m.id); // services, bookings, clients… go with it
+    // a salon: its masters' sign-ins (read before the staff rows go with the studio)
+    const { data: crew } = await admin.from('staff').select('user_id').eq('master_id', m.id).eq('is_owner', false).not('user_id', 'is', null);
+    const { error } = await admin.from('masters').delete().eq('id', m.id); // services, bookings, clients, staff… go with it
     if (error) return json({ error: 'delete_failed', message: error.message }, 500);
     // her account goes too — unless she runs another studio or is an admin
     let accountRemoved = false;
@@ -46,7 +48,16 @@ Deno.serve(async req => {
       const { data: isAdmin } = await admin.from('admins').select('user_id').eq('user_id', m.owner_id).maybeSingle();
       if (!count && !isAdmin) { await admin.auth.admin.deleteUser(m.owner_id); accountRemoved = true; }
     }
-    return json({ deleted: true, slug: m.slug, accountRemoved });
+    // each master's account too — unless she is on another team, runs a studio or is an admin
+    let staffRemoved = 0;
+    for (const { user_id: uid } of crew || []) {
+      if (uid === me.id) continue;
+      const { count: own } = await admin.from('masters').select('id', { count: 'exact', head: true }).eq('owner_id', uid);
+      const { count: other } = await admin.from('staff').select('id', { count: 'exact', head: true }).eq('user_id', uid);
+      const { data: adm } = await admin.from('admins').select('user_id').eq('user_id', uid).maybeSingle();
+      if (!own && !other && !adm) { await admin.auth.admin.deleteUser(uid); staffRemoved++; }
+    }
+    return json({ deleted: true, slug: m.slug, accountRemoved, staffRemoved });
   }
 
   return json({ error: 'unknown_action' }, 400);

@@ -22,7 +22,9 @@
   }
   const KNOWN = ['slot_taken', 'invalid_phone', 'invalid_email', 'invalid_name', 'too_many', 'not_found',
     'not_active', 'too_late', 'not_bookable', 'service_not_found', 'outside_hours', 'bad_status', 'forbidden',
-    'hours_overlap', 'hours_invalid', 'phone_taken', 'too_big', 'timeout', 'paused'];
+    'hours_overlap', 'hours_invalid', 'phone_taken', 'too_big', 'timeout', 'paused',
+    // a salon
+    'has_bookings', 'owner_stays', 'team_has_staff', 'staff_not_found', 'bad_staff', 'bad_kind'];
   const TIMEOUT = 15000;
   function toError(e) {
     if (e instanceof BackendError) return e;
@@ -61,7 +63,7 @@
      (reads, the token refresh, create_booking with its request id); a write is
      repeated only when it failed at once (it never reached the server). */
   const FETCH_MS = 8000;
-  const SAFE_RPC = /^(get_\w+|create_booking|my_account|am_i_admin|admin_studios|admin_slug_free|owner_(studios|bookings|booking|schedule|clients|client|services|profile|looks|insights|slots|push_devices|setup))$/;
+  const SAFE_RPC = /^(get_\w+|create_booking|my_account|am_i_admin|admin_studios|admin_slug_free|owner_(studios|bookings|booking|schedule|clients|client|services|profile|looks|insights|slots|push_devices|setup|staff|staff_future|payouts))$/;
   function safeToRepeat(url, method) {
     if (!method || /^(GET|HEAD)$/i.test(method)) return true;
     const m = /\/rest\/v1\/rpc\/(\w+)/.exec(url);
@@ -172,14 +174,16 @@
   /* ---------- public (clients) ---------- */
   const publicApi = {
     profile: slug => publicRpc('get_public_profile', { p_slug: slug }),
-    openings: (slug, serviceId, fromDate, days, ignore) =>
-      publicRpc('get_openings', { p_slug: slug, p_service_id: serviceId, p_from: fromDate, p_days: days, p_ignore: ignore || null }).then(scalars),
-    slots: (slug, serviceId, date, ignore) =>
-      publicRpc('get_available_slots', { p_slug: slug, p_service_id: serviceId, p_date: date, p_ignore: ignore || null }).then(scalars),
+    // staffId: one master (a salon); none = any available master
+    openings: (slug, serviceId, fromDate, days, ignore, staffId) =>
+      publicRpc('get_openings', { p_slug: slug, p_service_id: serviceId, p_from: fromDate, p_days: days, p_ignore: ignore || null, p_staff_id: staffId || null }).then(scalars),
+    slots: (slug, serviceId, date, ignore, staffId) =>
+      publicRpc('get_available_slots', { p_slug: slug, p_service_id: serviceId, p_date: date, p_ignore: ignore || null, p_staff_id: staffId || null }).then(scalars),
     // requestId: the same id on a retry returns the same booking (never two)
     createBooking: (slug, o) => publicRpc('create_booking', {
       p_slug: slug, p_service_id: o.serviceId, p_start_at: o.startAt,
-      p_name: o.name, p_phone: o.phone, p_email: o.email || null, p_note: o.note || null, p_request_id: o.requestId || null
+      p_name: o.name, p_phone: o.phone, p_email: o.email || null, p_note: o.note || null, p_request_id: o.requestId || null,
+      p_staff_id: o.staffId || null
     }),
     getBooking: token => publicRpc('get_booking', { p_token: token }),
     cancelBooking: (token, reason) => publicRpc('cancel_booking', { p_token: token, p_reason: reason || null }),
@@ -206,9 +210,10 @@
       const { error } = await sb.auth.updateUser({ password });
       if (error) throw new BackendError(toError(error).code, error.message);
     },
+    // this device only: her phone stays signed in when she signs out on the iPad
     async signOut() {
       const sb = await client();
-      await sb.auth.signOut();
+      await sb.auth.signOut({ scope: 'local' });
     },
     async onChange(cb) {
       const sb = await client();
@@ -223,20 +228,24 @@
     bookings: (mid, from, to, status) => rpc('owner_bookings', { p_master_id: mid, p_from: from, p_to: to, p_status: status || null }),
     booking: id => rpc('owner_booking', { p_booking_id: id }),
     setStatus: (id, status, reason) => rpc('owner_set_status', { p_booking_id: id, p_status: status, p_reason: reason || null }),
-    reschedule: (id, startAt, force) => rpc('owner_reschedule', { p_booking_id: id, p_new_start_at: startAt, p_force: !!force }),
+    // staffId: (owner) move it to another master — checked for that master's time
+    reschedule: (id, startAt, force, staffId) => rpc('owner_reschedule', { p_booking_id: id, p_new_start_at: startAt, p_force: !!force, p_staff_id: staffId || null }),
     create: (mid, o, force) => rpc('owner_create_booking', {
       p_master_id: mid, p_service_id: o.serviceId, p_start_at: o.startAt, p_name: o.name, p_phone: o.phone,
-      p_email: o.email || null, p_note: o.note || null, p_force: !!force
+      p_email: o.email || null, p_note: o.note || null, p_force: !!force, p_staff_id: o.staffId || null
     }),
-    slots: (mid, serviceId, date, ignore) =>
-      rpc('owner_slots', { p_master_id: mid, p_service_id: serviceId, p_date: date, p_ignore: ignore || null }).then(scalars),
+    slots: (mid, serviceId, date, ignore, staffId) =>
+      rpc('owner_slots', { p_master_id: mid, p_service_id: serviceId, p_date: date, p_ignore: ignore || null, p_staff_id: staffId || null }).then(scalars),
     clients: (mid, q) => rpc('owner_clients', { p_master_id: mid, p_q: q || null }),
     client: id => rpc('owner_client', { p_client_id: id }),
     setNotes: (id, notes) => rpc('owner_set_client_notes', { p_client_id: id, p_notes: notes }),
-    schedule: mid => rpc('owner_schedule', { p_master_id: mid }),
-    saveHours: (mid, hours) => rpc('owner_save_hours', { p_master_id: mid, p_hours: hours }),
+    // hours & time off of one master (owner: any, default herself; staff: her own)
+    schedule: (mid, staffId) => rpc('owner_schedule', { p_master_id: mid, p_staff_id: staffId || null }),
+    saveHours: (mid, hours, staffId) => rpc('owner_save_hours', { p_master_id: mid, p_hours: hours, p_staff_id: staffId || null }),
     saveRules: (mid, rules) => rpc('owner_save_rules', { p_master_id: mid, p_rules: rules }),
-    addTimeOff: (mid, start, end, reason) => rpc('owner_add_time_off', { p_master_id: mid, p_start_at: start, p_end_at: end, p_reason: reason || '' }),
+    addTimeOff: (mid, start, end, reason, staffId, wholeStudio) => rpc('owner_add_time_off', {
+      p_master_id: mid, p_start_at: start, p_end_at: end, p_reason: reason || '', p_staff_id: staffId || null, p_whole_studio: !!wholeStudio
+    }),
     deleteTimeOff: id => rpc('owner_delete_time_off', { p_id: id }),
 
     /* Web Push: this device's subscription, and a test message to all her devices */
@@ -271,7 +280,16 @@
     markInstalled: mid => rpc('owner_mark_installed', { p_master_id: mid }),
     // 'paid' (received) · 'waived' (not needed) · 'pending' (undo)
     setDeposit: (id, status) => rpc('owner_set_deposit', { p_booking_id: id, p_status: status }),
-    insights: (mid, period) => rpc('owner_insights', { p_master_id: mid, p_period: period || 'week' }),
+    insights: (mid, period, staffId) => rpc('owner_insights', { p_master_id: mid, p_period: period || 'week', p_staff_id: staffId || null }),
+    /* the team (a salon) */
+    staff: mid => rpc('owner_staff', { p_master_id: mid }),
+    saveStaff: (mid, p) => rpc('owner_save_staff', { p_master_id: mid, p }),
+    staffFuture: staffId => rpc('owner_staff_future', { p_staff_id: staffId }),
+    serviceStaff: (serviceId, staffIds) => rpc('owner_service_staff', { p_service_id: serviceId, p_staff_ids: staffIds }),
+    setKind: (mid, kind) => rpc('owner_set_kind', { p_master_id: mid, p_kind: kind }),
+    payouts: (mid, from, to) => rpc('owner_payouts', { p_master_id: mid, p_from: from, p_to: to }),
+    // her account with a temporary password + the staff row (Edge Function)
+    inviteStaff: body => invoke('owner-invite-staff', body, 45000),
 
     /* Photos → Storage "studio-media/<master_id>/<folder>/<uuid>.<ext>" (public URLs) */
     async upload(mid, folder, blob) {
@@ -313,9 +331,20 @@
   // Edge Functions answer {error: 'slug_taken'…} with a non-2xx status: that code becomes the error
   async function invoke(fn, body, ms) {
     const sb = await client();
-    await freshSession().catch(() => null);
+    // the token goes along explicitly: after a long time in the background the SDK's
+    // copy can be stale. 401/403 → the function checked the caller first and did
+    // nothing, so a fresh token and one repeat are safe.
+    const call = s => withTimeout(sb.functions.invoke(fn, { body, headers: s && s.access_token ? { Authorization: 'Bearer ' + s.access_token } : {} }), ms || 30000);
     let res;
-    try { res = await withTimeout(sb.functions.invoke(fn, { body }), ms || 30000); } catch (e) { throw toError(e); }
+    try {
+      res = await call(await freshSession().catch(() => null));
+      const st = res.error && res.error.context && res.error.context.status;
+      if (st === 401 || st === 403) {
+        const r = await withTimeout(sb.auth.refreshSession(), 18000).catch(() => null);
+        const s = r && r.data && r.data.session;
+        if (s) res = await call(s);
+      }
+    } catch (e) { throw toError(e); }
     if (res.error) {
       let code = 'unknown';
       let msg = res.error.message;

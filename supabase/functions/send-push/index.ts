@@ -2,7 +2,8 @@
 //
 // Two callers:
 //   1. the bookings trigger (pg_net) with header x-push-secret = PUSH_HOOK_SECRET
-//      body: { kind: 'new' | 'request' | 'cancel' | 'move' | 'deposit_expired', booking_id, old_start_at? }
+//      body: { kind: 'new' | 'request' | 'cancel' | 'move' | 'deposit_expired', booking_id, actor?, old_start_at? }
+//      → the studio's owner and the booking's master (each account's own devices), never the actor
 //   2. the dashboard's "Send test notification" with the master's own JWT
 //      body: { master_id }
 // Subscriptions answering 404 / 410 are deleted.
@@ -54,20 +55,26 @@ Deno.serve(async req => {
 
   let masterId: string;
   let message: Message;
+  let recipients: string[] = []; // the accounts whose devices get it
+  let ownerId: string | null = null; // a device saved without an account is the owner's
 
   if (HOOK_SECRET && req.headers.get('x-push-secret') === HOOK_SECRET) {
     // ---- from the bookings trigger ----
     const { data: b } = await admin
       .from('bookings')
-      .select('id, master_id, status, start_at, late_cancel, service_name, clients(name), masters(slug, timezone, cancel_window_hours)')
+      .select('id, master_id, status, start_at, late_cancel, service_name, clients(name), staff(user_id, name), masters(slug, timezone, cancel_window_hours, owner_id, kind)')
       .eq('id', input.booking_id)
       .single();
     if (!b) return json({ error: 'booking not found' }, 404);
     // deno-lint-ignore no-explicit-any
     const bk = b as any;
     const m = bk.masters;
-    const name = (bk.clients && bk.clients.name) || 'Client';
+    // a salon: the master's name goes along ("… · with Jasmine")
+    const name = ((bk.clients && bk.clients.name) || 'Client') + (m.kind === 'team' && bk.staff ? ` (with ${bk.staff.name})` : '');
     const at = when(bk.start_at, m.timezone);
+    // the owner and the booking's master — not the account that did it
+    ownerId = m.owner_id;
+    recipients = [m.owner_id, bk.staff && bk.staff.user_id].filter((x, i, a) => x && a.indexOf(x) === i && x !== input.actor);
     const url = `./?m=${encodeURIComponent(m.slug)}&owner=1&booking=${bk.id}`;
     masterId = bk.master_id;
     switch (input.kind) {
@@ -96,11 +103,14 @@ Deno.serve(async req => {
     // ---- "Send test notification" from the dashboard (her own JWT) ----
     const auth = req.headers.get('Authorization') || '';
     const user = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: auth } }, auth: { persistSession: false } });
+    const { data: me } = await user.auth.getUser();
+    if (me && me.user) recipients = [me.user.id]; // the test goes to this account's devices
     const { data: studios, error } = await user.rpc('owner_studios');
     // deno-lint-ignore no-explicit-any
     const st = !error && (studios as any[] || []).find(x => x.id === input.master_id);
     if (!st) return json({ error: 'forbidden' }, 403);
     masterId = st.id;
+    if (st.role === 'owner' && me && me.user) ownerId = me.user.id;
     message = {
       title: 'Notifications are on ✓',
       body: `You’ll hear about new bookings and cancellations at ${st.name} right here.`,
@@ -109,8 +119,10 @@ Deno.serve(async req => {
     };
   }
 
-  const { data: subs } = await admin.from('push_subscriptions').select('id, endpoint, p256dh, auth').eq('master_id', masterId);
-  const results = await Promise.all((subs || []).map(async s => {
+  if (!recipients.length) return json({ sent: 0, removed: 0, failed: [] });
+  const { data: all } = await admin.from('push_subscriptions').select('id, endpoint, p256dh, auth, user_id').eq('master_id', masterId);
+  const subs = (all || []).filter(s => recipients.includes(s.user_id || ownerId || ''));
+  const results = await Promise.all(subs.map(async s => {
     try { return { id: s.id, ...(await sendPush(s, message, VAPID)) }; } catch (e) { return { id: s.id, ok: false, status: 0, gone: false, text: String(e) }; }
   }));
   const gone = results.filter(r => r.gone).map(r => r.id);

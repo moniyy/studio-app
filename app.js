@@ -1106,6 +1106,8 @@
             </div>
           </div>` : ''}
 
+          ${teamHTML()}
+
           ${data.reviews.length ? `
           <div class="section" data-stagger>
             <div class="section-head"><h2>Loved by clients</h2></div>
@@ -2451,7 +2453,7 @@
   function openingsFor(off, svcId) {
     if (isBuiltin()) {
       const id = (svcId === undefined ? bk.service : svcId) || (data.services[0] && data.services[0].id);
-      const c = id === bk.service && bk.cache ? bk.cache : openCache[id];
+      const c = id === bk.service && bk.cache ? bk.cache : openCache[cacheKey(id, null)];
       return c && c.byOff[off] ? c.byOff[off].map(x => x.min) : [];
     }
     const svc = data.services.find(s => s.id === (svcId === undefined ? bk.service : svcId));
@@ -2470,6 +2472,74 @@
   }
 
   const bkService = () => data.services.find(s => s.id === bk.service);
+
+  /* ---------- A salon: several masters (Solo studios never see any of this) ---------- */
+  const isTeam = () => isBuiltin() && data.kind === 'team' && (data.staff || []).length > 1;
+  const staffById = id => (data.staff || []).find(x => x.id === id) || null;
+  const staffFor = svcId => (data.staff || []).filter(st => st.services.some(x => x.id === svcId));
+  const staffSvc = (st, svcId) => (st && st.services.find(x => x.id === svcId)) || null;
+  const firstWord = n => String(n || '').trim().split(/\s+/)[0];
+  const monoOf = n => String(n || '?').trim().split(/\s+/).slice(0, 2).map(w => w.charAt(0)).join('').toUpperCase();
+  // the price of a service with this master (her own, if she set one)
+  const svcPrice = (s, staffId) => { const o = staffSvc(staffById(staffId), s && s.id); return o && o.price != null ? o.price : s && s.price; };
+  const svcDuration = (s, staffId) => { const o = staffSvc(staffById(staffId), s && s.id); return o && o.duration ? fmtDuration(o.duration) : s && s.duration; };
+  const staffAvatar = (st, w) => (st && st.photo
+    ? `<img src="${esc(sized(safeUrl(st.photo), w || 200))}" alt="">`
+    : `<span class="st-mono" style="--c:${esc((st && st.color) || '#8E8E93')}">${esc(monoOf(st && st.name))}</span>`);
+
+  // "Book again" in a salon: with the same master, if she still does it
+  const sameStaffAttr = b => {
+    const st = isTeam() && b && b.staff_id ? staffById(b.staff_id) : null;
+    return st && staffSvc(st, b.service_id) ? ` data-book-staff="${esc(st.id)}"` : '';
+  };
+
+  /* Home: "Our team" */
+  function teamHTML() {
+    if (!isTeam()) return '';
+    return `
+          <div class="section" data-stagger>
+            <div class="section-head"><h2>Our team</h2></div>
+            <div class="rail team-rail">
+              ${data.staff.map(st => `
+                <button class="team-card" data-team-member="${esc(st.id)}">
+                  <span class="team-card__photo">${staffAvatar(st, 300)}</span>
+                  <b>${esc(st.name)}</b>
+                  ${st.title ? `<small>${esc(st.title)}</small>` : ''}
+                </button>`).join('')}
+            </div>
+          </div>`;
+  }
+  /* A master's page: bio, her work, her services, "Book with …" */
+  function openStaff(id) {
+    const st = staffById(id);
+    if (!st) return;
+    const looks = data.gallery.filter(g => g.staffId === id);
+    const svcs = data.services.filter(s => staffSvc(st, s.id));
+    haptic();
+    Sheet.open(el => {
+      el.innerHTML = `
+        <div class="sheet__scroll st-page" data-sheet-scroll>
+          <button class="sheet__x st-page__x" data-sheet-close aria-label="Close">${I.x}</button>
+          <header class="st-page__head">
+            <span class="st-page__photo">${staffAvatar(st, 500)}</span>
+            <h2>${esc(st.name)}</h2>
+            ${st.title ? `<p class="st-page__title">${esc(st.title)}</p>` : ''}
+            ${st.bio ? `<p class="st-page__bio">${esc(st.bio)}</p>` : ''}
+          </header>
+          ${looks.length ? `
+          <h3 class="sd-h">${esc(firstWord(st.name))}’s work</h3>
+          <div class="st-page__looks">${looks.slice(0, 9).map(g => `<button data-team-look="${data.gallery.indexOf(g)}"><img src="${esc(sized(safeUrl(g.photo), 300))}" alt="" loading="lazy"></button>`).join('')}</div>` : ''}
+          <h3 class="sd-h">Services</h3>
+          <div class="list st-page__svcs">${svcs.map(s => `
+            <button class="row row--link" data-book data-book-service="${esc(s.id)}" data-book-staff="${esc(st.id)}">
+              <span class="row__label">${esc(s.title)}<span class="row__sub">${esc(svcDuration(s, st.id) || '')}</span></span>
+              <span class="row__value num">${esc(price(svcPrice(s, st.id)))}</span>
+              <span class="row__chev">${I.chevR}</span>
+            </button>`).join('')}</div>
+        </div>
+        <footer class="sheet__foot"><button class="btn btn--primary btn--block" data-book data-book-staff="${esc(st.id)}">Book with ${esc(firstWord(st.name))}</button></footer>`;
+    }, { detent: 'large' });
+  }
   const dayLabel = (off, long) => {
     const d = studioDate(off);
     const name = long ? DAY_NAMES[d.dow] : DAY_SHORT[d.dow];
@@ -2481,6 +2551,9 @@
   function openBooking(opts) {
     opts = opts || {};
     bk.service = opts.service || null;
+    // the master: undefined = not chosen yet (Who step), null = any available, id = her
+    bk.staff = opts.staff !== undefined ? (opts.staff || null) : undefined;
+    if (bk.staff && bk.service && !staffSvc(staffById(bk.staff), bk.service)) bk.staff = undefined;
     bk.off = null;
     bk.min = null;
     if (opts.slot) {
@@ -2492,9 +2565,14 @@
       if (bk.off == null) bk.off = 0;
     }
     bk.look = opts.look || null;
-    if (isBuiltin()) { resetBuiltin(opts); bk.cache = null; if (opts.reschedule) { bk.off = opts.booking ? Math.max(0, studioSpot(opts.booking.start_at).off) : null; bk.min = null; } }
+    if (isBuiltin()) {
+      resetBuiltin(opts);
+      bk.cache = null;
+      if (opts.reschedule) { bk.off = opts.booking ? Math.max(0, studioSpot(opts.booking.start_at).off) : null; bk.min = null; bk.staff = (opts.booking && opts.booking.staff_id) || null; }
+    }
+    if (!isTeam() && !(opts.reschedule)) bk.staff = null;
     if (bk.off == null) bk.off = 0;
-    bk.step = bk.service ? 1 : 0;
+    bk.step = !bk.service ? 0 : ix('who') > 0 && bk.staff === undefined ? ix('who') : ix('time');
     if (bk.service) rememberService(bk.service);
     haptic();
     Sheet.open(renderBooking, { detent: 'large' });
@@ -2531,15 +2609,41 @@
   }
 
   function renderBkService() {
+    // "Book with Jasmine": only what she does, at her prices
+    const st = bk.staff ? staffById(bk.staff) : null;
+    const list = st ? data.services.filter(s => staffSvc(st, s.id)) : data.services;
     $('#bk-p0').innerHTML = `
       <h2 class="bk-title">Choose a service</h2>
-      <p class="bk-sub">${esc(pricesFrom())}</p>
+      <p class="bk-sub">${st ? `With ${esc(st.name)}.` : esc(pricesFrom())}</p>
       <div class="pick-list">
-        ${data.services.map(s => `
+        ${list.map(s => `
           <button class="pick${s.id === bk.service ? ' is-selected' : ''}" data-bk-svc="${esc(s.id)}">
             <img src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="" loading="lazy">
-            <span class="pick__text"><b>${esc(s.title)}</b><small>${esc(s.duration || '')}</small></span>
-            <span class="pick__price">${esc(price(s.price))}</span>
+            <span class="pick__text"><b>${esc(s.title)}</b><small>${esc((st ? svcDuration(s, st.id) : s.duration) || '')}</small></span>
+            <span class="pick__price">${esc(price(st ? svcPrice(s, st.id) : s.price))}</span>
+            <span class="pick__check">${I.check}</span>
+          </button>`).join('')}
+      </div>`;
+  }
+
+  /* Who: "Any available" first, then the masters who do this service */
+  function renderBkWho() {
+    const s = bkService();
+    const list = s ? staffFor(s.id) : [];
+    $('#bk-p' + ix('who')).innerHTML = `
+      <h2 class="bk-title">Who</h2>
+      <p class="bk-sub">${esc(s ? s.title : '')} — pick a master, or take the first one free.</p>
+      <div class="pick-list">
+        <button class="pick pick--any${bk.staff === null ? ' is-selected' : ''}" data-bk-staff="">
+          <span class="st-mono st-mono--any">${svg('<circle cx="9" cy="9" r="3"/><circle cx="16.5" cy="10.5" r="2.5"/><path d="M3.5 19c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5M14.5 15.2c.6-.2 1.3-.3 2-.3 2.1 0 3.6 1.2 4.2 3.6"/>')}</span>
+          <span class="pick__text"><b>Any available</b><small>The most open times</small></span>
+          <span class="pick__check">${I.check}</span>
+        </button>
+        ${list.map(st => `
+          <button class="pick${bk.staff === st.id ? ' is-selected' : ''}" data-bk-staff="${esc(st.id)}">
+            ${staffAvatar(st, 200)}
+            <span class="pick__text"><b>${esc(st.name)}</b><small>${esc(st.title || svcDuration(s, st.id) || '')}</small></span>
+            <span class="pick__price">${esc(price(svcPrice(s, st.id)))}</span>
             <span class="pick__check">${I.check}</span>
           </button>`).join('')}
       </div>`;
@@ -2548,18 +2652,21 @@
   function renderBkTime() {
     const s = bkService();
     const builtin = isBuiltin();
-    if (builtin && !bk.cache && !bkx.loadErr) ensureOpenings();
+    // the openings of this service with this master (or anyone)
+    if (builtin && (!bk.cache || bk.cacheKey !== cacheKey(bk.service, bk.staff))) {
+      if (!bkx.loadErr) ensureOpenings(); else bk.cache = null;
+    }
     const loading = builtin && !bk.cache;
     const nDays = builtin ? Math.min(openingsDays(), Math.max(BK_DAYS, (bk.off || 0) + 4)) : BK_DAYS;
     const days = Array.from({ length: nDays }, (_, i) => ({ d: studioDate(i), n: loading ? 1 : openingsFor(i).length }));
     const moving = builtin && bkx.mode === 'reschedule';
-    $('#bk-p1').innerHTML = `
+    $('#bk-p' + ix('time')).innerHTML = `
       <h2 class="bk-title">${moving ? 'Pick a new time' : 'Pick a day & time'}</h2>
       ${builtin && bkx.notice ? `<div class="bk-notice">${I.clock}<span>${esc(bkx.notice)}</span></div>` : ''}
       ${s && !moving ? `
       <button class="bk-chosen" data-bk-step="0">
         <img src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">
-        <span><b>${esc(s.title)}</b><small>${esc([s.duration, price(s.price)].filter(Boolean).join(' · '))}</small></span>
+        <span><b>${esc(s.title)}</b><small>${esc([isTeam() && bk.staff ? 'with ' + firstWord((staffById(bk.staff) || {}).name) : '', svcDuration(s, bk.staff), price(svcPrice(s, bk.staff))].filter(Boolean).join(' · '))}</small></span>
         <em>Change</em>
       </button>` : ''}
       <div class="days${loading ? ' is-loading' : ''}" id="bk-days" role="listbox" aria-label="Day">
@@ -2677,7 +2784,7 @@
 
   function renderBkReview() {
     const s = bkService();
-    const pane = $('#bk-p2');
+    const pane = $('#bk-p' + ix('review'));
     if (!s || bk.min == null) { pane.innerHTML = ''; return; }
     const numeric = typeof s.price === 'number';
     const dep = data.deposit || 0;
@@ -2731,10 +2838,10 @@
     }
     let summary;
     let action;
-    if (bk.step === 0) {
+    if (stepKey(bk.step) === 'service') {
       summary = `<b>${s ? esc(s.title) : 'Choose a service'}</b><span>Step 1 of 3</span>`;
       action = `<button class="btn btn--primary" data-bk-next${s ? '' : ' disabled'}>Next ${I.arrowR}</button>`;
-    } else if (bk.step === 1) {
+    } else if (stepKey(bk.step) === 'time') {
       summary = `<b>${s ? esc(s.title) : ''}</b><span class="num">${bk.min != null ? esc(dayLabel(bk.off, false)) + ' · ' + fmtClock(bk.min) : 'Pick a time'}</span>`;
       action = `<button class="btn btn--primary" data-bk-next${bk.min != null ? '' : ' disabled'}>Review ${I.arrowR}</button>`;
     } else {
@@ -2879,20 +2986,23 @@
 
   function maxStep() {
     if (!bk.service) return 0;
-    if (bk.min == null) return 1;
-    if (isBuiltin()) return bkx.mode === 'reschedule' ? 1 : detailsOk() ? 3 : 2;
-    return 2;
+    if (ix('who') > 0 && bk.staff === undefined) return ix('who');
+    if (bk.min == null) return ix('time');
+    if (isBuiltin()) return bkx.mode === 'reschedule' ? ix('time') : detailsOk() ? ix('review') : ix('details');
+    return ix('review');
   }
 
   /* Render a step's content, show only that pane, sync header + footer */
   function showStep(n) {
     bk.step = n;
-    if (n === 0) renderBkService();
-    if (n === 1) renderBkTime();
+    const k = stepKey(n);
+    if (k === 'service') renderBkService();
+    if (k === 'who') renderBkWho();
+    if (k === 'time') renderBkTime();
     if (isBuiltin()) {
-      if (n === 2) renderBkDetails();
-      if (n === 3) renderBkReviewBuiltin();
-    } else if (n === 2) renderBkReview();
+      if (k === 'details') renderBkDetails();
+      if (k === 'review') renderBkReviewBuiltin();
+    } else if (k === 'review') renderBkReview();
     $$('.bk-pane', Sheet.el()).forEach((p, i) => { p.hidden = i !== n; });
     const pane = $(`#bk-p${n}`);
     pane.scrollTop = 0;
@@ -2908,7 +3018,7 @@
     if (btn.offsetWidth) slidePill(pill, btn.offsetLeft, btn.offsetWidth, !!$('.bk-steps__pill', steps).style.width);
     $('.bk-back', Sheet.el()).classList.toggle('is-visible', n > 0);
     renderBkFoot();
-    if (n === 1) centerDay(false);
+    if (k === 'time') centerDay(false);
     return pane;
   }
 
@@ -2987,7 +3097,15 @@
     paused: 'This studio isn’t taking bookings right now',
     phone_taken: 'Another client already has this phone',
     too_big: 'That’s too much text or too large a photo',
-    forbidden: 'This account can’t change that studio'
+    forbidden: 'This account can’t change that studio',
+    // a salon
+    email_taken: 'That email already has an account — use another one',
+    has_login: 'She already has a sign-in',
+    has_bookings: 'She still has upcoming bookings',
+    team_has_staff: 'Turn off the other masters first',
+    staff_not_found: 'That master isn’t taking bookings',
+    owner_stays: 'The owner stays on the team',
+    invite_failed: 'Couldn’t create her sign-in — try again'
   };
   const errText = e => ERR_COPY[e && e.code] || 'Something went wrong — try again';
 
@@ -3036,6 +3154,7 @@
     if (m.accent) out.brandAccent = m.accent;
     out.bookingEngine = m.booking_engine;
     out.status = m.status || 'active';
+    out.kind = m.kind === 'team' ? 'team' : 'solo';
     out.masterId = m.id;
     // made-up dashboard numbers are for the demo only; real studios have Insights
     if (m.booking_engine === 'builtin') out.ownerDemo = null;
@@ -3053,12 +3172,28 @@
       // her portfolio from the dashboard (Looks) replaces any gallery in settings
       if ((prof.looks || []).length) {
         out.gallery = prof.looks.map(l => ({
-          id: l.id, title: l.title, tag: l.tag || '', serviceId: l.service_id || '', photo: l.photo,
+          id: l.id, title: l.title, tag: l.tag || '', serviceId: l.service_id || '', photo: l.photo, staffId: l.staff_id || '',
           before: l.before_photo || '', isNew: !!l.is_new, popular: !!l.popular
         }));
       }
+      // the masters (a salon): who does what, at her own price / duration
+      out.staff = (prof.staff || []).map(st => ({
+        id: st.id, name: st.name, title: st.title || '', photo: st.photo || '', bio: st.bio || '', color: st.color || '#8E8E93',
+        isOwner: !!st.is_owner,
+        services: (st.services || []).map(x => ({ id: x.id, price: x.price != null ? +x.price : null, duration: x.duration != null ? +x.duration : null }))
+      }));
+      // opening hours = everyone's hours together (overlapping ones merged)
+      const ints = {};
+      (prof.hours || []).forEach(h => { (ints[h.weekday] = ints[h.weekday] || []).push([h.start, h.end]); });
       const byDay = {};
-      (prof.hours || []).forEach(h => { (byDay[h.weekday] = byDay[h.weekday] || []).push(`${h.start}-${h.end}`); });
+      Object.keys(ints).forEach(d => {
+        const merged = [];
+        ints[d].sort((a, z) => a[0].localeCompare(z[0])).forEach(([s, e]) => {
+          const last = merged[merged.length - 1];
+          if (last && s <= last[1]) { if (e > last[1]) last[1] = e; } else merged.push([s, e]);
+        });
+        byDay[d] = merged.map(([s, e]) => `${s}-${e}`);
+      });
       out.hours = {};
       DAY_KEYS.forEach((k, i) => { out.hours[k] = byDay[i] ? byDay[i].join(', ') : 'closed'; });
       out.slots = [];
@@ -3070,21 +3205,24 @@
   /* ---------- Openings (per service, cached for a minute) ---------- */
   const openCache = {};
   const OPEN_TTL = 60000;
+  // per service and master ("*" = any available)
+  const cacheKey = (svcId, staffId) => `${svcId}|${staffId || '*'}`;
+  const dropOpenings = svcId => Object.keys(openCache).forEach(k => { if (k.startsWith(svcId + '|')) delete openCache[k]; });
   function openingsDays() { return Math.min(60, ((data.rules && data.rules.maxDays) || 60) + 1); }
-  function cachedOpenings(svcId) {
-    const c = openCache[svcId];
+  function cachedOpenings(svcId, staffId) {
+    const c = openCache[cacheKey(svcId, staffId)];
     return c && Date.now() - c.at < OPEN_TTL ? c : null;
   }
-  async function loadOpenings(svcId, ignore, force) {
-    if (!force && !ignore) { const c = cachedOpenings(svcId); if (c) return c; }
-    const list = await Backend.openings(SLUG, svcId, dateKey(0), openingsDays(), ignore || null);
+  async function loadOpenings(svcId, ignore, force, staffId) {
+    if (!force && !ignore) { const c = cachedOpenings(svcId, staffId); if (c) return c; }
+    const list = await Backend.openings(SLUG, svcId, dateKey(0), openingsDays(), ignore || null, staffId || null);
     const byOff = {};
     list.forEach(iso => {
       const s = studioSpot(iso);
       (byOff[s.off] = byOff[s.off] || []).push({ min: s.min, iso: new Date(s.ms).toISOString() });
     });
     const c = { at: Date.now(), byOff, ignore: ignore || null };
-    if (!ignore) openCache[svcId] = c;
+    if (!ignore) openCache[cacheKey(svcId, staffId)] = c;
     return c;
   }
   const firstOpenOff = (c, from) => {
@@ -3129,9 +3267,15 @@
   const ME_KEY = 'me';
   const bkx = { details: null, agree: false, busy: false, loadErr: null, notice: '', mode: 'new', token: null, ignore: null, current: null };
 
-  function stepLabels() {
-    return isBuiltin() ? ['Service', 'Time', 'Details', 'Review'] : ['Service', 'Time', 'Review'];
+  // the steps by name: a salon adds "Who" after the service (not when moving a booking — same master)
+  function stepKeys() {
+    if (!isBuiltin()) return ['service', 'time', 'review'];
+    return isTeam() && bkx.mode !== 'reschedule' ? ['service', 'who', 'time', 'details', 'review'] : ['service', 'time', 'details', 'review'];
   }
+  const STEP_LABEL = { service: 'Service', who: 'Who', time: 'Time', details: 'Details', review: 'Review' };
+  function stepLabels() { return stepKeys().map(k => STEP_LABEL[k]); }
+  const ix = k => stepKeys().indexOf(k);
+  const stepKey = n => stepKeys()[n];
   const reviewStep = () => stepLabels().length - 1;
   const detailsOk = () => {
     const d = bkx.details || {};
@@ -3169,33 +3313,37 @@
   function ensureOpenings() {
     const svc = bk.service;
     if (!svc) return;
-    const c = bkx.ignore ? null : cachedOpenings(svc);
+    const staff = bk.staff || null;
+    const key = cacheKey(svc, staff);
+    const c = bkx.ignore ? null : cachedOpenings(svc, staff);
     if (c) {
       bk.cache = c;
+      bk.cacheKey = key;
       // no time picked yet: start on the first day that has openings
       if (bk.min == null && !(c.byOff[bk.off] || []).length) { const f = firstOpenOff(c, 0); if (f != null) bk.off = f; }
       return;
     }
     bk.cache = null;
     bkx.loadErr = null;
-    loadOpenings(svc, bkx.ignore).then(c2 => {
-      if (bk.service !== svc) return;
+    loadOpenings(svc, bkx.ignore, false, staff).then(c2 => {
+      if (bk.service !== svc || (bk.staff || null) !== staff) return;
       bk.cache = c2;
+      bk.cacheKey = key;
       if (!(c2.byOff[bk.off] || []).length) {
         const f = firstOpenOff(c2, 0);
         if (f != null) bk.off = f;
       }
-      if (Sheet.isOpen() && bk.step === 1) { renderBkTime(); springIn($$('#bk-times .time', Sheet.el()), { stagger: 0.02, y: 10, duration: 0.5 }); renderBkFoot(); centerDay(false); }
+      if (Sheet.isOpen() && stepKey(bk.step) === 'time') { renderBkTime(); springIn($$('#bk-times .time', Sheet.el()), { stagger: 0.02, y: 10, duration: 0.5 }); renderBkFoot(); centerDay(false); }
     }).catch(e => {
       bkx.loadErr = e;
-      if (Sheet.isOpen() && bk.step === 1) renderBkTime();
+      if (Sheet.isOpen() && stepKey(bk.step) === 'time') renderBkTime();
     });
   }
   const builtinTimes = off => ((bk.cache && bk.cache.byOff[off]) || []);
 
   function renderBkDetails() {
     const d = bkx.details;
-    const pane = $('#bk-p2');
+    const pane = $('#bk-p' + ix('details'));
     pane.innerHTML = `
       <h2 class="bk-title">Your details</h2>
       <p class="bk-sub">So ${esc(firstName())} knows who’s coming. We never share them.</p>
@@ -3253,8 +3401,9 @@
         </div>
         <div class="bk-row"><span>Date</span><b>${esc(dayLabel(bk.off, true))}</b></div>
         <div class="bk-row"><span>Time</span><b class="num">${fmtClock(bk.min)}</b></div>
-        ${s.duration ? `<div class="bk-row"><span>Duration</span><b>${esc(s.duration)}</b></div>` : ''}
-        <div class="bk-row"><span>Price</span><b class="num">${esc(price(s.price))}</b></div>
+        ${isTeam() ? `<div class="bk-row"><span>With</span><b>${esc(bk.staff ? (staffById(bk.staff) || {}).name || '' : 'The first master free')}</b></div>` : ''}
+        ${svcDuration(s, bk.staff) ? `<div class="bk-row"><span>Duration</span><b>${esc(svcDuration(s, bk.staff))}</b></div>` : ''}
+        <div class="bk-row"><span>Price</span><b class="num">${esc(price(svcPrice(s, bk.staff)))}</b></div>
         ${svcDeposit(s) ? `<div class="bk-row bk-row--accent"><span>Deposit</span><b class="num">${esc(price(svcDeposit(s)))} · after booking</b></div>` : ''}
         <div class="bk-row"><span>Name</span><b>${esc(d.name)}</b></div>
         <div class="bk-row"><span>Phone</span><b class="num">${esc(maskPhone(d.phone))}</b></div>
@@ -3274,17 +3423,22 @@
         action: `<button class="btn btn--primary" data-bk-move${bk.min != null && !bkx.busy ? '' : ' disabled'}>${bkx.busy ? spinner() : 'Move here'}</button>`
       };
     }
-    if (bk.step === 0) return { summary: `<b>${s ? esc(s.title) : 'Choose a service'}</b><span>Step 1 of ${steps}</span>`, action: `<button class="btn btn--primary" data-bk-next${s ? '' : ' disabled'}>Next ${I.arrowR}</button>` };
-    if (bk.step === 1) return {
+    const k = stepKey(bk.step);
+    if (k === 'service') return { summary: `<b>${s ? esc(s.title) : 'Choose a service'}</b><span>Step 1 of ${steps}</span>`, action: `<button class="btn btn--primary" data-bk-next${s ? '' : ' disabled'}>Next ${I.arrowR}</button>` };
+    if (k === 'who') return {
+      summary: `<b>${s ? esc(s.title) : ''}</b><span>${bk.staff === undefined ? 'Choose who' : bk.staff ? esc((staffById(bk.staff) || {}).name || '') : 'Any available'}</span>`,
+      action: `<button class="btn btn--primary" data-bk-next${bk.staff !== undefined ? '' : ' disabled'}>Next ${I.arrowR}</button>`
+    };
+    if (k === 'time') return {
       summary: `<b>${s ? esc(s.title) : ''}</b><span class="num">${bk.min != null ? esc(dayLabel(bk.off, false)) + ' · ' + fmtClock(bk.min) : 'Pick a time'}</span>`,
       action: `<button class="btn btn--primary" data-bk-next${bk.min != null ? '' : ' disabled'}>Next ${I.arrowR}</button>`
     };
-    if (bk.step === 2) return {
+    if (k === 'details') return {
       summary: `<b>${s ? esc(s.title) : ''}</b><span class="num">${esc(dayLabel(bk.off, false))} · ${fmtClock(bk.min)}</span>`,
       action: `<button class="btn btn--primary" data-bk-next${detailsOk() ? '' : ' disabled'}>Review ${I.arrowR}</button>`
     };
     return {
-      summary: `<b class="num">${s ? esc(price(s.price)) : ''}</b><span>${svcDeposit(s) ? esc(price(svcDeposit(s))) + ' deposit after booking' : 'Pay at the studio'}</span>`,
+      summary: `<b class="num">${s ? esc(price(svcPrice(s, bk.staff))) : ''}</b><span>${svcDeposit(s) ? esc(price(svcDeposit(s))) + ' deposit after booking' : 'Pay at the studio'}</span>`,
       action: `<button class="btn btn--primary${bkx.agree ? '' : ' is-off'}" data-bk-confirm${bkx.busy ? ' disabled aria-busy="true"' : ''}${bkx.agree ? '' : ' aria-disabled="true"'}>${bkx.busy ? spinner() : 'Confirm'}</button>`
     };
   }
@@ -3293,7 +3447,7 @@
   // One id per choice (service + time + phone): a retry — after a timeout or a
   // double tap — sends the same id, and the server answers with the same booking
   function requestIdFor(s, d) {
-    const key = [s.id, bk.iso, phoneDigits(d.phone)].join('|');
+    const key = [s.id, bk.iso, phoneDigits(d.phone), bk.staff || '*'].join('|');
     if (bkx.reqKey !== key) {
       bkx.reqKey = key;
       bkx.reqId = (crypto.randomUUID && crypto.randomUUID()) ||
@@ -3313,12 +3467,13 @@
     try {
       const res = await Backend.createBooking(SLUG, {
         serviceId: s.id, startAt: bk.iso, name: d.name.trim(), phone: d.phone, email: (d.email || '').trim(),
-        note: (d.note || '').trim(), requestId: requestIdFor(s, d)
+        note: (d.note || '').trim(), requestId: requestIdFor(s, d), staffId: bk.staff || null
       });
+      if (isTeam() && res.staff_id) store.set('lastStaff', res.staff_id); // "Book again" with her
       if (d.remember) store.set(ME_KEY, { name: d.name.trim(), phone: d.phone, email: (d.email || '').trim(), remember: true });
       else store.remove(ME_KEY);
       saveMine(res);
-      delete openCache[s.id];
+      dropOpenings(s.id);
       done = true;
       bkx.busy = false;
       bkx.reqKey = null;
@@ -3365,11 +3520,11 @@
       haptic([20, 40, 20]);
       toast(ERR_COPY.slot_taken, 'x');
       bkx.notice = 'That time was just taken — here’s what’s still open.';
-      if (bk.service) delete openCache[bk.service];
+      if (bk.service) dropOpenings(bk.service);
       bk.cache = null;
       bk.min = null;
       bk.iso = null;
-      if (Sheet.isOpen()) goStep(1, true);
+      if (Sheet.isOpen()) goStep(ix('time'), true);
       return;
     }
     toast(errText(e), 'x');
@@ -3404,6 +3559,7 @@
             <img src="${esc(b.service_photo ? sized(safeUrl(b.service_photo), 200) : photoSrc(s || { title: b.service_name }, 200))}"${phAttr(s || { title: b.service_name })} alt="">
             <span><b>${esc(b.service_name || (s && s.title) || '')}</b><small>${esc(bookingStatus(b))}</small></span>
           </div>
+          ${b.staff_name ? `<div class="bk-row"><span>With</span><b>${esc(b.staff_name)}</b></div>` : ''}
           <div class="bk-row"><span>Date</span><b>${esc(dayLabel(studioSpot(b.start_at).off, true))}</b></div>
           <div class="bk-row"><span>Time</span><b class="num">${fmtClock(studioSpot(b.start_at).min)}</b></div>
           ${b.price != null ? `<div class="bk-row"><span>Price</span><b class="num">${esc(price(+b.price))}</b></div>` : ''}
@@ -3482,7 +3638,7 @@
       price: b.price, late_cancel: !!b.late_cancel, updated_at: b.updated_at,
       deposit: +b.deposit || 0, deposit_status: b.deposit_status || 'none', deposit_due_at: b.deposit_due_at || null,
       fill_weeks: b.fill_weeks || null, completed_at: b.completed_at || null, cancel_reason: b.cancel_reason || null,
-      client_visits: +b.client_visits || 0
+      client_visits: +b.client_visits || 0, staff_id: b.staff_id || null, staff_name: b.staff_name || null
     };
   }
   // opts.mine: this device made the change (so it's not news to her)
@@ -3556,7 +3712,7 @@
         <div class="mybk__top"><span class="eyebrow">Your appointment</span><span class="bstat bstat--${dep ? 'deposit' : b.status}">${dep ? 'Awaiting deposit' : b.status === 'pending' ? 'Pending' : 'Confirmed'}</span></div>
         <div class="mybk__main">
           <img src="${esc(photoSrc(b, 200))}"${phAttr(b)} alt="">
-          <span><b>${esc(b.service_name)}</b><span class="num">${esc(whenText(b.start_at))}</span><small class="mybk__count" data-countdown="${esc(b.start_at)}">${countdown(b.start_at)}</small></span>
+          <span><b>${esc(b.service_name)}</b><span class="num">${esc(whenText(b.start_at))}${b.staff_name ? ` · with ${esc(firstWord(b.staff_name))}` : ''}</span><small class="mybk__count" data-countdown="${esc(b.start_at)}">${countdown(b.start_at)}</small></span>
         </div>
         <div class="mybk__actions">
           ${dep ? `<button class="btn btn--primary btn--sm" data-manage="${esc(b.token)}">Pay ${esc(price(+b.deposit))} deposit</button>` : `<button class="btn btn--soft btn--sm" data-mybk-move="${esc(b.token)}">Reschedule</button>`}
@@ -3592,7 +3748,7 @@
           <div class="after__main"><span class="after__em" aria-hidden="true">✨</span><span><b>How was your visit?</b><small>${esc(done.service_name)} · ${esc(whenText(done.start_at))}. A quick review means the world to ${esc(firstName())}.</small></span></div>
           <div class="mybk__actions">
             ${rv ? `<a class="btn btn--primary btn--sm" href="${esc(safeUrl(rv.url))}" ${ext} data-after-review="${esc(done.token)}">${esc(rv.label)}</a>` : ''}
-            ${svc ? `<button class="btn btn--soft btn--sm" data-book data-book-service="${esc(svc.id)}">Book again</button>` : ''}
+            ${svc ? `<button class="btn btn--soft btn--sm" data-book data-book-service="${esc(svc.id)}"${sameStaffAttr(done)}>Book again</button>` : ''}
           </div>
         </div>`;
     }
@@ -3669,6 +3825,7 @@
       ${b.status === 'pending' && !depositDue(b) ? `<div class="sheet__note">${I.clock}<span>${esc(firstName())} hasn’t confirmed yet — you’ll see it here as soon as it’s confirmed.</span></div>` : ''}
       <div class="card bk-sum">
         <div class="bk-row"><span>Name</span><b>${esc(b.client_name || '')}</b></div>
+        ${b.staff_name ? `<div class="bk-row"><span>With</span><b>${esc(b.staff_name)}</b></div>` : ''}
         ${b.duration_min ? `<div class="bk-row"><span>Duration</span><b>${esc(fmtDuration(b.duration_min))}</b></div>` : ''}
         ${b.price != null ? `<div class="bk-row"><span>Price</span><b class="num">${esc(price(+b.price))}</b></div>` : ''}
         ${+b.deposit > 0 && b.deposit_status !== 'none' ? `<div class="bk-row"><span>Deposit</span><b class="num">${esc(price(+b.deposit))} · ${esc({ pending: 'not paid yet', paid: 'received ✓', waived: 'not needed', expired: 'not received' }[b.deposit_status] || '')}</b></div>` : ''}
@@ -3696,7 +3853,7 @@
         <a class="btn btn--soft" href="${esc(directionsUrl())}" ${ext}>${I.pin}Directions</a>
         ${data.phone ? `<a class="btn btn--soft" href="${esc(telUrl())}">${I.phone}Call</a>` : ''}
       </div>
-      ${!ACTIVE.includes(b.status) ? `<button class="btn btn--primary btn--block" data-book data-book-service="${esc(b.service_id || '')}">Book again</button>` : ''}
+      ${!ACTIVE.includes(b.status) ? `<button class="btn btn--primary btn--block" data-book data-book-service="${esc(b.service_id || '')}"${sameStaffAttr(b)}>Book again</button>` : ''}
       <button class="mg__link" data-copy-manage="${esc(b.manage_token)}">${svg('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>')}Copy the link to this booking</button>`;
     if (animate) springIn($$('.mg > *', Sheet.el()), { stagger: 0.04, y: 12, duration: 0.5 });
   }
@@ -3751,7 +3908,7 @@
     const row = b => `
       <button class="row row--link mybk-row" data-manage="${esc(b.token)}">
         <img src="${esc(photoSrc(b, 120))}"${phAttr(b)} alt="">
-        <span class="row__label">${esc(b.service_name)}<span class="row__sub num">${esc(whenText(b.start_at))}</span></span>
+        <span class="row__label">${esc(b.service_name)}<span class="row__sub num">${esc(whenText(b.start_at))}${b.staff_name ? ` · with ${esc(firstWord(b.staff_name))}` : ''}</span></span>
         <span class="bstat bstat--${depositDue(b) ? 'deposit' : b.status}">${esc(depositDue(b) ? 'Awaiting deposit' : b.status === 'confirmed' ? 'Confirmed' : b.status === 'pending' ? 'Pending' : statusText(b.status))}</span>
         <span class="row__chev">${I.chevR}</span>
       </button>`;
@@ -4824,7 +4981,9 @@
     const l = curLook();
     if (!l) return;
     haptic(10);
-    lv.after = () => openBooking({ service: l.serviceId || null, look: l.id });
+    // a salon: the look's own master (if she does that service)
+    const st = isTeam() && l.staffId ? staffById(l.staffId) : null;
+    lv.after = () => openBooking({ service: l.serviceId || null, look: l.id, staff: st && (!l.serviceId || staffSvc(st, l.serviceId)) ? st.id : undefined });
     popOverlay();
   }
 
@@ -5435,11 +5594,29 @@
       // Booking sheet
       if ((el = t.closest('[data-bk-svc]'))) {
         bk.service = el.dataset.bkSvc;
+        // a master who doesn't do this one: choose again
+        if (bk.staff && !staffSvc(staffById(bk.staff), bk.service)) bk.staff = undefined;
         rememberService(bk.service);
         $$('[data-bk-svc]', Sheet.el()).forEach(b => b.classList.toggle('is-selected', b === el));
         popIn($('.pick__check', el), { from: 0.4 });
         renderBkFoot();
-        setTimeout(() => { if (Sheet.isOpen() && bk.step === 0) goStep(1, true); }, 260);
+        setTimeout(() => { if (Sheet.isOpen() && stepKey(bk.step) === 'service') goStep(bk.step + 1, true); }, 260);
+        return;
+      }
+      if ((el = t.closest('[data-bk-staff]'))) {
+        bk.staff = el.dataset.bkStaff || null; // the chosen time stays if she is free then
+        $$('[data-bk-staff]', Sheet.el()).forEach(b => b.classList.toggle('is-selected', b === el));
+        popIn($('.pick__check', el), { from: 0.4 });
+        haptic();
+        renderBkFoot();
+        setTimeout(() => { if (Sheet.isOpen() && stepKey(bk.step) === 'who') goStep(bk.step + 1, true); }, 260);
+        return;
+      }
+      if ((el = t.closest('[data-team-member]'))) { openStaff(el.dataset.teamMember); return; }
+      if ((el = t.closest('[data-team-look]'))) {
+        const i = +el.dataset.teamLook;
+        Sheet.close();
+        setTimeout(() => openLook(data.gallery, i), 380);
         return;
       }
       if ((el = t.closest('[data-bk-day]'))) {
@@ -5554,8 +5731,9 @@
       }
       if ((el = t.closest('[data-book]')) && Sheet.isOpen() && t.closest('.mg')) {
         const svcId = el.dataset.bookService;
+        const staff = el.hasAttribute('data-book-staff') ? (el.dataset.bookStaff || null) : undefined;
         Sheet.close();
-        setTimeout(() => openBooking({ service: svcId || null }), 380);
+        setTimeout(() => openBooking({ service: svcId || null, staff }), 380);
         return;
       }
       if ((el = t.closest('[data-manage]')) && !t.closest('[data-book]')) {
@@ -5565,7 +5743,7 @@
       }
       if ((el = t.closest('[data-book]'))) {
         e.preventDefault();
-        openBooking({ slot: el.dataset.slot, service: el.dataset.bookService });
+        openBooking({ slot: el.dataset.slot, service: el.dataset.bookService, staff: el.hasAttribute('data-book-staff') ? (el.dataset.bookStaff || null) : undefined });
         return;
       }
       if ((el = t.closest('[data-open-service]'))) {
@@ -6176,11 +6354,14 @@
   function bookAgainHTML() {
     const s = data.services.find(x => x.id === store.get('lastService'));
     if (!s) return '';
+    // a salon: the same master again (if she still does it)
+    const st = isTeam() ? staffById(store.get('lastStaff')) : null;
+    const withHer = st && staffSvc(st, s.id) ? st : null;
     return `
       <div class="again card">
         <img class="again__photo" src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">
-        <span class="again__text"><span class="eyebrow">Book again</span><b>${esc(s.title)} · <span class="num">${esc(price(s.price))}</span></b></span>
-        <button class="btn btn--primary btn--sm" data-book data-book-service="${esc(s.id)}">Book</button>
+        <span class="again__text"><span class="eyebrow">Book again${withHer ? ` with ${esc(firstWord(withHer.name))}` : ''}</span><b>${esc(s.title)} · <span class="num">${esc(price(withHer ? svcPrice(s, withHer.id) : s.price))}</span></b></span>
+        <button class="btn btn--primary btn--sm" data-book data-book-service="${esc(s.id)}"${withHer ? ` data-book-staff="${esc(withHer.id)}"` : ''}>Book</button>
       </div>`;
   }
   function syncBookAgain() {

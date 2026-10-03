@@ -20,7 +20,9 @@
     known: null, self: new Set(), live: false, unsub: null, poll: 0,
     badges: { today: 0, calendar: 0, requests: 0 }, queue: [], audio: null,
     showCx: (() => { try { return localStorage.getItem('studio-app:cab:showCancelled') !== '0'; } catch (e) { return true; } })(),
-    email: '', busy: false, hrs: null, hrsDirty: false
+    email: '', busy: false, hrs: null, hrsDirty: false,
+    // a salon: the masters, each one's hours, the calendar / hours filter
+    team: null, scheds: {}, calStaff: null, hrsStaff: null, hsched: null, insStaff: null
   };
 
   const TABS = [
@@ -30,6 +32,9 @@
     { id: 'insights', label: 'Insights', icon: '<path d="M5 19.5V12M10 19.5V5.5M15 19.5v-5M20 19.5V9"/>' },
     { id: 'studio', label: 'Studio', icon: '<path d="M4 10.5 12 4l8 6.5V20H4z"/><path d="M9.5 20v-5.5h5V20"/>' }
   ];
+  // a master in a salon: her own day, clients, numbers and hours — no Studio
+  const STAFF_TABS = TABS.slice(0, 4).concat({ id: 'hours', label: 'My hours', icon: '<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4M12 13.5V16l1.8 1"/>' });
+  const tabBtn = t => `<button class="cab__tab" data-cab-tab="${t.id}"><span class="cab__tabic">${icon(t.icon)}<i class="cab__badge" data-badge="${t.id}" hidden></i></span><span>${t.label}</span></button>`;
   const ACTIVE = ['pending', 'confirmed'];
 
   /* ---------- small helpers ---------- */
@@ -60,6 +65,24 @@
   };
   const statusLabel = s => ({ pending: 'Request', confirmed: 'Confirmed', completed: 'Completed', no_show: 'No-show', cancelled_client: 'Cancelled by client', cancelled_master: 'Cancelled by you' }[s] || s);
 
+  /* ---------- a salon: the owner sees every master, a master only herself ---------- */
+  const isStaff = () => !!S.studio && S.studio.role === 'staff';
+  const isTeam = () => !!S.studio && S.studio.kind === 'team';
+  const teamView = () => isTeam() && !isStaff(); // the owner (or the admin, looking)
+  const ownStaff = () => (S.studio && S.studio.staff_id) || null;
+  const crew = () => (S.team || []).filter(x => x.active);
+  const crewById = id => (S.team || []).find(x => x.id === id) || null;
+  const firstOf = n => String(n || '').trim().split(/\s+/)[0] || '';
+  const monoOf = n => String(n || '?').trim().split(/\s+/).slice(0, 2).map(w => w.charAt(0)).join('').toUpperCase();
+  const crewAv = st => (st && st.photo
+    ? `<img class="crew-av" src="${esc(K.sized(K.safeUrl(st.photo), 120))}" alt="">`
+    : `<span class="crew-av crew-av--mono" style="--c:${esc((st && st.color) || '#8E8E93')}">${esc(monoOf(st && st.name))}</span>`);
+  const crewDot = color => `<i class="crew-dot" style="--c:${esc(color || '#8E8E93')}"></i>`;
+  // "Jasmine" on a booking (the owner's view of a salon)
+  const crewTag = b => (teamView() && b && b.staff_name ? `<span class="crew-tag" style="--c:${esc(b.staff_color || '#8E8E93')}">${esc(firstOf(b.staff_name))}</span>` : '');
+  const CREW_COLORS = ['#AF52DE', '#FF9500', '#34C759', '#007AFF', '#FF2D55', '#5AC8FA', '#A2845E', '#FF6B6B'];
+  const doesSvc = (st, svcId) => !!st && (st.services || []).some(x => x.id === svcId);
+
   /* =========================================================
      Open / close
      ========================================================= */
@@ -86,7 +109,7 @@
       <div class="cab__banner" id="cab-banner" role="status" aria-live="polite"></div>
       <main class="cab__main" id="cab-main"></main>
       <nav class="cab__tabs" id="cab-tabs" hidden>
-        ${TABS.map(t => `<button class="cab__tab" data-cab-tab="${t.id}"><span class="cab__tabic">${icon(t.icon)}<i class="cab__badge" data-badge="${t.id}" hidden></i></span><span>${t.label}</span></button>`).join('')}
+        ${TABS.map(tabBtn).join('')}
       </nav>`;
     (document.getElementById('shell') || document.body).appendChild(root);
     document.addEventListener('click', onClick);
@@ -184,7 +207,7 @@
     try {
       K.store.set('cab', {
         uid: S.session.user && S.session.user.id, at: Date.now(), studio: S.studio, sched: S.sched,
-        from: S.knownFrom, to: S.knownTo, known: [...S.known.values()]
+        from: S.knownFrom, to: S.knownTo, known: [...S.known.values()], team: S.team, scheds: S.scheds
       });
     } catch (e) { /* storage full: next time loads from the network */ }
   }
@@ -194,6 +217,8 @@
     S.studio = c.studio;
     S.readonly = c.studio.mine === false;
     S.sched = c.sched || { hours: [], time_off: [], rules: {} };
+    S.team = c.team || null;
+    S.scheds = c.scheds || {};
     applyBookings(c.known || [], c.from, c.to, true);
     S.lastSync = Date.now(); // enter() is fetching the fresh copy right now
     showChrome();
@@ -201,7 +226,15 @@
     return true;
   }
   function showChrome() {
-    $('#cab-tabs').hidden = false;
+    // the tabs follow the role: a master in a salon has no Studio tab
+    const nav = $('#cab-tabs');
+    const role = isStaff() ? 'staff' : 'owner';
+    if (nav.dataset.role !== role) {
+      nav.dataset.role = role;
+      nav.innerHTML = (isStaff() ? STAFF_TABS : TABS).map(tabBtn).join('');
+      paintBadges();
+    }
+    nav.hidden = false;
     $('[data-cab-new]').hidden = false;
     $('[data-cab-menu]').hidden = false;
   }
@@ -249,7 +282,9 @@
         </div>`;
       return;
     }
+    if (!S.studio || S.studio.id !== studio.id || S.studio.role !== studio.role) { S.team = null; S.scheds = {}; S.calStaff = null; S.hrsStaff = null; S.hsched = null; S.insStaff = null; }
     S.studio = studio;
+    if (isStaff() && !STAFF_TABS.some(t => t.id === S.tab) && S.tab !== 'requests') S.tab = 'today';
     if (studio.id !== guess) {
       [sched, books] = await Promise.all([K.Backend.owner.schedule(studio.id).catch(() => null), windowBookings(studio.id, w).catch(() => null)]);
     }
@@ -524,13 +559,43 @@
   const MEM = {};
   const memLoad = async (k, f) => (MEM[k] = await f());
   const loadSched = async () => { S.sched = await K.Backend.owner.schedule(S.studio.id); saveLocal(); };
+  // a salon (owner): the masters and each one's hours — at most once a minute unless forced
+  async function loadTeam(force, evenSolo) {
+    if (isStaff() || !S.studio || !(isTeam() || evenSolo)) return;
+    if (S.team && !force && Date.now() - (S.teamAt || 0) < 60000) return;
+    const team = await K.Backend.owner.staff(S.studio.id);
+    const scheds = {};
+    await Promise.all(team.filter(x => x.active).map(x => K.Backend.owner.schedule(S.studio.id, x.id).then(r => { scheds[x.id] = r; }, () => null)));
+    S.team = team;
+    S.scheds = scheds;
+    S.teamAt = Date.now();
+    saveLocal();
+  }
+  // the hours page: whose (the owner may pick any master)
+  const hrsFor = () => S.hrsStaff || ownStaff();
+  async function loadHrs() {
+    const r = await K.Backend.owner.schedule(S.studio.id, S.hrsStaff || null);
+    if (!S.hrsStaff || S.hrsStaff === ownStaff()) { S.sched = r; saveLocal(); }
+    if (S.hrsStaff) S.scheds[S.hrsStaff] = r;
+    S.hsched = r;
+  }
+  function hrsSched() {
+    if (S.hsched && S.hsched.staff_id && S.hsched.staff_id === hrsFor()) return S.hsched;
+    if (!S.hrsStaff || S.hrsStaff === ownStaff()) return S.sched;
+    return S.scheds[S.hrsStaff] || null;
+  }
+  const insKey = () => 'ins:' + (S.insPer || 'week') + ':' + (S.insStaff || '');
   const knownFresh = () => (S.known && Date.now() - (S.lastSync || 0) < 30000 ? null : syncChanges(true));
   const LOAD = {
-    today: () => Promise.all([knownFresh(), loadSetup()]),
+    today: () => Promise.all([knownFresh(), isStaff() ? null : loadSetup(), loadTeam().catch(() => null)]),
     requests: () => knownFresh(),
-    calendar: () => loadCalendar(),
+    calendar: () => Promise.all([loadCalendar(), loadTeam().catch(() => null)]),
     clients: () => memLoad('cl:' + S.q, () => K.Backend.owner.clients(S.studio.id, S.q)),
-    insights: () => memLoad('ins:' + (S.insPer || 'week'), () => K.Backend.owner.insights(S.studio.id, S.insPer || 'week')),
+    insights: () => Promise.all([
+      memLoad(insKey(), () => K.Backend.owner.insights(S.studio.id, S.insPer || 'week', S.insStaff)),
+      teamView() && !S.insStaff ? loadPayouts() : null
+    ]),
+    team: () => Promise.all([loadTeam(true, true), loadServices(true)]),
     studio: () => Promise.all([loadProfile(true), loadServices(true), loadLooks(true)]),
     profile: () => loadProfile(true),
     style: () => loadProfile(true),
@@ -538,25 +603,28 @@
     faq: () => loadProfile(true),
     promo: () => loadProfile(true),
     loyalty: () => loadProfile(true),
-    services: () => Promise.all([loadServices(true), loadProfile(true)]),
+    services: () => Promise.all([loadServices(true), loadProfile(true), loadTeam().catch(() => null)]),
     looks: () => Promise.all([loadLooks(true), loadServices(true)]),
     payments: () => Promise.all([loadProfile(true), loadSched(), loadServices(true)]),
-    hours: () => (S.hrsDirty ? null : loadSched())
+    hours: () => (S.hrsDirty ? null : Promise.all([loadHrs(), loadTeam().catch(() => null)]))
   };
   const RENDER = {
     today: () => todayHTML(), calendar: () => calendarHTML(), requests: () => requestsHTML(), clients: () => clientsHTML(),
     hours: () => hoursHTML(), studio: () => studioHTML(), insights: () => insightsHTML(), payments: () => paymentsHTML(),
     profile: () => profileHTML(), style: () => styleHTML(), services: () => servicesHTML(), looks: () => looksHTML(),
-    texts: () => textsHTML(), faq: () => faqHTML(), promo: () => promoHTML(), loyalty: () => loyaltyEditHTML()
+    texts: () => textsHTML(), faq: () => faqHTML(), promo: () => promoHTML(), loyalty: () => loyaltyEditHTML(),
+    team: () => teamHTML()
   };
   const EDITORS = new Set(['profile', 'style', 'texts', 'faq', 'payments', 'hours', 'promo', 'loyalty']);
 
   async function go(tab, initial) {
+    // a master in a salon: only her own tabs
+    if (isStaff() && !STAFF_TABS.some(t => t.id === tab) && tab !== 'requests') tab = 'today';
     S.tab = tab;
     S.dirty = false;
     if (tab === 'today' || tab === 'calendar') S.badges[tab] = 0;
     paintBadges();
-    $$('.cab__tab').forEach(b => b.classList.toggle('is-active', b.dataset.cabTab === (PARENT[tab] || tab)));
+    $$('.cab__tab').forEach(b => b.classList.toggle('is-active', b.dataset.cabTab === (isStaff() ? tab : PARENT[tab] || tab)));
     if (S2.edit && !['service', 'look', 'formula'].includes(S2.edit.kind)) cleanupUnsaved();
     const main = $('#cab-main');
     main.innerHTML = `<div class="cab__view" data-view="${tab}"></div>`;
@@ -644,8 +712,12 @@
     const revenue = counted.reduce((s, b) => s + (+b.price || 0), 0);
     const now = Date.now();
     const next = live.filter(b => isActive(b) && Date.parse(b.end_at) > now).sort((a, b) => Date.parse(a.start_at) - Date.parse(b.start_at))[0];
-    const free = freeWindows(0, list);
-    const freeMin = free.reduce((s, w) => s + (w.e - w.s), 0);
+    // a salon (owner): free time of every master; the day as one list with the master on each
+    const team = teamView() && S.team;
+    const free = team ? [] : freeWindows(0, list);
+    const freeMin = team
+      ? crew().reduce((s, st) => s + freeWindows(0, list.filter(b => b.staff_id === st.id), S.scheds[st.id]).reduce((x, w) => x + (w.e - w.s), 0), 0)
+      : free.reduce((s, w) => s + (w.e - w.s), 0);
     const d = K.studioDate(0);
     return `
       <header class="cab-h"><span class="eyebrow">${K.DAY_NAMES[d.dow]}, ${K.MONTHS[d.month]} ${d.day}</span><h1>Today</h1></header>
@@ -660,8 +732,8 @@
       ${next ? nextClientHTML(next) : `<div class="card cab-next cab-next--none"><b>${live.length ? 'All done for today' : 'No clients today'}</b><span>${free.length ? 'Free windows are below — tap one to book a client.' : 'Enjoy the quiet.'}</span></div>`}
       ${depositsWaitingHTML()}
       ${S.pending.length ? `<button class="cab-req card" data-cab-tab="requests">${icon('<path d="M4 6.5h16v11H4z"/><path d="m4 7 8 6 8-6"/>')}<span><b>${S.pending.length} request${S.pending.length > 1 ? 's' : ''} waiting</b><small>Approve or decline</small></span>${K.I.chevR}</button>` : ''}
-      ${tlHead('Timeline')}
-      ${timelineHTML(0, list)}
+      ${tlHead(team ? 'Everyone today' : 'Timeline')}
+      ${team ? crewListHTML(list) : timelineHTML(0, list)}
       ${free.length ? `
       <div class="group-label">Free windows</div>
       <div class="cab-free">${free.map(w => `<button class="chip" data-cab-new-at="0:${w.s}">${K.fmtClock(w.s)} – ${K.fmtClock(w.e)}</button>`).join('')}</div>` : ''}`;
@@ -673,7 +745,7 @@
       <section class="card cab-next" data-cab-b="${esc(b.id)}" role="button" tabindex="0">
         <div class="cab-next__top"><span class="eyebrow">${started ? 'In the chair now' : 'Next client'}</span><span class="cab-next__in">${started ? 'until ' + K.fmtClock(spot(b.end_at).min) : K.countdown(b.start_at)}</span></div>
         <h2>${esc(b.client_name || 'Client')}${tagBadges(b.client_tags, b.client_no_shows)}</h2>
-        <p class="num">${esc(b.service_name)} · ${timeRange(b)}</p>
+        <p class="num">${esc(b.service_name)} · ${timeRange(b)}${teamView() && b.staff_name ? ` · with ${esc(firstOf(b.staff_name))}` : ''}</p>
         ${b.deposit_status === 'pending' ? `<span class="bstat bstat--deposit">Deposit ${money(b.deposit)} not received</span>` : ''}
         ${b.last_formula ? `<p class="cab-last num">${icon(LASH)}<span>Last time: <b>${esc(formulaLine(b.last_formula))}</b></span></p>` : ''}
         ${b.client_note ? `<p class="cab-next__note">“${esc(b.client_note)}”</p>` : ''}
@@ -685,12 +757,26 @@
       </section>`;
   }
 
-  /* open working time not taken by bookings or time off */
-  function freeWindows(off, list) {
+  /* the day of a salon (owner): everyone's bookings in one list, the master on each */
+  function crewListHTML(list) {
+    const rows = list.filter(b => S.showCx || !b.status.startsWith('cancelled'));
+    if (!rows.length) return '<p class="cab-muted">No bookings today.</p>';
+    return `<div class="list crew-list">${rows.map(b => `
+      <button class="row row--link crew-row${b.status.startsWith('cancelled') ? ' is-cx' : ''}" data-cab-b="${esc(b.id)}">
+        <span class="crew-row__time num">${K.fmtClock(spot(b.start_at).min)}</span>
+        <span class="row__label">${esc(b.client_name || 'Client')}<span class="row__sub">${esc(b.service_name)}${b.status === 'pending' ? ' · request' : b.status.startsWith('cancelled') ? ' · cancelled' : b.status === 'no_show' ? ' · no-show' : ''}</span></span>
+        ${crewTag(b)}
+        <span class="row__chev">${K.I.chevR}</span>
+      </button>`).join('')}</div>`;
+  }
+
+  /* open working time not taken by bookings or time off (one master's schedule; default: mine) */
+  function freeWindows(off, list, sched) {
+    const sc = sched || S.sched || {};
     const dow = K.studioDate(off).dow;
-    let wins = (S.sched.hours || []).filter(h => h.weekday === dow).map(h => ({ s: minOf(h.start), e: minOf(h.end) }));
+    let wins = (sc.hours || []).filter(h => h.weekday === dow).map(h => ({ s: minOf(h.start), e: minOf(h.end) }));
     const busy = list.filter(isActive).map(b => ({ s: spot(b.start_at).min, e: spot(b.end_at).min }))
-      .concat(timeOffOn(off));
+      .concat(timeOffOn(off, sc));
     if (off === 0) {
       const nowMin = K.studioSpot(Date.now()).min;
       busy.push({ s: 0, e: Math.ceil(nowMin / 15) * 15 });
@@ -700,10 +786,10 @@
     });
     return wins.filter(w => w.e - w.s >= 30);
   }
-  function timeOffOn(off) {
+  function timeOffOn(off, sched) {
     const start = Date.parse(dayStartIso(off));
     const end = Date.parse(dayStartIso(off + 1));
-    return (S.sched.time_off || []).filter(t => Date.parse(t.start_at) < end && Date.parse(t.end_at) > start).map(t => ({
+    return (((sched || S.sched || {}).time_off) || []).filter(t => Date.parse(t.start_at) < end && Date.parse(t.end_at) > start).map(t => ({
       s: Date.parse(t.start_at) <= start ? 0 : spot(t.start_at).min,
       e: Date.parse(t.end_at) >= end ? 24 * 60 : spot(t.end_at).min,
       reason: t.reason
@@ -712,9 +798,12 @@
 
   /* ---------- Timeline (Today + Calendar day) ---------- */
   const PX = 1.25; // px per minute
-  function timelineHTML(off, list) {
+  // o: { sched (whose hours; default mine), staff (a new booking here is hers), from / to (a shared scale), bare (a column) }
+  function timelineHTML(off, list, o) {
+    o = o || {};
+    const sc = o.sched || S.sched || {};
     const dow = K.studioDate(off).dow;
-    const hours = (S.sched.hours || []).filter(h => h.weekday === dow).map(h => ({ s: minOf(h.start), e: minOf(h.end) }));
+    const hours = (sc.hours || []).filter(h => h.weekday === dow).map(h => ({ s: minOf(h.start), e: minOf(h.end) }));
     const span = b => ({ b, s: spot(b.start_at).min, e: Math.max(spot(b.start_at).min + 15, spot(b.end_at).off > spot(b.start_at).off ? 24 * 60 : spot(b.end_at).min) });
     const items = list.filter(b => !b.status.startsWith('cancelled')).map(span);
     // cancelled ones stay visible (faded); if a new booking took the time, they step aside
@@ -734,17 +823,17 @@
       if (c) { cluster.push(c); end = Math.max(end, c.e); }
     }
     const cxPos = c => { const base = c.side ? 50 : 0; const w = (100 - base) / (c.lanes || 1); const l = base + w * (c.lane || 0); return `left:calc(${l.toFixed(2)}% + 4px);right:calc(${(100 - l - w).toFixed(2)}% + 4px);`; };
-    const offs = timeOffOn(off);
-    let from = Math.min(9 * 60, ...hours.map(h => h.s), ...items.map(i => i.s));
-    let to = Math.max(18 * 60, ...hours.map(h => h.e), ...items.map(i => i.e));
+    const offs = timeOffOn(off, sc);
+    let from = o.from != null ? o.from : Math.min(9 * 60, ...hours.map(h => h.s), ...items.map(i => i.s));
+    let to = o.to != null ? o.to : Math.max(18 * 60, ...hours.map(h => h.e), ...items.map(i => i.e));
     from = Math.floor(from / 60) * 60;
     to = Math.min(24 * 60, Math.ceil(to / 60) * 60);
     const y = m => ((m - from) * PX).toFixed(1);
     const lines = [];
-    for (let m = from; m <= to; m += 60) lines.push(`<div class="tl__h" style="top:${y(m)}px"><span>${m < 24 * 60 ? K.fmtTime(m) : ''}</span></div>`);
+    for (let m = from; m <= to; m += 60) lines.push(`<div class="tl__h" style="top:${y(m)}px">${o.bare ? '' : `<span>${m < 24 * 60 ? K.fmtTime(m) : ''}</span>`}</div>`);
     const nowMin = off === 0 ? K.studioSpot(Date.now()).min : -1;
     return `
-      <div class="tl" style="height:${((to - from) * PX).toFixed(0)}px" data-tl="${off}" data-from="${from}">
+      <div class="tl${o.bare ? ' tl--col' : ''}" style="height:${((to - from) * PX).toFixed(0)}px" data-tl="${off}" data-from="${from}"${o.staff ? ` data-staff="${esc(o.staff)}"` : ''}>
         ${hours.map(h => `<i class="tl__open" style="top:${y(h.s)}px;height:${((h.e - h.s) * PX).toFixed(1)}px"></i>`).join('')}
         ${lines.join('')}
         ${offs.map(o => `<div class="tl__off" style="top:${y(Math.max(from, o.s))}px;height:${((Math.min(to, o.e) - Math.max(from, o.s)) * PX).toFixed(1)}px"><span>${esc(o.reason || 'Time off')}</span></div>`).join('')}
@@ -760,7 +849,37 @@
           </button>`; }).join('')}
         ${nowMin >= from && nowMin <= to ? `<i class="tl__now" style="top:${y(nowMin)}px"></i>` : ''}
       </div>
-      ${!items.length && !hours.length ? '<p class="cab-muted">Closed this day.</p>' : ''}`;
+      ${!items.length && !hours.length && !o.bare ? '<p class="cab-muted">Closed this day.</p>' : ''}`;
+  }
+
+  /* A salon's day (owner): a column per master, one time scale, scrolls sideways on a phone */
+  function crewDayHTML(off, list) {
+    const cols = crew();
+    const dow = K.studioDate(off).dow;
+    let from = 9 * 60;
+    let to = 18 * 60;
+    cols.forEach(st => ((S.scheds[st.id] || {}).hours || []).filter(h => h.weekday === dow).forEach(h => { from = Math.min(from, minOf(h.start)); to = Math.max(to, minOf(h.end)); }));
+    list.forEach(b => { if (S.showCx || !b.status.startsWith('cancelled')) { from = Math.min(from, spot(b.start_at).min); to = Math.max(to, spot(b.end_at).off > spot(b.start_at).off ? 24 * 60 : spot(b.end_at).min); } });
+    from = Math.floor(from / 60) * 60;
+    to = Math.min(24 * 60, Math.ceil(to / 60) * 60);
+    const marks = [];
+    for (let m = from; m < to; m += 60) marks.push(`<span style="top:${((m - from) * PX).toFixed(1)}px">${K.fmtTime(m)}</span>`);
+    return `
+      <div class="crew-day">
+        <div class="crew-day__axis" style="height:${((to - from) * PX).toFixed(0)}px">${marks.join('')}</div>
+        ${cols.map(st => `
+        <div class="crew-day__col">
+          <button class="crew-day__head" data-crew-cal="${esc(st.id)}" style="--c:${esc(st.color || '#8E8E93')}">${crewAv(st)}<b>${esc(firstOf(st.name))}</b></button>
+          ${timelineHTML(off, list.filter(b => b.staff_id === st.id), { sched: S.scheds[st.id] || { hours: [], time_off: [] }, staff: st.id, from, to, bare: true })}
+        </div>`).join('')}
+      </div>`;
+  }
+  // All · Jasmine · Mia … (the owner's calendar)
+  function crewChipsHTML(attr, sel) {
+    return `<div class="crew-chips" role="radiogroup">
+      <button class="chip${sel ? '' : ' is-active'}" ${attr}="" role="radio" aria-checked="${!sel}">All</button>
+      ${crew().map(st => `<button class="chip${sel === st.id ? ' is-active' : ''}" ${attr}="${esc(st.id)}" role="radio" aria-checked="${sel === st.id}">${crewDot(st.color)}${esc(firstOf(st.name))}</button>`).join('')}
+    </div>`;
   }
 
   // section title + the "Show cancelled" switch
@@ -774,10 +893,16 @@
     const seg = `<div class="segmented cab-seg" role="radiogroup" style="--n:2;--idx:${S.cal === 'week' ? 1 : 0}"><i class="segmented__thumb"></i>
       <button role="radio" data-cab-cal="day" aria-checked="${S.cal === 'day'}">Day</button>
       <button role="radio" data-cab-cal="week" aria-checked="${S.cal === 'week'}">Week</button></div>`;
+    // a salon (owner): everyone side by side, or one master (chips)
+    const team = teamView() && S.team && crew().length > 0;
+    if (team && S.calStaff && !crewById(S.calStaff)) S.calStaff = null;
+    const who = team ? S.calStaff : null;
+    const mine = l => (who ? l.filter(b => b.staff_id === who) : l);
+    const chips = team ? crewChipsHTML('data-crew-cal', who) : '';
     if (S.cal === 'week') {
       const d0 = K.studioDate(S.day);
       const start = S.day - ((d0.dow + 6) % 7); // Monday
-      const list = bookingsFor(start, 7);
+      const list = mine(bookingsFor(start, 7));
       const a = K.studioDate(start);
       const b = K.studioDate(start + 6);
       return `
@@ -789,10 +914,13 @@
             <button class="cab__ic" data-cab-shift="7" aria-label="Next week">${K.I.chevR}</button>
             ${S.day !== 0 ? '<button class="cab-today" data-cab-today>Today</button>' : ''}
           </div>
+          ${chips}
         </div>
-        ${weekHTML(start, list)}`;
+        ${weekHTML(start, list, who ? S.scheds[who] : team ? null : S.sched)}`;
     }
-    const list = bookingsFor(S.day, 1);
+    const all = bookingsFor(S.day, 1);
+    const list = mine(all);
+    const sc = who ? S.scheds[who] || { hours: [], time_off: [] } : S.sched;
     return `
       <div class="cab-pin">
         <header class="cab-h cab-h--row"><h1>Calendar</h1>${seg}</header>
@@ -802,15 +930,18 @@
           <button class="cab__ic" data-cab-shift="1" aria-label="Next day">${K.I.chevR}</button>
           ${S.day !== 0 ? '<button class="cab-today" data-cab-today>Today</button>' : ''}
         </div>
+        ${chips}
       </div>
       ${tlHead('Day')}
-      <div class="cab-day" data-swipe>${timelineHTML(S.day, list)}</div>
-      ${(() => { const free = S.day >= 0 ? freeWindows(S.day, list) : []; return free.length ? `
+      ${team && !who ? `<div class="cab-day cab-day--crew">${crewDayHTML(S.day, all)}</div>` : `
+      <div class="cab-day" data-swipe>${timelineHTML(S.day, list, { sched: sc, staff: who })}</div>
+      ${(() => { const free = S.day >= 0 ? freeWindows(S.day, list, sc) : []; return free.length ? `
       <div class="group-label">Free windows</div>
-      <div class="cab-free">${free.map(w => `<button class="chip" data-cab-new-at="${S.day}:${w.s}">${K.fmtClock(w.s)} – ${K.fmtClock(w.e)}</button>`).join('')}</div>` : ''; })()}`;
+      <div class="cab-free">${free.map(w => `<button class="chip" data-cab-new-at="${S.day}:${w.s}${who ? ':' + esc(who) : ''}">${K.fmtClock(w.s)} – ${K.fmtClock(w.e)}</button>`).join('')}</div>` : ''; })()}`}`;
   }
 
-  function weekHTML(start, list) {
+  // sched: whose open hours are shaded (none for "everyone" in a salon)
+  function weekHTML(start, list, sched) {
     const from = 8 * 60;
     const to = 20 * 60;
     const H = 7 * 60 / 60; // not used: rows are percentage based
@@ -820,13 +951,13 @@
       const off = start + i;
       const d = K.studioDate(off);
       const day = list.filter(b => spot(b.start_at).off === off && (S.showCx || !b.status.startsWith('cancelled')));
-      const open = (S.sched.hours || []).filter(h => h.weekday === d.dow);
+      const open = ((sched || {}).hours || []).filter(h => h.weekday === d.dow);
       cols.push(`
         <div class="wk__col${off === 0 ? ' is-today' : ''}">
           <button class="wk__d" data-cab-goday="${off}"><small>${K.DAY_SHORT[d.dow].charAt(0)}</small><b class="num">${d.day}</b></button>
           <div class="wk__body">
             ${open.map(h => `<i class="wk__open" style="top:${pct(minOf(h.start), from, to)}%;height:${pct(minOf(h.end), from, to) - pct(minOf(h.start), from, to)}%"></i>`).join('')}
-            ${day.map(b => { const s = spot(b.start_at).min; const e = Math.max(s + 20, spot(b.end_at).min); return `<button class="wk__b tl__b--${b.status}${b.status.startsWith('cancelled') ? ' tl__b--cx' : ''}" data-cab-b="${esc(b.id)}" style="top:${pct(s, from, to)}%;height:${pct(e, from, to) - pct(s, from, to)}%" aria-label="${esc(b.client_name)} ${esc(whenLine(b))}"><span>${esc(String(b.client_name || '').split(' ')[0])}</span></button>`; }).join('')}
+            ${day.map(b => { const s = spot(b.start_at).min; const e = Math.max(s + 20, spot(b.end_at).min); return `<button class="wk__b tl__b--${b.status}${b.status.startsWith('cancelled') ? ' tl__b--cx' : ''}${teamView() && b.staff_color ? ' wk__b--crew' : ''}" data-cab-b="${esc(b.id)}" style="top:${pct(s, from, to)}%;height:${pct(e, from, to) - pct(s, from, to)}%${teamView() && b.staff_color ? ';--c:' + esc(b.staff_color) : ''}" aria-label="${esc(b.client_name)} ${esc(whenLine(b))}${teamView() && b.staff_name ? ' · ' + esc(b.staff_name) : ''}"><span>${esc(String(b.client_name || '').split(' ')[0])}</span></button>`; }).join('')}
           </div>
           <span class="wk__n num">${day.filter(b => !b.status.startsWith('cancelled')).length || ''}</span>
         </div>`);
@@ -848,7 +979,7 @@
         <div class="req" data-req="${esc(b.id)}">
           <div class="req__bg"><span class="req__yes">${K.I.check}Approve</span><span class="req__no">Decline${K.I.x}</span></div>
           <div class="req__card card">
-            <div class="req__top"><b>${esc(b.client_name || 'Client')}</b><small>${ago(b.created_at)}</small></div>
+            <div class="req__top"><b>${esc(b.client_name || 'Client')}</b>${crewTag(b)}<small>${ago(b.created_at)}</small></div>
             <p class="num">${esc(b.service_name)} · ${esc(whenLine(b))}</p>
             ${b.client_note ? `<p class="req__note">“${esc(b.client_note)}”</p>` : ''}
             <div class="req__actions">
@@ -1014,19 +1145,24 @@
 
   /* ---------- HOURS ---------- */
   async function hoursHTML() {
+    // whose hours: mine, or (the owner of a salon) the master picked above
+    const sc = need(hrsSched());
     if (!S.hrs || !S.hrsDirty) {
-      need(S.sched);
       S.hrs = {};
-      for (let d = 0; d < 7; d++) S.hrs[d] = (S.sched.hours || []).filter(h => h.weekday === d).map(h => ({ s: h.start, e: h.end }));
+      for (let d = 0; d < 7; d++) S.hrs[d] = (sc.hours || []).filter(h => h.weekday === d).map(h => ({ s: h.start, e: h.end }));
     }
-    const r = S.sched.rules || {};
+    const r = sc.rules || {};
+    const staffView = isStaff();
+    const pickCrew = teamView() && S.team && crew().length > 1;
+    const her = S.hrsStaff && S.hrsStaff !== ownStaff() ? crewById(S.hrsStaff) : null;
     const order = [1, 2, 3, 4, 5, 6, 0];
     const sel = (name, value, opts, fmt) => `<select class="cab-sel" data-rule="${name}">${opts.map(o => `<option value="${o}"${+o === +value ? ' selected' : ''}>${fmt(o)}</option>`).join('')}</select>`;
     const hrsFmt = h => (h === 0 ? 'None' : h < 24 ? h + ' h' : h / 24 + (h === 24 ? ' day' : ' days'));
     return `
       ${backHTML('hours')}
-      <header class="cab-h"><h1>Hours & rules</h1></header>
-      <div class="group-label">Working hours</div>
+      <header class="cab-h"><h1>${staffView ? 'My hours' : 'Hours & rules'}</h1></header>
+      ${pickCrew ? `<div class="crew-chips crew-chips--hrs">${crew().map(st => `<button class="chip${st.id === hrsFor() ? ' is-active' : ''}" data-crew-hrs="${esc(st.id)}">${crewDot(st.color)}${esc(firstOf(st.name))}</button>`).join('')}</div>` : ''}
+      <div class="group-label">${her ? esc(firstOf(her.name)) + '’s working hours' : 'Working hours'}</div>
       <div class="list hrs">
         ${order.map(d => {
           const ints = S.hrs[d] || [];
@@ -1052,13 +1188,14 @@
 
       <div class="group-label">Time off</div>
       <div class="list">
-        ${(S.sched.time_off || []).map(t => `
+        ${(sc.time_off || []).map(t => `
           <div class="row">
-            <span class="row__label">${esc(t.reason || 'Time off')}<span class="row__sub num">${esc(offRange(t))}</span></span>
-            <button class="hrs__del" data-toff-del="${esc(t.id)}" aria-label="Delete">${K.I.x}</button>
+            <span class="row__label">${esc(t.reason || 'Time off')}<span class="row__sub num">${esc(offRange(t))}${isTeam() && t.whole_studio ? ' · whole studio' : ''}</span></span>
+            ${staffView && t.whole_studio ? '' : `<button class="hrs__del" data-toff-del="${esc(t.id)}" aria-label="Delete">${K.I.x}</button>`}
           </div>`).join('') || '<div class="row"><span class="row__label cab-muted">No time off planned</span></div>'}
       </div>
       ${toffFormHTML()}
+      ${staffView ? '' : `
 
       <div class="group-label">Booking rules</div>
       <div class="list">
@@ -1073,7 +1210,7 @@
         <div class="row"><span class="row__label">Start times every</span>
           ${sel('slot_step_min', r.slot_step_min, [15, 20, 30, 45, 60], m => m + ' min')}</div>
       </div>
-      <p class="cab-muted">Clients see these rules on the Review step.</p>`;
+      <p class="cab-muted">Clients see these rules on the Review step.${isTeam() ? ' They are the same for every master.' : ''}</p>`}`;
   }
   function offRange(t) {
     const a = spot(t.start_at);
@@ -1096,6 +1233,7 @@
           <label class="field"><span>&nbsp;</span><input type="time" id="toff-et" value="23:45" step="900"></label>
         </div>
         <label class="field"><span>Reason <em>optional, only you see it</em></span><input id="toff-r" maxlength="120" placeholder="Vacation, dentist, training…"></label>
+        ${teamView() ? '<label class="tick"><input type="checkbox" id="toff-all"><i aria-hidden="true">' + K.I.check + '</i><span>The whole studio is closed (every master)</span></label>' : ''}
         <button class="btn btn--primary btn--block" data-toff-add>Add time off</button>
       </details>`;
   }
@@ -1117,7 +1255,10 @@
     const r = readHours();
     if (r.error) { K.toast(r.error, 'x'); return; }
     try {
-      S.sched = await K.Backend.owner.saveHours(S.studio.id, r.flat);
+      const sc = await K.Backend.owner.saveHours(S.studio.id, r.flat, S.hrsStaff || null);
+      S.hsched = sc;
+      if (sc.staff_id) S.scheds[sc.staff_id] = sc;
+      if (!S.hrsStaff || S.hrsStaff === ownStaff()) S.sched = sc;
       S.hrsDirty = false;
       K.haptic([10, 30, 10]);
       K.toast('Working hours saved', 'ok');
@@ -1138,10 +1279,13 @@
     if (endMin >= 23 * 60 + 45) endMin = 24 * 60; // "until the end of the day"
     const end = new Date(K.zonedMs(ey, em, ed, endMin)).toISOString();
     if (Date.parse(end) <= Date.parse(start)) { K.toast('The end must be after the start', 'x'); return; }
+    const all = !!($('#toff-all') || {}).checked;
+    const whose = hrsFor();
     try {
-      await K.Backend.owner.addTimeOff(S.studio.id, start, end, v('toff-r'));
+      await K.Backend.owner.addTimeOff(S.studio.id, start, end, v('toff-r'), S.hrsStaff || null, all);
+      if (all) S.teamAt = 0; // everyone's calendar changed
       // bookings inside the new time off are not touched — say so
-      const clash = [...(S.known || new Map()).values()].filter(b => isActive(b) && Date.parse(b.start_at) < Date.parse(end) && Date.parse(b.end_at) > Date.parse(start));
+      const clash = [...(S.known || new Map()).values()].filter(b => isActive(b) && (all || !whose || b.staff_id === whose) && Date.parse(b.start_at) < Date.parse(end) && Date.parse(b.end_at) > Date.parse(start));
       K.toast(clash.length ? `Added — ${clash.length} booking${clash.length > 1 ? 's' : ''} still in that time` : 'Time off added', clash.length ? 'bell' : 'ok');
       K.haptic();
       K.onDataChanged();
@@ -1165,9 +1309,10 @@
      STUDIO — she runs everything herself: profile, look, services,
      looks, texts, assistant answers. Photos go to Supabase Storage.
      ========================================================= */
-  const PARENT = { requests: 'today', hours: 'studio', services: 'studio', profile: 'studio', style: 'studio', looks: 'studio', texts: 'studio', faq: 'studio', payments: 'studio', promo: 'studio', loyalty: 'studio' };
-  const SUB_TITLE = { requests: 'Today', hours: 'Studio', services: 'Studio', profile: 'Studio', style: 'Studio', looks: 'Studio', texts: 'Studio', faq: 'Studio', payments: 'Studio', promo: 'Studio', loyalty: 'Studio' };
-  const backHTML = tab => PARENT[tab] ? `<button class="cab-back cab-back--top" data-cab-tab="${PARENT[tab]}">${K.I.chevL}${SUB_TITLE[tab]}</button>` : '';
+  const PARENT = { requests: 'today', hours: 'studio', services: 'studio', profile: 'studio', style: 'studio', looks: 'studio', texts: 'studio', faq: 'studio', payments: 'studio', promo: 'studio', loyalty: 'studio', team: 'studio' };
+  const SUB_TITLE = { requests: 'Today', hours: 'Studio', services: 'Studio', profile: 'Studio', style: 'Studio', looks: 'Studio', texts: 'Studio', faq: 'Studio', payments: 'Studio', promo: 'Studio', loyalty: 'Studio', team: 'Studio' };
+  // a master's "My hours" is a tab of its own (no way back to a Studio she doesn't have)
+  const backHTML = tab => PARENT[tab] && !(isStaff() && tab === 'hours') ? `<button class="cab-back cab-back--top" data-cab-tab="${PARENT[tab]}">${K.I.chevL}${SUB_TITLE[tab]}</button>` : '';
   const S2 = { profile: null, services: null, looks: null, edit: null };
 
   async function loadProfile(force) {
@@ -1281,12 +1426,274 @@
       </div>
       <div class="group-label">Booking</div>
       <div class="list">
+        ${row('team', '<circle cx="9" cy="8.5" r="3.2"/><circle cx="16.5" cy="9.5" r="2.6"/><path d="M3 19.5c.8-3.2 3.2-5 6-5s5.2 1.8 6 5M15 14.6c2.6-.3 5 1.2 5.8 4.9"/>', 'Team', isTeam() ? (S.team ? crew().length + (crew().length === 1 ? ' master' : ' masters') : 'Team') : 'Solo')}
         ${row('hours', '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>', 'Hours, time off & rules')}
         ${row('payments', '<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10.5h18M7 15h4"/>', 'Payments & deposits', Object.values(st.payments || {}).some(v => String(v || '').trim()) ? 'On' : 'Off')}
         ${row('texts', '<path d="M6 4h12v16H6z"/><path d="M9 8h6M9 12h6M9 16h4"/>', 'Policies & texts')}
         ${row('faq', '<path d="M20.5 11.8a8.3 8.3 0 0 1-12.2 7.3L3.5 20.5l1.4-4.6a8.3 8.3 0 1 1 15.6-4.1z"/>', 'Assistant answers', (st.faq || []).length)}
       </div>
       <button class="btn btn--soft btn--block" data-cab-close>${icon('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>')}See it as a client</button>`;
+  }
+
+  /* ---------- Team (a salon): Solo / Team, the masters, their sign-ins ---------- */
+  async function teamHTML() {
+    const team = need(S.team);
+    need(S2.services);
+    const solo = !isTeam();
+    return `
+      ${backHTML('team')}
+      <header class="cab-h cab-h--row"><h1>Team</h1>${solo ? '' : `<button class="btn btn--primary btn--sm" data-crew-new>${icon('<path d="M12 5v14M5 12h14"/>')}Add</button>`}</header>
+      <div class="segmented crew-kind" role="radiogroup" style="--n:2;--idx:${solo ? 0 : 1}"><i class="segmented__thumb"></i>
+        <button role="radio" data-crew-kind="solo" aria-checked="${solo}">Solo</button><button role="radio" data-crew-kind="team" aria-checked="${!solo}">Team</button></div>
+      <p class="cab-muted">${solo
+        ? 'Just you. Switch to Team when other masters work in your studio — clients then choose who they book with.'
+        : 'Clients choose a master — or “Any available” — when they book. Each master signs in with her own email and sees only her own calendar, clients and numbers.'}</p>
+      ${solo ? '' : `
+      <div class="list crew-team">${team.map(st => `
+        <button class="row row--link crew-team__row${st.active ? '' : ' is-off'}" data-crew-edit="${esc(st.id)}">
+          ${crewAv(st)}
+          <span class="row__label">${esc(st.name)}${st.is_owner ? ' <em class="crew-you">You</em>' : ''}<span class="row__sub">${esc([
+            st.title,
+            (st.services || []).length + ' service' + ((st.services || []).length === 1 ? '' : 's'),
+            +st.commission_pct ? +st.commission_pct + '%' : '',
+            !st.active ? 'Inactive' : st.is_owner ? '' : st.has_login ? 'Signs in' : 'No sign-in yet'
+          ].filter(Boolean).join(' · '))}</span></span>
+          <span class="row__chev">${K.I.chevR}</span>
+        </button>`).join('')}</div>
+      ${crew().length < 2 ? '<p class="cab-muted">Clients see the team once a second master is added.</p>' : ''}`}`;
+  }
+
+  async function setKind(kind) {
+    if (kind === (isTeam() ? 'team' : 'solo')) return;
+    try {
+      await K.Backend.owner.setKind(S.studio.id, kind);
+      S.studio.kind = kind;
+      S.teamAt = 0;
+      K.haptic([10, 30, 10]);
+      K.toast(kind === 'team' ? 'Team is on — add your masters' : 'Back to Solo', 'ok');
+      saveLocal();
+      published();
+      refreshView();
+    } catch (e) {
+      K.toast(e.code === 'team_has_staff' ? 'Turn off the other masters first' : err(e), 'x');
+      refreshView();
+    }
+  }
+
+  // add / edit a master: photo, name, title, bio, color, commission, what she does (her own price / time)
+  function openCrewEditor(st) {
+    const svcs = (S2.services || []).filter(s => s.active);
+    const isNew = !st;
+    const s = st || { name: '', title: '', bio: '', photo: '', color: CREW_COLORS[(S.team || []).length % CREW_COLORS.length], commission_pct: 40, services: svcs.map(x => ({ id: x.id })), active: true, has_login: false };
+    const mine = {};
+    (s.services || []).forEach(x => { mine[x.id] = x; });
+    S2.edit = { kind: 'crew', id: s.id || null, photo: s.photo || '', color: s.color || CREW_COLORS[0], __orig: { photo: s.photo || '' } };
+    K.haptic();
+    K.Sheet.open(el => {
+      el.innerHTML = `
+        <div class="ob" data-sheet-scroll>
+          <header class="ob__head"><span class="eyebrow">${isNew ? 'New master' : s.is_owner ? 'You' : 'Master'}</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
+          <form class="bk-form" id="crew-form" onsubmit="return false">
+            ${photoSlot('photo', s.photo, 'Photo', 'team')}
+            <label class="field"><span>Name</span><input name="name" maxlength="60" value="${esc(s.name)}" placeholder="Jasmine Lee"></label>
+            <label class="field"><span>Title <em>optional</em></span><input name="title" maxlength="60" value="${esc(s.title || '')}" placeholder="Senior lash artist"></label>
+            <label class="field"><span>About <em>optional, clients see it</em></span><textarea name="bio" rows="3" maxlength="400" placeholder="Volume sets, 6 years, loves a soft wispy look">${esc(s.bio || '')}</textarea></label>
+            <div class="field"><span>Color in the calendar</span>
+              <div class="crew-colors">${CREW_COLORS.map(c => `<button type="button" class="crew-color${c === S2.edit.color ? ' is-active' : ''}" data-crew-color="${c}" style="--c:${c}" aria-label="Color ${c}"></button>`).join('')}</div></div>
+            ${s.is_owner ? '' : `<label class="field"><span>Commission, % <em>her share of each visit — for Payouts</em></span><input name="commission_pct" type="number" inputmode="decimal" min="0" max="100" step="1" value="${esc(+s.commission_pct || 0)}"></label>`}
+            ${s.is_owner ? '' : s.has_login ? `
+            <div class="row"><span class="row__label">Signs in as<span class="row__sub">${esc(s.email || '')}</span></span></div>` : `
+            <label class="field"><span>Her email <em>${isNew ? 'to sign in — or leave empty and add it later' : 'to give her a sign-in'}</em></span><input name="email" type="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="jasmine@gmail.com"></label>`}
+            <div class="group-label">What she does</div>
+            <p class="cab-muted">Her own price or time only if it differs from the menu.</p>
+            <div class="list crew-svcs">${svcs.map(x => { const o = mine[x.id]; return `
+              <div class="row row--stack crew-svc">
+                <label class="tick"><input type="checkbox" data-crew-svc="${esc(x.id)}"${o ? ' checked' : ''}><i aria-hidden="true">${K.I.check}</i><span>${esc(x.name)} <small class="num">${money(x.price)} · ${durText(x.duration_min)}</small></span></label>
+                <div class="form-2 crew-svc__own">
+                  <label class="field"><span>Her price, $</span><input type="number" inputmode="decimal" min="0" step="1" data-crew-price="${esc(x.id)}" value="${esc(o && o.price != null ? +o.price : '')}" placeholder="${esc(+x.price)}"></label>
+                  <label class="field"><span>Her time</span><select class="cab-sel cab-sel--wide" data-crew-dur="${esc(x.id)}"><option value="">${durText(x.duration_min)}</option>${DURATIONS.map(m => `<option value="${m}"${o && +o.duration === m ? ' selected' : ''}>${durText(m)}</option>`).join('')}</select></label>
+                </div>
+              </div>`; }).join('') || '<div class="row"><span class="row__label cab-muted">Add services first</span></div>'}</div>
+          </form>
+          <button class="btn btn--primary btn--block" data-crew-save>${isNew ? 'Add master' : 'Save'}</button>
+          ${!isNew ? `<button class="btn btn--soft btn--block" data-crew-hours="${esc(s.id)}">${icon('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>')}${s.is_owner ? 'My' : 'Her'} hours & time off</button>` : ''}
+          ${!isNew && !s.is_owner ? (s.active
+            ? `<button class="btn btn--soft btn--block ob__danger" data-crew-off="${esc(s.id)}">Turn off — she no longer takes bookings</button>`
+            : `<button class="btn btn--soft btn--block" data-crew-on="${esc(s.id)}">Turn back on</button>`) : ''}
+        </div>`;
+    }, { detent: 'large' });
+  }
+
+  function readCrewForm() {
+    const f = K.$('#crew-form', K.Sheet.el());
+    const v = n => (f.elements[n] ? f.elements[n].value.trim() : '');
+    const services = K.$$('[data-crew-svc]', K.Sheet.el()).filter(c => c.checked).map(c => {
+      const id = c.dataset.crewSvc;
+      const p = K.$(`[data-crew-price="${id}"]`, K.Sheet.el());
+      const d = K.$(`[data-crew-dur="${id}"]`, K.Sheet.el());
+      return { id, price: p && p.value !== '' ? +p.value : null, duration: d && d.value ? +d.value : null };
+    });
+    return {
+      name: v('name'), title: v('title'), bio: v('bio'), email: v('email').toLowerCase(),
+      commission_pct: f.elements.commission_pct ? Math.max(0, Math.min(100, +v('commission_pct') || 0)) : undefined,
+      photo: S2.edit.photo || '', color: S2.edit.color, services
+    };
+  }
+
+  async function saveCrew(btn) {
+    const p = readCrewForm();
+    const id = S2.edit.id;
+    if (!p.name) { K.toast('Add her name', 'x'); return; }
+    if (p.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p.email)) { K.toast('Check the email', 'x'); return; }
+    if (!p.services.length) { K.toast('Pick at least one service she does', 'x'); return; }
+    await busyBtn(btn, async () => {
+      let invite = null;
+      const body = { name: p.name, title: p.title, bio: p.bio, photo: p.photo, color: p.color, services: p.services };
+      if (p.commission_pct !== undefined) body.commission_pct = p.commission_pct;
+      if (!id && p.email) {
+        // her account + the master in one go (Edge Function)
+        invite = await K.Backend.owner.inviteStaff(Object.assign({ master_id: S.studio.id, email: p.email }, body));
+      } else {
+        await K.Backend.owner.saveStaff(S.studio.id, Object.assign(id ? { id } : {}, body));
+        if (id && p.email) invite = await K.Backend.owner.inviteStaff({ master_id: S.studio.id, staff_id: id, email: p.email });
+      }
+      dropReplaced(S2.edit.__orig.photo, S2.edit.photo);
+      S2.edit.__saved = true;
+      await loadTeam(true).catch(() => null);
+      published();
+      if (invite && invite.password) { openInvite(invite, p.name); return; }
+      K.toast(id ? 'Saved' : `${firstOf(p.name)} is on the team`, 'ok');
+      K.Sheet.close();
+      refreshView();
+    });
+  }
+
+  // the message with her sign-in (the temporary password is shown only now)
+  function inviteText(r, name) {
+    const link = `${location.origin}${location.pathname}?m=${encodeURIComponent(K.SLUG)}&owner=1`;
+    return [
+      `Hi ${firstOf(name) || 'there'}! 👋`,
+      '',
+      `You’re on the team at ${S.studio.name} ✨ Your bookings, clients and hours are in our app.`,
+      '',
+      `1. On your iPhone, open this link in Safari: ${link}`,
+      '2. Tap Share → Add to Home Screen, then open the app from your Home Screen.',
+      `3. Sign in with ${r.email} and this temporary password: ${r.password}`,
+      '4. Choose your own password when the app asks.',
+      '5. On Today, turn on notifications so you hear about new bookings.'
+    ].join('\n');
+  }
+  function openInvite(r, name) {
+    const text = inviteText(r, name);
+    S.inviteText = text;
+    K.haptic([10, 30, 10]);
+    K.Sheet.open(el => {
+      el.innerHTML = `
+        <div class="ob" data-sheet-scroll>
+          <header class="ob__head"><span class="eyebrow">Invite</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
+          <h2>${esc(firstOf(name))} can sign in ✨</h2>
+          <p class="ob__sub">Send her this message. The temporary password is shown only now — she picks her own at the first sign-in.</p>
+          <div class="card bk-sum crew-inv">
+            <div class="bk-row"><span>Email</span><b>${esc(r.email)}</b></div>
+            <div class="bk-row"><span>Temporary password</span><b class="num crew-pw">${esc(r.password)}</b></div>
+          </div>
+          <label class="field"><span>Message</span><textarea class="crew-msg" rows="11" readonly>${esc(text)}</textarea></label>
+          <button class="btn btn--primary btn--block" data-crew-copy>Copy message</button>
+          <button class="btn btn--soft btn--block" data-sheet-close>Done</button>
+        </div>`;
+    }, { detent: 'large' });
+    refreshView();
+  }
+  async function copyText(text, what) {
+    try { await navigator.clipboard.writeText(text); K.toast(what || 'Copied', 'ok'); } catch (e) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); K.toast(what || 'Copied', 'ok'); } catch (x) { K.toast('Copy didn’t work — select the text and copy it', 'x'); }
+      ta.remove();
+    }
+  }
+
+  // turn a master off: her upcoming bookings go to another master or are cancelled first
+  async function crewOff(id, btn) {
+    const st = crewById(id);
+    await busyBtn(btn, async () => {
+      try {
+        await K.Backend.owner.saveStaff(S.studio.id, { id, active: false });
+      } catch (e) {
+        if (e.code === 'has_bookings') { openReassign(id); return; }
+        throw e;
+      }
+      await loadTeam(true).catch(() => null);
+      published();
+      K.toast(`${firstOf(st && st.name)} is off — she no longer takes bookings`, 'ok');
+      K.Sheet.close();
+      refreshView();
+    });
+  }
+  async function crewOn(id, btn) {
+    await busyBtn(btn, async () => {
+      await K.Backend.owner.saveStaff(S.studio.id, { id, active: true });
+      await loadTeam(true).catch(() => null);
+      published();
+      K.toast('She takes bookings again', 'ok');
+      K.Sheet.close();
+      refreshView();
+    });
+  }
+  async function openReassign(id) {
+    S2.reassign = { id, list: null };
+    K.Sheet.open(el => { el.innerHTML = '<div class="ob" data-sheet-scroll><div class="cab-load"><i class="spin"></i></div></div>'; }, { detent: 'large' });
+    await paintReassign();
+  }
+  async function paintReassign() {
+    const r = S2.reassign;
+    if (!r) return;
+    try { r.list = await K.Backend.owner.staffFuture(r.id); } catch (e) { K.toast(err(e), 'x'); return; }
+    const box = K.$('.ob', K.Sheet.el());
+    if (!box || S2.reassign !== r) return;
+    const st = crewById(r.id) || { name: '' };
+    box.innerHTML = `
+      <header class="ob__head"><span class="eyebrow">Reassign</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
+      <h2>${r.list.length ? `${esc(firstOf(st.name))} has ${r.list.length} upcoming booking${r.list.length > 1 ? 's' : ''}` : 'All set'}</h2>
+      <p class="ob__sub">${r.list.length ? 'Give each one to a master who is free then, or cancel it — the client sees it in the app.' : `Nothing is left in ${esc(firstOf(st.name))}’s calendar.`}</p>
+      <div class="crew-re">${r.list.map(b => `
+        <div class="card crew-re__b">
+          <b>${esc(b.client_name || 'Client')}</b>
+          <small class="num">${esc(b.service_name)} · ${esc(whenLine(b))}</small>
+          <div class="crew-chips">${(b.options || []).map(o => `<button class="chip" data-crew-move="${esc(b.id)}|${esc(o.id)}|${esc(b.start_at)}">${crewDot(o.color)}${esc(firstOf(o.name))}</button>`).join('') || '<span class="cab-muted">Nobody else is free then</span>'}</div>
+          <button class="cab-link ob__danger" data-crew-cx="${esc(b.id)}">Cancel this booking</button>
+        </div>`).join('')}</div>
+      ${r.list.length ? '' : `<button class="btn btn--primary btn--block" data-crew-off="${esc(r.id)}">Turn ${esc(firstOf(st.name))} off now</button>`}`;
+  }
+  async function crewMove(val, btn) {
+    const [bid, sid, at] = val.split('|');
+    await busyBtn(btn, async () => {
+      S.self.add(bid);
+      try {
+        await K.Backend.owner.reschedule(bid, at, false, sid);
+      } catch (e) {
+        // outside her hours by the rules, but free: the owner decided — move it anyway
+        if (e.code === 'outside_hours') await K.Backend.owner.reschedule(bid, at, true, sid);
+        else throw e;
+      }
+      K.toast(`Moved to ${firstOf((crewById(sid) || {}).name)}`, 'ok');
+      K.onDataChanged();
+      syncChanges(true).catch(() => null);
+      await paintReassign();
+    });
+  }
+  async function crewCancel(bid, btn) {
+    if (btn.dataset.sure !== '1') { btn.dataset.sure = '1'; btn.textContent = 'Tap again to cancel it'; K.haptic(20); return; }
+    await busyBtn(btn, async () => {
+      S.self.add(bid);
+      await K.Backend.owner.setStatus(bid, 'cancelled_master', 'Your master is no longer available — please book another time');
+      K.toast('Cancelled — the client will see it', 'ok');
+      K.onDataChanged();
+      syncChanges(true).catch(() => null);
+      await paintReassign();
+    });
   }
 
   /* ---------- Profile & photos ---------- */
@@ -1483,6 +1890,9 @@
             <label class="tick"><input type="checkbox" name="price_from"${s.price_from ? ' checked' : ''}><i aria-hidden="true">${K.I.check}</i><span>Show as “from $” (the price can be higher)</span></label>
             <label class="field"><span>Fill reminder</span><select class="cab-sel cab-sel--wide" name="fill_weeks">${[['', 'None'], [2, 'After 2 weeks'], [3, 'After 3 weeks'], [4, 'After 4 weeks'], [5, 'After 5 weeks'], [6, 'After 6 weeks'], [8, 'After 8 weeks']].map(([v, l]) => `<option value="${v}"${String(v) === String(s.fill_weeks || '') ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
             <div class="row hrs-switch"><span class="row__label">Visible to clients<span class="row__sub">Off: hidden from the app, nothing is deleted</span></span><button type="button" class="switch" role="switch" aria-checked="${s.active !== false}" data-svc-active></button></div>
+            ${teamView() && S.team && crew().length > 1 ? `
+            <div class="field"><span>Who does it</span>
+              <div class="chips-wrap" data-svc-crew>${crew().map(st => `<button type="button" class="chip${!s.id || doesSvc(st, s.id) ? ' is-active' : ''}" data-svc-who="${esc(st.id)}">${crewDot(st.color)}${esc(firstOf(st.name))}</button>`).join('')}</div></div>` : ''}
           </form>
           <button class="btn btn--primary btn--block" data-svc-save>${s.id ? 'Save service' : 'Add service'}</button>
           ${s.id ? '<button class="btn btn--soft btn--block ob__danger" data-svc-del>Delete service</button>' : ''}
@@ -1504,8 +1914,16 @@
     if (!svc.name) { K.toast('Add a name', 'x'); return; }
     if (svc.price == null || !(svc.price >= 0)) { K.toast('Add a price', 'x'); return; }
     if (svc.deposit > svc.price && svc.price > 0) { K.toast('The deposit is bigger than the price', 'x'); return; }
+    // a salon: who does it (all chips on = everyone, the default for a new one)
+    const whoBox = K.$('[data-svc-crew]', K.Sheet.el());
+    const who = whoBox ? K.$$('[data-svc-who]', whoBox).filter(c => c.classList.contains('is-active')).map(c => c.dataset.svcWho) : null;
+    if (who && !who.length) { K.toast('Pick at least one master who does it', 'x'); return; }
     await busyBtn(btn, async () => {
-      await K.Backend.owner.saveService(S.studio.id, svc);
+      const saved = await K.Backend.owner.saveService(S.studio.id, svc);
+      if (who && saved && saved.id && (svc.id || who.length < crew().length)) {
+        await K.Backend.owner.serviceStaff(saved.id, who);
+      }
+      if (who) S.teamAt = 0;
       dropReplaced(S2.edit.__orig.photo, S2.edit.photo);
       S2.edit.__saved = true;
       K.toast(svc.id ? 'Service saved' : 'Service added — clients can book it', 'ok');
@@ -1968,6 +2386,26 @@
     if ((el = t.closest('[data-ly-save]'))) { saveLoyalty(el); return true; }
     if ((el = t.closest('[data-pay-save]'))) { savePayments(el); return true; }
     if ((el = t.closest('[data-ins-per]'))) { S.insPer = el.dataset.insPer; S.insSel = null; K.haptic(); refreshView(); return true; }
+    if ((el = t.closest('[data-crew-ins]'))) { S.insStaff = el.dataset.crewIns || null; S.insSel = null; K.haptic(); refreshView(); return true; }
+    if ((el = t.closest('[data-pay-copy]'))) { copyText(payoutsText(), 'Payouts copied'); return true; }
+    // team
+    if ((el = t.closest('[data-crew-kind]'))) { setKind(el.dataset.crewKind); return true; }
+    if ((el = t.closest('[data-crew-new]'))) { openCrewEditor(null); return true; }
+    if ((el = t.closest('[data-crew-edit]'))) { openCrewEditor(crewById(el.dataset.crewEdit)); return true; }
+    if ((el = t.closest('[data-crew-color]'))) {
+      S2.edit.color = el.dataset.crewColor;
+      K.$$('[data-crew-color]', K.Sheet.el()).forEach(c => c.classList.toggle('is-active', c === el));
+      K.haptic();
+      return true;
+    }
+    if ((el = t.closest('[data-crew-save]'))) { saveCrew(el); return true; }
+    if ((el = t.closest('[data-crew-copy]'))) { copyText(S.inviteText || '', 'Message copied'); return true; }
+    if ((el = t.closest('[data-crew-hours]'))) { S.hrsStaff = el.dataset.crewHours; S.hrs = null; S.hrsDirty = false; S.hsched = null; K.Sheet.close(); go('hours'); return true; }
+    if ((el = t.closest('[data-crew-off]'))) { crewOff(el.dataset.crewOff, el); return true; }
+    if ((el = t.closest('[data-crew-on]'))) { crewOn(el.dataset.crewOn, el); return true; }
+    if ((el = t.closest('[data-crew-move]'))) { crewMove(el.dataset.crewMove, el); return true; }
+    if ((el = t.closest('[data-crew-cx]'))) { crewCancel(el.dataset.crewCx, el); return true; }
+    if ((el = t.closest('[data-svc-who]'))) { el.classList.toggle('is-active'); K.haptic(); return true; }
     if ((el = t.closest('[data-ins-bar]'))) {
       S.insSel = +el.dataset.insBar;
       $$('[data-ins-bar]').forEach(x => x.classList.toggle('is-sel', x === el));
@@ -2036,7 +2474,8 @@
   }
 
   /* ---------- Read-only (the platform admin looking at a studio) ---------- */
-  const RO_BLOCK = ['[data-pf-save]', '[data-sty-save]', '[data-sty]', '[data-sty-acc]', '[data-svc-new]', '[data-svc-save]', '[data-svc-del]',
+  const RO_BLOCK = ['[data-crew-kind]', '[data-crew-new]', '[data-crew-save]', '[data-crew-off]', '[data-crew-on]', '[data-crew-move]', '[data-crew-cx]',
+    '[data-pf-save]', '[data-sty-save]', '[data-sty]', '[data-sty-acc]', '[data-svc-new]', '[data-svc-save]', '[data-svc-del]',
     '[data-look-new]', '[data-look-save]', '[data-look-del]', '[data-tx-save]', '[data-faq-save]', '[data-faq-add]', '[data-pay-save]',
     '[data-pr-save]', '[data-ly-save]', '[data-hrs-save]', '[data-hrs-toggle]', '[data-hrs-add]', '[data-hrs-del]', '[data-toff-add]',
     '[data-toff-del]', '[data-rule-auto]', '[data-ob-set]', '[data-ob-cancel]', '[data-ob-move]', '[data-dep-set]', '[data-req-yes]',
@@ -2085,7 +2524,7 @@
     ];
   }
   function setupHTML() {
-    if (K.store.get('setupDone')) return '';
+    if (isStaff() || K.store.get('setupDone')) return '';
     const items = setupItems();
     if (!items) return '';
     const n = items.filter(x => x.done).length;
@@ -2160,10 +2599,10 @@
       <div class="card ob-dep ob-dep--${b.deposit_status}">
         <div class="ob-dep__top"><span class="ob-dep__ic">${icon('<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10.5h18M7 15h4"/>')}</span>
           <span><b>Deposit ${money(b.deposit)}</b><small>${esc(sub)}</small></span></div>
-        ${b.deposit_status === 'pending' && live ? `
+        ${b.deposit_status === 'pending' && live && !isStaff() ? `
         <button class="btn btn--primary btn--block" data-dep-set="paid">${K.I.check}Mark deposit received</button>
         <button class="cab-link" data-dep-set="waived">Not needed this time</button>` : ''}
-        ${(b.deposit_status === 'paid' || b.deposit_status === 'waived') && live ? '<button class="cab-link" data-dep-set="pending">Undo</button>' : ''}
+        ${(b.deposit_status === 'paid' || b.deposit_status === 'waived') && live && !isStaff() ? '<button class="cab-link" data-dep-set="pending">Undo</button>' : ''}
       </div>`;
   }
   async function setDeposit(status, btn) {
@@ -2179,6 +2618,7 @@
     });
   }
   function depositsWaitingHTML() {
+    if (isStaff()) return ''; // payments are the owner's
     const list = [...(S.known || new Map()).values()]
       .filter(b => isActive(b) && b.deposit_status === 'pending' && Date.parse(b.start_at) > Date.now())
       .sort((a, z) => Date.parse(a.start_at) - Date.parse(z.start_at));
@@ -2259,9 +2699,67 @@
     if (!s) return '';
     return `<b>${esc(insLabel(s.start, d.period, true))}</b><span class="num">${money(s.revenue)} earned${+s.expected ? ' · ' + money(s.expected) + ' booked ahead' : ''} · ${s.bookings} booking${s.bookings === 1 ? '' : 's'}${s.no_shows ? ' · ' + s.no_shows + ' no-show' + (s.no_shows > 1 ? 's' : '') : ''}</span>`;
   }
+  // payouts by commission for a period (owner of a salon)
+  const ymd = off => { const d = K.studioDate(off); return `${d.year}-${String(d.month + 1).padStart(2, '0')}-${String(d.day).padStart(2, '0')}`; };
+  function payRange() {
+    if (!S.payFrom) { const d = K.studioDate(0); S.payFrom = `${d.year}-${String(d.month + 1).padStart(2, '0')}-01`; S.payTo = ymd(0); }
+    return [S.payFrom, S.payTo];
+  }
+  async function loadPayouts() {
+    const [a, z] = payRange();
+    MEM['pay:' + a + ':' + z] = await K.Backend.owner.payouts(S.studio.id, a, z);
+  }
+  const fmtYmd = s => { const [y, m, d] = s.split('-').map(Number); return `${MON3(m - 1)} ${d}, ${y}`; };
+  function payoutsText() {
+    const [a, z] = payRange();
+    const list = MEM['pay:' + a + ':' + z] || [];
+    const total = list.reduce((s, x) => s + (+x.payout || 0), 0);
+    return [
+      `Payouts · ${S.studio.name}`,
+      `${fmtYmd(a)} – ${fmtYmd(z)} · completed visits`,
+      '',
+      ...list.map(x => `${x.name}${x.is_owner ? ' (owner)' : ''} — ${x.visits} visit${x.visits === 1 ? '' : 's'} · ${money(x.revenue)} · ${+x.commission_pct}% → ${money(x.payout)}`),
+      '',
+      `Total to masters: ${money(total)}`
+    ].join('\n');
+  }
+  function crewInsightsHTML(d) {
+    const rows = d.staff || [];
+    if (!rows.length) return '';
+    const [a, z] = payRange();
+    const pay = MEM['pay:' + a + ':' + z];
+    return `
+      <div class="group-label">By master</div>
+      <div class="card crew-ins">
+        <div class="crew-ins__row crew-ins__row--h"><span></span><span>Revenue</span><span>Visits</span><span>Load</span><span>Return</span><span>No-show</span></div>
+        ${rows.map(x => `
+        <div class="crew-ins__row${x.active ? '' : ' is-off'}">
+          <span class="crew-ins__name">${crewDot(x.color)}${esc(firstOf(x.name))}</span>
+          <span class="num">${money(x.revenue)}</span>
+          <span class="num">${x.bookings}</span>
+          <span class="num">${+x.open_min ? Math.round((+x.booked_min / +x.open_min) * 100) + '%' : '—'}</span>
+          <span class="num">${x.returning}/${x.clients}</span>
+          <span class="num${x.no_shows ? ' is-bad' : ''}">${x.no_shows}</span>
+        </div>`).join('')}
+      </div>
+      <p class="cab-muted">Last 12 ${d.period === 'month' ? 'months' : 'weeks'}. Load = booked time out of her working hours.</p>
+      <div class="group-label">Payouts</div>
+      <div class="card crew-pay">
+        <div class="form-2">
+          <label class="field"><span>From</span><input type="date" data-pay-from value="${esc(a)}"></label>
+          <label class="field"><span>To</span><input type="date" data-pay-to value="${esc(z)}"></label>
+        </div>
+        ${pay ? `
+        <div class="list crew-pay__list">${pay.map(x => `
+          <div class="row"><span class="row__label">${esc(x.name)}<span class="row__sub num">${x.visits} visit${x.visits === 1 ? '' : 's'} · ${money(x.revenue)} · ${+x.commission_pct}%</span></span><span class="row__value num">${money(x.payout)}</span></div>`).join('') || '<div class="row"><span class="row__label cab-muted">No completed visits</span></div>'}</div>
+        <div class="crew-pay__total"><span>Total to masters</span><b class="num">${money(pay.reduce((s, x) => s + (+x.payout || 0), 0))}</b></div>
+        <button class="btn btn--soft btn--block" data-pay-copy>Copy as text</button>` : '<div class="cab-load"><i class="spin"></i></div>'}
+      </div>`;
+  }
+
   async function insightsHTML() {
     const per = S.insPer || 'week';
-    const d = need(MEM['ins:' + per]);
+    const d = need(MEM[insKey()]);
     S.ins = d;
     const t = d.totals;
     const ser = d.series || [];
@@ -2282,7 +2780,8 @@
         <div class="segmented ins-seg" role="radiogroup" style="--n:2;--idx:${per === 'month' ? 1 : 0}"><i class="segmented__thumb"></i>
           <button role="radio" data-ins-per="week" aria-checked="${per === 'week'}">Weeks</button><button role="radio" data-ins-per="month" aria-checked="${per === 'month'}">Months</button></div>
       </header>
-      <p class="cab-muted">Last 12 ${per === 'month' ? 'months' : 'weeks'} · from your bookings</p>
+      ${teamView() && S.team && crew().length > 1 ? crewChipsHTML('data-crew-ins', S.insStaff) : ''}
+      <p class="cab-muted">Last 12 ${per === 'month' ? 'months' : 'weeks'} · ${isStaff() ? 'your own bookings' : S.insStaff && crewById(S.insStaff) ? esc(firstOf(crewById(S.insStaff).name)) + '’s bookings' : isTeam() ? 'the whole studio' : 'from your bookings'}</p>
       <div class="ins-kpi card">
         ${kpi(money(t.revenue), 'Revenue')}
         ${kpi(t.bookings, 'Bookings')}
@@ -2319,7 +2818,8 @@
       </div>
       <div class="group-label">Busiest days</div>
       <div class="card ins-wd">${order.map(i => `
-        <div class="ins-wd__d"><span class="ins-wd__col"><i style="height:${(((wd[i] || 0) / wdMax) * 100).toFixed(1)}%"></i></span><b class="num">${wd[i] || 0}</b><small>${K.DAY_NAMES[i].slice(0, 3)}</small></div>`).join('')}</div>`;
+        <div class="ins-wd__d"><span class="ins-wd__col"><i style="height:${(((wd[i] || 0) / wdMax) * 100).toFixed(1)}%"></i></span><b class="num">${wd[i] || 0}</b><small>${K.DAY_NAMES[i].slice(0, 3)}</small></div>`).join('')}</div>
+      ${teamView() && !S.insStaff ? crewInsightsHTML(d) : ''}`;
   }
 
   function onStudioInput(t) {
@@ -2533,7 +3033,7 @@
       actions.push(`<button class="btn btn--soft" data-ob-cancel>Decline</button>`);
     }
     if (isActive(b) && future) {
-      actions.push(`<button class="btn btn--soft" data-ob-move>${icon('<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/>')}Reschedule</button>`);
+      actions.push(`<button class="btn btn--soft" data-ob-move>${icon('<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/>')}${teamView() && crew().length > 1 ? 'Move' : 'Reschedule'}</button>`);
       if (b.status !== 'pending') actions.push(`<button class="btn btn--soft ob__danger" data-ob-cancel>${K.I.x}Cancel</button>`);
     }
     if (isActive(b) && started) {
@@ -2559,6 +3059,7 @@
       ${obDepositHTML(b)}
       <div class="card bk-sum">
         <div class="bk-row"><span>Service</span><b>${esc(b.service_name)}</b></div>
+        ${teamView() && b.staff_name ? `<div class="bk-row"><span>Master</span><b>${crewDot(b.staff_color)}${esc(b.staff_name)}</b></div>` : ''}
         ${b.price != null ? `<div class="bk-row"><span>Price</span><b class="num">${money(b.price)}</b></div>` : ''}
         <div class="bk-row"><span>Phone</span><b class="num">${esc(phoneText(b.client_phone))}</b></div>
         ${b.client_email ? `<div class="bk-row"><span>Email</span><b>${esc(b.client_email)}</b></div>` : ''}
@@ -2604,17 +3105,28 @@
 
   /* ---------- day + time picker (move / new booking) ---------- */
   function pickerShell(title, b) {
-    const p = ob.pick || (ob.pick = { off: b ? Math.max(0, spot(b.start_at).off) : 0, min: null, iso: null, slots: null, custom: '', force: false });
+    const p = ob.pick || (ob.pick = { off: b ? Math.max(0, spot(b.start_at).off) : 0, min: null, iso: null, slots: null, custom: '', force: false, staff: b ? b.staff_id : null });
     return `
       <header class="ob__head"><button class="cab-back" data-ob-back>${K.I.chevL}Back</button><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
       <h2>${esc(title)}</h2>
-      ${b ? `<p class="ob__sub">${esc(b.client_name)} · ${esc(b.service_name)} · now ${esc(whenLine(b))}</p>` : ''}
+      ${b ? `<p class="ob__sub">${esc(b.client_name)} · ${esc(b.service_name)} · now ${esc(whenLine(b))}${teamView() && b.staff_name ? ' with ' + esc(firstOf(b.staff_name)) : ''}</p>` : ''}
+      ${pkCrewHTML(b ? b.service_id : nb.svc)}
       ${dayStripHTML(p.off)}
       <div class="bk-label">${esc(K.dayLabel(p.off, true))}</div>
       <div class="times" id="pk-times">${'<i class="time time--sk"></i>'.repeat(6)}</div>
       <label class="field pk-custom"><span>Or another time</span><input type="time" step="300" id="pk-custom" value="${esc(p.custom)}"></label>
       <div id="pk-warn"></div>
       <button class="btn btn--primary btn--block" data-pk-go disabled>${b ? 'Move here' : 'Next'}</button>`;
+  }
+  // a salon (owner): which master — only those who do this service; their times below
+  function pkCrewHTML(svcId) {
+    const p = ob.pick;
+    if (!teamView() || !S.team || !p) return '';
+    const list = crew().filter(st => doesSvc(st, svcId));
+    if (!list.length) return '';
+    if (!list.some(st => st.id === p.staff)) p.staff = (list.find(st => st.id === ownStaff()) || list[0]).id;
+    if (list.length < 2) return '';
+    return `<div class="crew-chips crew-chips--pk" id="pk-crew">${list.map(st => `<button class="chip${st.id === p.staff ? ' is-active' : ''}" data-pk-staff="${esc(st.id)}">${crewDot(st.color)}${esc(firstOf(st.name))}</button>`).join('')}</div>`;
   }
   function dayStripHTML(sel) {
     const n = Math.max(14, sel + 4);
@@ -2632,8 +3144,9 @@
     const sel = K.$('.pk-days .is-selected', K.Sheet.el());
     if (sel) sel.scrollIntoView({ inline: 'center', block: 'nearest' });
     try {
-      const list = await K.Backend.owner.slots(S.studio.id, svc, K.dateKey(off), ob.mode === 'move' ? ob.b.id : null);
-      if (p.off !== off) return;
+      const staff = teamView() ? p.staff || null : null;
+      const list = await K.Backend.owner.slots(S.studio.id, svc, K.dateKey(off), ob.mode === 'move' ? ob.b.id : null, staff);
+      if (p.off !== off || (teamView() ? p.staff || null : null) !== staff) return;
       p.slots = list.map(iso => ({ iso: new Date(Date.parse(iso)).toISOString(), min: spot(iso).min }));
     } catch (e) { p.slots = []; }
     paintPicker();
@@ -2662,20 +3175,24 @@
     if (!iso || ob.busy) return;
     ob.busy = true;
     S.self.add(ob.b.id);
+    // a salon (owner): maybe to another master — checked for her time
+    const to = teamView() && ob.pick.staff && ob.pick.staff !== ob.b.staff_id ? ob.pick.staff : null;
     try {
-      ob.b = await K.Backend.owner.reschedule(ob.b.id, iso, ob.pick.force);
+      const prev = ob.b;
+      const res = await K.Backend.owner.reschedule(ob.b.id, iso, ob.pick.force, to);
+      ob.b = Object.assign({}, prev, res, to ? { staff_name: (crewById(to) || {}).name, staff_color: (crewById(to) || {}).color } : {});
       ob.busy = false;
       ob.mode = 'view';
       ob.pick = null;
       K.haptic([10, 30, 10]);
-      K.toast('Moved — the client will see the new time', 'ok');
+      K.toast(to ? `Moved to ${firstOf((crewById(to) || {}).name)} — the client will see it` : 'Moved — the client will see the new time', 'ok');
       renderOb(true);
       K.onDataChanged();
       syncChanges(true).then(() => refreshView());
     } catch (e) {
       ob.busy = false;
       if (e.code === 'outside_hours' && !ob.pick.force) { ob.pick.force = true; paintPicker(); K.haptic(20); return; }
-      K.toast(err(e), 'x');
+      K.toast(e.code === 'slot_taken' && to ? `${firstOf((crewById(to) || {}).name)} is busy then — pick another time` : err(e), 'x');
       if (e.code === 'slot_taken') loadPicker();
     }
   }
@@ -2692,7 +3209,11 @@
     ob.mode = 'new';
     ob.b = null;
     ob.busy = false;
-    ob.pick = { off: at ? at.off : S.tab === 'calendar' ? Math.max(0, S.day) : 0, min: at ? at.min : null, iso: null, slots: null, custom: '', force: false };
+    ob.pick = {
+      off: at ? at.off : S.tab === 'calendar' ? Math.max(0, S.day) : 0, min: at ? at.min : null, iso: null, slots: null, custom: '', force: false,
+      // a salon (owner): the column she tapped, the master in the calendar filter, or herself
+      staff: (at && at.staff) || (S.tab === 'calendar' && S.calStaff) || ownStaff()
+    };
     K.haptic();
     K.Sheet.open(el => { el.innerHTML = '<div class="ob" data-sheet-scroll></div>'; }, { detent: 'large' });
     renderNew(true);
@@ -2719,7 +3240,7 @@
       box.innerHTML = `
         <header class="ob__head"><button class="cab-back" data-nb-back>${K.I.chevL}Back</button><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
         <h2>Who’s coming?</h2>
-        <p class="ob__sub">${esc(s ? s.title : '')} · ${esc(K.dayLabel(spot(iso).off, false))} · ${K.fmtClock(spot(iso).min)}</p>
+        <p class="ob__sub">${esc(s ? s.title : '')} · ${esc(K.dayLabel(spot(iso).off, false))} · ${K.fmtClock(spot(iso).min)}${teamView() && crewById(ob.pick.staff) && crew().length > 1 ? ' · with ' + esc(firstOf(crewById(ob.pick.staff).name)) : ''}</p>
         <div class="bk-form">
           <label class="field"><span>Name</span><input data-nb="name" value="${esc(nb.name)}" autocomplete="off" placeholder="Start typing — we’ll find returning clients"></label>
           <div class="nb-sugg" id="nb-sugg"></div>
@@ -2754,7 +3275,10 @@
     ob.busy = true;
     renderNew();
     try {
-      const b = await K.Backend.owner.create(S.studio.id, { serviceId: nb.svc, startAt: iso, name: nb.name.trim(), phone: nb.phone, email: nb.email.trim(), note: nb.note.trim() }, ob.pick.force);
+      const b = await K.Backend.owner.create(S.studio.id, {
+        serviceId: nb.svc, startAt: iso, name: nb.name.trim(), phone: nb.phone, email: nb.email.trim(), note: nb.note.trim(),
+        staffId: teamView() ? ob.pick.staff || null : null
+      }, ob.pick.force);
       S.self.add(b.id);
       ob.busy = false;
       K.Sheet.close();
@@ -2811,7 +3335,7 @@
     // anything she touches in a form: no quiet redraws until she leaves it
     if (EDITORS.has(S.tab) && t.closest('.cab__view')) S.dirty = true;
     if ((el = t.closest('[data-cab-new]'))) { openNew(null); return; }
-    if ((el = t.closest('[data-cab-new-at]'))) { const [o, m] = el.dataset.cabNewAt.split(':').map(Number); openNew({ off: o, min: m }); return; }
+    if ((el = t.closest('[data-cab-new-at]'))) { const [o, m, st] = el.dataset.cabNewAt.split(':'); openNew({ off: +o, min: +m, staff: st || null }); return; }
     if ((el = t.closest('[data-cab-new-for]'))) {
       const who = { name: el.dataset.name, phone: el.dataset.phone, email: el.dataset.email };
       openNew(null, who);
@@ -2845,6 +3369,19 @@
     if ((el = t.closest('[data-cab-shift]'))) { shiftDay(+el.dataset.cabShift); return; }
     if ((el = t.closest('[data-cab-today]'))) { S.day = 0; refreshView(true); return; }
     if ((el = t.closest('[data-cab-goday]'))) { S.day = +el.dataset.cabGoday; S.cal = 'day'; refreshView(true); K.haptic(); return; }
+    // a salon: one master / everyone (calendar), whose hours
+    if ((el = t.closest('[data-crew-cal]'))) { S.calStaff = el.dataset.crewCal || null; K.haptic(); refreshView(); return; }
+    if ((el = t.closest('[data-crew-hrs]'))) {
+      if (S.hrsDirty && !confirm('Leave without saving the hours?')) return;
+      S.hrsStaff = el.dataset.crewHrs === ownStaff() ? null : el.dataset.crewHrs;
+      S.hrs = null;
+      S.hrsDirty = false;
+      S.hsched = null;
+      S.dirty = false;
+      K.haptic();
+      refreshView();
+      return;
+    }
     // requests
     if ((el = t.closest('[data-req-yes]'))) { decide(el.dataset.reqYes, true); return; }
     if ((el = t.closest('[data-req-no]'))) { decide(el.dataset.reqNo, false); return; }
@@ -2908,6 +3445,18 @@
       loadPicker();
       return;
     }
+    if ((el = t.closest('[data-pk-staff]'))) {
+      ob.pick.staff = el.dataset.pkStaff;
+      ob.pick.min = null;
+      ob.pick.slots = null;
+      ob.pick.force = false;
+      K.$$('[data-pk-staff]', K.Sheet.el()).forEach(x => x.classList.toggle('is-active', x === el));
+      const box = K.$('#pk-times', K.Sheet.el());
+      if (box) box.innerHTML = '<i class="time time--sk"></i>'.repeat(6);
+      K.haptic();
+      loadPicker();
+      return;
+    }
     if ((el = t.closest('[data-pk-time]'))) {
       ob.pick.min = +el.dataset.pkTime;
       ob.pick.custom = '';
@@ -2936,7 +3485,7 @@
       const r = el.getBoundingClientRect();
       const from = +el.dataset.from;
       const min = Math.round((from + (e.clientY - r.top) / PX) / 15) * 15;
-      openNew({ off: +el.dataset.tl, min });
+      openNew({ off: +el.dataset.tl, min, staff: el.dataset.staff || null });
     }
   }
 
@@ -2981,7 +3530,16 @@
       nb.svc = t.value;
       ob.pick.slots = null;
       ob.pick.min = null;
+      // a salon: only the masters who do this one
+      const chips = K.$('#pk-crew', K.Sheet.el());
+      const html = pkCrewHTML(nb.svc);
+      if (chips) chips.outerHTML = html || '<span id="pk-crew"></span>';
+      else if (html) { const days = K.$('.pk-days', K.Sheet.el()); if (days) days.insertAdjacentHTML('beforebegin', html); }
       loadPicker();
+    }
+    if (t.matches && t.matches('[data-pay-from], [data-pay-to]')) {
+      if (t.matches('[data-pay-from]')) S.payFrom = t.value; else S.payTo = t.value;
+      if (S.payFrom && S.payTo && S.payFrom <= S.payTo) loadPayouts().then(repaint, x => K.toast(err(x), 'x'));
     }
   }
 
@@ -3087,6 +3645,9 @@
     S.studio = null;
     K.setOwnerHere && K.setOwnerHere(false);
     S.known = null;
+    S.team = null;
+    S.scheds = {};
+    S.calStaff = S.hrsStaff = S.hsched = S.insStaff = null;
     K.store.remove('cab');
     Object.keys(MEM).forEach(k => delete MEM[k]);
     S2.profile = S2.services = S2.looks = null;
