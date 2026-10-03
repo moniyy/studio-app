@@ -298,6 +298,8 @@ node tools/make-icon.js --master bella-nails # для мастера → img/bel
   из переменной окружения при `supabase config push`). Письмо со ссылкой и кодом из 6 цифр; на iPhone в установленном приложении —
   «Forgot password?» → код из письма → новый пароль, без перехода в Safari.
 - **Деплой**: `npx supabase functions deploy send-email --use-api --no-verify-jwt` (и `email-unsubscribe`).
+- **Тесты без отправки**: секрет `SMTP_DRYRUN=1` — всё работает как обычно, но письмо не уходит, а его текст и `.ics`
+  сохраняются в `email_log.data.dry_run`; после тестов `npx supabase secrets unset SMTP_DRYRUN` и удалить эти строки журнала.
 
 ## Красивые ссылки
 
