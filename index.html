@@ -59,12 +59,13 @@
         <img src="img/brand/favicon.svg" alt="" width="30" height="30"><span>Satinbook</span>
       </a>
       <nav class="nav__links" aria-label="Sections">
+        <a href="#how">How it works</a>
         <a href="#features">Features</a>
         <a href="#demo">Demo</a>
         <a href="#pricing">Pricing</a>
         <a href="#faq">FAQ</a>
       </nav>
-      <a class="btn btn--sm btn--light" href="#start">Start free</a>
+      <a class="btn btn--sm btn--light" href="#start" data-track="click_try">Start free</a>
     </div>
   </header>
 
@@ -77,8 +78,8 @@
           <h1 class="reveal">Your own booking app. <em>Your name on your clients’ phones.</em></h1>
           <p class="lead reveal">Clients add your app to their Home Screen in one tap, see your prices and free times, and book in two taps — with a deposit. You get a push. No more “how much?” in your DMs.</p>
           <div class="hero__cta reveal">
-            <a class="btn btn--accent" href="#start">Try it free for 30 days</a>
-            <a class="btn btn--ghost" href="#demo">See the demo</a>
+            <a class="btn btn--accent" href="#start" data-track="click_try">Try it free for 30 days</a>
+            <a class="btn btn--ghost" href="#demo" data-track="click_demo">See the demo</a>
           </div>
           <p class="fine reveal">No card needed · I set everything up for you</p>
         </div>
@@ -117,6 +118,19 @@
             <div class="pain__q"><span class="pain__tag">Before</span><p>A new client waits for your reply — and books with whoever answered first.</p></div>
             <div class="pain__a"><span class="pain__tag pain__tag--ok">With your app</span><p>Your app answers in a second, even at midnight, even while you’re mid-set.</p></div>
           </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ============ How it works ============ -->
+    <section class="sec" id="how">
+      <div class="wrap">
+        <p class="eyebrow reveal">How it works</p>
+        <h2 class="reveal">Live in a day. Three steps.</h2>
+        <ol class="steps">
+          <li class="step reveal"><span class="step__n">1</span><h3>Send me your Instagram</h3><p>Your handle and your price list — that’s all I need to start.</p></li>
+          <li class="step reveal"><span class="step__n">2</span><h3>I build your app in 24 hours</h3><p>Your name, photos, services, hours and rules — set up and ready to check.</p></li>
+          <li class="step reveal"><span class="step__n">3</span><h3>Put the link in your bio</h3><p>Clients tap it, add your app to their Home Screen and book in two taps.</p></li>
         </ol>
       </div>
     </section>
@@ -184,8 +198,8 @@
           <h2 class="reveal">Tap around a real app.</h2>
           <p class="lead reveal">Meet Aria Lash Studio — a demo studio. Book a set, ask the assistant, open the owner dashboard. Nothing is real, nothing gets sent.</p>
           <div class="demo__cta reveal">
-            <a class="btn btn--light" href="demo">Open as a client</a>
-            <a class="btn btn--ghost" href="demo?owner=1">Open the owner dashboard</a>
+            <a class="btn btn--light" href="demo" data-track="click_demo">Open as a client</a>
+            <a class="btn btn--ghost" href="demo?owner=1" data-track="click_owner_demo">Open the owner dashboard</a>
           </div>
           <p class="fine reveal">Best on your phone. On a computer it opens in a phone-sized window.</p>
         </div>
@@ -211,7 +225,7 @@
             <li>Deposits, cancel rules, lash maps, gallery</li>
             <li>Setup done for you — services, prices, photos</li>
           </ul>
-          <a class="btn btn--accent btn--wide" href="#start">Start your free trial</a>
+          <a class="btn btn--accent btn--wide" href="#start" data-track="click_try">Start your free trial</a>
           <p class="fine">No card for the trial. No contracts.</p>
         </div>
       </div>
@@ -271,6 +285,7 @@
             <p class="form-err" id="lead-err" role="alert" hidden></p>
             <button class="btn btn--accent btn--wide" type="submit">Start my free trial</button>
             <p class="fine">No card needed. I’ll only use your email to set up your app.</p>
+            <p class="form-legal">By sending this, you agree to our <a href="terms">Terms</a> &amp; <a href="privacy">Privacy Policy</a>.</p>
           </form>
           <div class="done" id="lead-done" hidden tabindex="-1">
             <div class="done__icon"><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></div>
@@ -286,7 +301,7 @@
     <div class="wrap foot__in">
       <a class="logo" href="#top"><img src="img/brand/favicon.svg" alt="" width="26" height="26"><span>Satinbook</span></a>
       <p>Your own booking app for beauty artists.</p>
-      <p><a href="mailto:hello@satinbook.com">hello@satinbook.com</a> · <a href="demo">Demo</a></p>
+      <p><a href="mailto:hello@satinbook.com">hello@satinbook.com</a> · <a href="demo">Demo</a> · <a href="privacy">Privacy</a> · <a href="terms">Terms</a></p>
       <p class="fine">© 2026 Satinbook</p>
     </div>
   </footer>

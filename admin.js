@@ -11,14 +11,16 @@
    • Welcome kit: links, the temporary password (shown once), a printable
      QR card and a ready message for the master.
    • Leads: "Start your free trial" from satinbook.com — status, notes,
-     "Create studio" (New studio filled in from the lead).
+     "Create studio" (New studio filled in from the lead); the landing page's
+     counts for the last 7 days on top.
+   • Errors: what broke in the apps, the same error together, counted.
    ========================================================= */
 (function () {
   'use strict';
 
   let K = null;
   let root = null;
-  const A = { session: null, list: null, view: 'list', q: '', form: null, kit: null, busy: false, leads: null, leadFilter: 'all' };
+  const A = { session: null, list: null, view: 'list', q: '', form: null, kit: null, busy: false, leads: null, leadFilter: 'all', errors: null, landing: null };
 
   const $ = (s, el) => (el || root).querySelector(s);
   const $$ = (s, el) => Array.from((el || root).querySelectorAll(s));
@@ -71,7 +73,7 @@
     let ok = false;
     try { ok = await K.Backend.admin.isAdmin(); } catch (e) { renderSignIn(errText(e)); return; }
     if (!ok) { renderNotAdmin(); return; }
-    go(location.hash === '#leads' ? 'leads' : 'list');
+    go(location.hash === '#leads' ? 'leads' : location.hash === '#errors' ? 'errors' : 'list');
   }
 
   function renderSignIn(msg) {
@@ -124,9 +126,10 @@
   function go(view) {
     A.view = view;
     // …?admin=1#leads (the link in the "New lead" email) opens the leads
-    try { history.replaceState(history.state, '', location.pathname + location.search + (view === 'leads' ? '#leads' : '')); } catch (e) { /* file:// */ }
+    try { history.replaceState(history.state, '', location.pathname + location.search + (view === 'leads' || view === 'errors' ? '#' + view : '')); } catch (e) { /* file:// */ }
     if (view === 'list') renderList();
     else if (view === 'leads') renderLeads();
+    else if (view === 'errors') renderErrors();
     else if (view === 'new') renderNew();
     else if (view === 'kit') renderKit();
     root.scrollTop = 0;
@@ -142,11 +145,16 @@
     ${title ? `<h1 class="adm-title">${title}</h1>` : ''}`;
   // Studios | Leads (new ones counted)
   const newLeads = () => (A.leads || []).filter(l => l.status === 'new').length;
+  // Studios | Leads (new ones counted) | Errors (in the last hour)
+  const hourErrors = () => (A.errors && A.errors.total_1h) || 0;
+  const TABS = ['list', 'leads', 'errors'];
   const tabsHTML = () => `
-    <div class="adm-tabs-wrap"><div class="segmented adm-tabs" role="tablist" style="--n:2;--idx:${A.view === 'leads' ? 1 : 0}"><i class="segmented__thumb"></i>
-      <button role="tab" data-a-go="list" aria-checked="${A.view !== 'leads'}">Studios</button>
+    <div class="adm-tabs-wrap"><div class="segmented adm-tabs" role="tablist" style="--n:3;--idx:${Math.max(0, TABS.indexOf(A.view))}"><i class="segmented__thumb"></i>
+      <button role="tab" data-a-go="list" aria-checked="${A.view === 'list'}">Studios</button>
       <button role="tab" data-a-go="leads" aria-checked="${A.view === 'leads'}">Leads${newLeads() ? ` <span class="adm-tabs__n num">${newLeads()}</span>` : ''}</button>
+      <button role="tab" data-a-go="errors" aria-checked="${A.view === 'errors'}">Errors${hourErrors() ? ` <span class="adm-tabs__n adm-tabs__n--err num">${hourErrors()}</span>` : ''}</button>
     </div></div>`;
+  const repaintTabs = () => { const t = $('.adm-tabs-wrap'); if (t) t.outerHTML = tabsHTML(); };
 
   /* ---------- the list ---------- */
   const day = 864e5;
@@ -175,7 +183,8 @@
   async function renderList() {
     root.innerHTML = barHTML('') + tabsHTML() + '<main class="adm-main"><div class="adm-load"><i class="spin"></i></div></main>';
     try {
-      [A.list, A.mail, A.leads] = await Promise.all([K.Backend.admin.studios(), K.Backend.admin.emailStats().catch(() => null), K.Backend.admin.leads().catch(() => A.leads)]);
+      [A.list, A.mail, A.leads, A.errors] = await Promise.all([K.Backend.admin.studios(), K.Backend.admin.emailStats().catch(() => null),
+        K.Backend.admin.leads().catch(() => A.leads), K.Backend.admin.errors().catch(() => A.errors)]);
       const tabs = $('.adm-tabs-wrap');
       if (tabs && A.view === 'list') tabs.outerHTML = tabsHTML();
     } catch (e) {
@@ -439,7 +448,9 @@
   const LEAD_ST = [['new', 'New'], ['contacted', 'Contacted'], ['trial', 'Trial'], ['lost', 'Lost']];
   async function renderLeads() {
     root.innerHTML = barHTML('') + tabsHTML() + '<main class="adm-main"><div class="adm-load"><i class="spin"></i></div></main>';
-    try { A.leads = await K.Backend.admin.leads(); } catch (e) {
+    try {
+      [A.leads, A.landing] = await Promise.all([K.Backend.admin.leads(), K.Backend.admin.landing(7).catch(() => null)]);
+    } catch (e) {
       $('.adm-main').innerHTML = `<div class="adm-empty"><b>${esc(errText(e))}</b><button class="btn btn--soft btn--sm" data-a-go="leads">Try again</button></div>`;
       return;
     }
@@ -455,6 +466,7 @@
     const list = f === 'all' ? all : all.filter(l => l.status === f);
     const n = s => all.filter(l => l.status === s).length;
     main.innerHTML = `
+      ${landingHTML()}
       <div class="adm-head">
         <div><h1>Leads</h1><p class="adm-muted">${all.length ? `${all.length} from satinbook.com${n('new') ? ` · <b class="adm-warn-text">${n('new')} new</b>` : ''}` : 'From “Start your free trial” on satinbook.com'}</p></div>
       </div>
@@ -488,6 +500,58 @@
         </div>
       </article>`;
   }
+  /* "Landing · last 7 days": views, taps, form sends, and which studio apps sent visitors */
+  function landingHTML() {
+    const d = A.landing;
+    if (!d) return '';
+    const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 + '%' : '—');
+    const days = [];
+    for (let i = d.days - 1; i >= 0; i--) days.push(new Date(Date.now() - i * 864e5).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }));
+    const byDay = Object.fromEntries((d.by_day || []).map(x => [x.day, +x.views]));
+    const max = Math.max(1, ...days.map(k => byDay[k] || 0));
+    const kpi = (n, label) => `<div><b class="num">${n}</b><small>${label}</small></div>`;
+    return `
+      <section class="adm-land">
+        <div class="adm-due__head"><h2>Landing · last ${d.days} days</h2><span class="num">${esc(pct(d.leads, d.views))} sent the form</span></div>
+        <div class="adm-land__kpis">
+          ${kpi(d.views, 'Views')}${kpi(d.click_try, 'Try it free')}${kpi(d.click_demo, 'See the demo')}${kpi(d.click_owner_demo, 'Owner dashboard')}${kpi(d.leads, 'Leads')}
+        </div>
+        <div class="adm-land__bars" aria-label="Views by day">${days.map(k => `<i style="height:${Math.max(4, Math.round(((byDay[k] || 0) / max) * 100))}%" title="${esc(k)}: ${byDay[k] || 0}"></i>`).join('')}</div>
+        ${(d.refs || []).length ? `<p class="adm-muted">From “Powered by Satinbook”: ${d.refs.map(r => `<b>/${esc(r.ref)}</b> ${r.n}`).join(' · ')}</p>` : '<p class="adm-muted">No visits from “Powered by Satinbook” yet.</p>'}
+      </section>`;
+  }
+
+  /* ---------- Errors: what broke in the apps (last 7 days), the same error together ---------- */
+  async function renderErrors() {
+    root.innerHTML = barHTML('') + tabsHTML() + '<main class="adm-main"><div class="adm-load"><i class="spin"></i></div></main>';
+    try { A.errors = await K.Backend.admin.errors(); } catch (e) {
+      $('.adm-main').innerHTML = `<div class="adm-empty"><b>${esc(errText(e))}</b><button class="btn btn--soft btn--sm" data-a-go="errors">Try again</button></div>`;
+      return;
+    }
+    repaintTabs();
+    const d = A.errors;
+    const groups = d.groups || [];
+    const ROLE = { client: 'Clients', owner: 'Owners', staff: 'Masters', admin: 'Admin', landing: 'Landing' };
+    $('.adm-main').innerHTML = `
+      <div class="adm-head">
+        <div><h1>Errors</h1><p class="adm-muted"><b class="num">${d.total_24h}</b> in 24 h · <b class="num${d.total_1h > 10 ? ' adm-warn-text' : ''}">${d.total_1h}</b> in the last hour · more than 10 in an hour emails hello@</p></div>
+      </div>
+      ${groups.length ? `<div class="adm-errs">${groups.map(g => `
+        <article class="adm-card adm-err${g.n_24h ? '' : ' is-old'}">
+          <div class="adm-err__top">
+            <span class="adm-pill adm-pill--${g.kind === 'request' ? 'trial' : g.kind === 'rejection' ? 'contacted' : 'new'}">${esc(g.kind)}</span>
+            <span class="adm-err__n"><b class="num">${g.n_24h}</b> in 24 h · <span class="num">${g.n_7d}</span> in 7 days</span>
+          </div>
+          <b class="adm-err__msg">${esc(g.message)}</b>
+          <small class="adm-muted">${g.source ? `<span class="adm-link">${esc(g.source)}</span> · ` : ''}last ${esc(ago(g.last_at))} · first ${esc(fmtDate(g.first_at))}</small>
+          <small class="adm-muted">${(g.roles || []).map(r => esc(ROLE[r] || r)).join(', ')}${(g.slugs || []).length ? ' · ' + g.slugs.slice(0, 6).map(x => '/' + esc(x)).join(' ') : ''}</small>
+          ${g.last ? `<details class="adm-edit"><summary>Details</summary>
+            <pre class="adm-err__stack">${esc(g.last.stack || '(no stack)')}</pre>
+            <small class="adm-muted">${esc(g.last.page || '')} · ${esc(g.last.version || '')}<br>${esc(g.last.ua || '')}</small>
+          </details>` : ''}
+        </article>`).join('')}</div>` : '<div class="adm-empty"><b>No errors in the last 7 days ✓</b><span>Errors from the apps, the dashboard and satinbook.com show up here, grouped.</span></div>'}`;
+  }
+
   const leadById = id => (A.leads || []).find(l => l.id === id);
   async function setLeadStatus(id, status, btn) {
     const l = leadById(id);

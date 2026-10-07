@@ -17,6 +17,8 @@
       var slug = (root === '/' ? parts[parts.length - 1] : parts[1] || '') || '';
       slug = slug.toLowerCase();
       if (!ok.test(slug)) { location.replace(root); return; }
+      // the site's own pages, not studios
+      if (slug === 'privacy' || slug === 'terms') { location.replace(root + slug + '.html' + location.hash); return; }
       var q = location.search.replace(/^\?/, '');
       location.replace(root + 'app.html?m=' + encodeURIComponent(slug) + (q ? '&' + q : '') + location.hash);
     })();

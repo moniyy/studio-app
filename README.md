@@ -365,6 +365,73 @@ DNS в Cloudflare (у записей сайта Proxy status — **DNS only**):
 - **Проверка**: `https://satinbook.com/bella-brows` открывает студию; `moniyy.github.io/studio-app/?m=bella-brows` ведёт туда же;
   письмо «Send me a test» из Studio → Emails — ссылки на новый домен; «Forgot password?» — письмо приходит, код работает.
 
+## Надёжность
+
+### База не засыпает
+
+Supabase Free ставит проект на паузу после недели без активности. Workflow **Keep the database awake**
+(`.github/workflows/keepalive.yml`) раз в день (07:23 UTC) вызывает `public.ping()` с anon-ключом. Если три попытки
+не прошли — запуск падает (GitHub присылает письмо владельцу репозитория) и открывается issue «Database ping failed»
+со ссылкой на проект: если там **Paused** — нажать **Restore** и перезапустить workflow (Actions → Run workflow).
+
+### Резервные копии
+
+Workflow **Weekly database backup** (`.github/workflows/backup.yml`) по воскресеньям (06:41 UTC) делает `pg_dump` 17:
+`schema.sql` (таблицы и функции приложения — схемы `public`, `private`) и `data.sql` (все строки: `public`, `private`,
+`auth` — аккаунты, `storage` — записи о фото), gzip, папка с датой — в **приватный** репозиторий `moniyy/satinbook-backups`.
+Хранятся последние 8 копий (репозиторий каждый раз переписывается одним коммитом, старые копии удаляются по-настоящему).
+Подключается роль **`satinbook_backup`** — только чтение (`pg_read_all_data`), её пароль есть только в секрете
+`SUPABASE_BACKUP_DB_URL`; в репозиторий пишет ключ развёртывания `BACKUP_DEPLOY_KEY` с доступом только к нему.
+Если упало — issue «Weekly backup failed». Запустить вручную: Actions → Weekly database backup → Run workflow.
+
+В копии — вся база: студии, записи, клиентки, аккаунты (`auth.users` с хешами паролей), поэтому репозиторий приватный.
+**Фото из Storage в копию не входят** (в базе только ссылки на них) — их хранит Supabase Storage.
+
+**Как восстановить** (в новый проект Supabase; в этот же — сначала очистить таблицы `public`):
+1. Скачать нужную папку: `git clone git@github.com:moniyy/satinbook-backups.git` → папка `ГГГГ-ММ-ДД`, `gunzip *.sql.gz`.
+2. Создать проект в Supabase (регион us-east-1), привязать CLI: `npx supabase link --project-ref <новый ref>`,
+   затем `npx supabase db push` — миграции из репозитория создают все таблицы и функции (`schema.sql` — для сверки).
+3. Строка подключения нового проекта: Settings → Database → Connection string (Session pooler) = `$NEW_DB_URL`. Залить данные:
+   ```
+   psql --single-transaction --variable ON_ERROR_STOP=1 \
+     --command 'SET session_replication_role = replica' --file data.sql \
+     --dbname "$NEW_DB_URL"
+   ```
+   (`replica` — без триггеров: письма и push во время заливки не уходят.)
+4. Задеплоить функции (`npx supabase functions deploy <имя> --use-api --no-verify-jwt` для каждой папки в `supabase/functions`),
+   поставить секреты (`RESEND_API_KEY`, `VAPID_*`, `PUSH_HOOK_SECRET`, `APP_BASE_URL`), в Vault — `email_function_url`
+   и `push_hook_secret`, `npx supabase config push` (с `RESEND_API_KEY` в окружении); пароль роли `satinbook_backup`
+   и секрет `SUPABASE_BACKUP_DB_URL` — заново.
+5. Обновить секреты GitHub `SUPABASE_URL` / `SUPABASE_ANON_KEY` (и `config.js` локально) — сайт заработает с новой базой.
+
+### Журнал ошибок
+
+Приложение клиенток, кабинет, админка и satinbook.com ловят `window.onerror`, `unhandledrejection` и неудачные запросы к
+Supabase (кроме обычных ответов вроде `slot_taken`, `invalid_phone` и офлайна) → `public.log_client_error` → таблица
+`client_errors`: студия, роль (client / owner / staff / admin / landing), сообщение, стек, страница без параметров,
+браузер, версия кэша. Email-адреса, телефоны, токены и id вычищаются ещё в базе; не больше 500 записей в час
+и 20 одинаковых за 10 минут. **Админка → Errors**: одинаковые ошибки вместе, счётчик за 24 ч и 7 дней, где и у кого,
+стек последней. Больше 10 ошибок за час — письмо на hello@ (не чаще раза в час). Хранятся 30 дней (pg_cron `studio-prune-logs`).
+
+### Счётчики главной (без cookies и внешних сервисов)
+
+`landing.js` → `public.track_event`: просмотр (раз за визит), нажатия Try it free / See the demo / Open the owner
+dashboard, отправка формы, переход по «Powered by Satinbook» (`?ref=<slug>`). Таблица `events` (12 месяцев), IP и cookies
+не сохраняются. **Админка → Leads → «Landing · last 7 days»**: цифры, просмотры по дням, какие студии привели гостей.
+
+### Правовые страницы
+
+`privacy.html` и `terms.html` открываются как **satinbook.com/privacy** и **/terms** (и через 404.html / service worker,
+если адрес без `.html` не сработал). Ссылки: футер главной, More у клиентки, строка у кнопки Confirm, форма заявки,
+экран входа мастера. Это простой шаблон для небольшого сервиса в США — перед ростом стоит показать юристу.
+
+### Ключ Resend
+
+Секрет `RESEND_API_KEY` — ключ **только на отправку** (Sending access, домен satinbook.com). Он же — пароль Auth SMTP
+(`RESEND_API_KEY=… npx supabase config push`). Сменить ключ: `npx supabase secrets set RESEND_API_KEY=…`, затем
+`config push` с тем же значением в переменной окружения, проверить письмо, удалить старый ключ в Resend.
+Статусы доставки через API Resend таким ключом не читаются — смотреть в панели Resend → Emails.
+
 ## Полезные параметры адреса
 
 | Параметр | Что делает |

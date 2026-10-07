@@ -165,7 +165,7 @@ input { -webkit-user-select: text; user-select: text; }
 .tile:active, .msg-action:active, .send:active, .svc-card:active, .svc2:active, .story:active, .review:active,
 .contact:active, .pick:active, .day:active, .time:active, .bk-chosen:active, .pbtn:active, .cc-slot:active,
 .cc-row:active, .stories__cta:active, .onb__skip:active {
-  transform: scale(.96);
+  transform: scale(.97);
   filter: brightness(.92);
   transition-duration: .1s;
 }
@@ -6383,3 +6383,80 @@ html.is-admin .app::after, html.is-admin .statusbar, html.is-admin .desk, html.i
 .tabbar .tab[hidden] { display: none; }
 /* the field the setup list sent her to */
 .cab .field.is-hint input { box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* Terms & Privacy: under "Powered by" in More, and by the Confirm button */
+.foot-legal { margin: -4px 0 8px; text-align: center; font-size: var(--fs-12); color: var(--text-2); }
+.foot-legal a, .bk-legal a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.sheet__foot:has(.bk-legal) { flex-wrap: wrap; row-gap: 8px; }
+.bk-legal { flex: 0 0 100%; order: -1; margin: 0; font-size: 11.5px; line-height: 1.35; text-align: center; color: var(--text-2); }
+.cab-auth__legal { margin-top: 6px; font-size: var(--fs-12); line-height: 1.4; color: var(--text-2); }
+.cab-auth__legal a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+
+/* Admin: Errors tab, Landing · last 7 days */
+.adm-tabs__n--err { background: #FF3B30; color: #fff; }
+.adm-errs { display: flex; flex-direction: column; gap: 10px; }
+.adm-err { gap: 6px; }
+.adm-err.is-old { opacity: .7; }
+.adm-err__top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.adm-err__n { font-size: var(--fs-13); color: var(--text-2); }
+.adm-err__n b { color: var(--text); }
+.adm-err__msg { font-size: var(--fs-15); line-height: 1.35; overflow-wrap: anywhere; }
+.adm-err__stack { max-height: 220px; overflow: auto; margin: 8px 0; padding: 10px 12px; border-radius: 12px; background: var(--fill); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.adm-land { display: flex; flex-direction: column; gap: 10px; padding: 16px; border-radius: 20px; background: var(--card); box-shadow: var(--shadow-sm); }
+.adm-land__kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.adm-land__kpis > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.adm-land__kpis b { font-size: var(--fs-20, 20px); letter-spacing: -.02em; }
+.adm-land__kpis small { font-size: 11px; font-weight: 600; color: var(--text-2); line-height: 1.25; }
+.adm-land__bars { display: flex; align-items: flex-end; gap: 4px; height: 44px; }
+.adm-land__bars i { flex: 1; min-height: 3px; border-radius: 4px 4px 2px 2px; background: var(--accent); opacity: .8; }
+@media (max-width: 560px) { .adm-land__kpis { grid-template-columns: repeat(3, 1fr); row-gap: 12px; } }
+
+/* ---------- Tour: the screen dims, one thing is lit, a card says what it is ---------- */
+.tour { position: fixed; inset: 0; z-index: 700; animation: tour-in .25s var(--ease) both; }
+.tour.is-out { opacity: 0; transition: opacity .2s var(--ease); }
+.tour__spot {
+  position: fixed; left: 50%; top: 50%; width: 0; height: 0; border-radius: 16px; pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, .62), 0 0 0 2px color-mix(in srgb, var(--accent) 80%, #fff);
+  transition: left .35s var(--ease), top .35s var(--ease), width .35s var(--ease), height .35s var(--ease), border-radius .35s var(--ease), opacity .2s;
+}
+.tour__card {
+  position: fixed; display: flex; flex-direction: column; gap: 6px; padding: 16px 16px 14px; border-radius: 20px;
+  background: var(--card); color: var(--text); box-shadow: 0 18px 50px -12px rgba(0, 0, 0, .55), 0 0 0 .5px var(--line);
+  transition: left .35s var(--ease), top .35s var(--ease);
+}
+.tour__card.is-in { animation: tour-card .32s var(--spring) both; }
+.tour__n { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.tour__t { font-size: var(--fs-17); letter-spacing: -.01em; line-height: 1.25; }
+.tour__p { margin: 0; font-size: var(--fs-14); line-height: 1.45; color: var(--text-2); }
+.tour__row { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+.tour__skip { padding: 8px 4px; font-size: var(--fs-14); font-weight: 600; color: var(--text-2); }
+@keyframes tour-in { from { opacity: 0; } }
+@keyframes tour-card { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+.tour.is-still, .tour.is-still .tour__spot, .tour.is-still .tour__card { animation: none; transition: none; }
+
+/* Studio: "Your link" — copy it for the Instagram bio */
+.cab-linkcard { display: flex; align-items: center; gap: 12px; padding: 14px 16px; }
+.cab-linkcard__txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cab-linkcard__txt small { font-size: var(--fs-13); color: var(--text-2); overflow-wrap: anywhere; }
+.cab-linkcard .btn svg { width: 16px; height: 16px; }
+.cab-tour-again { display: block; margin: 4px auto 0; }
+
+/* ---------- Micro-animations (none with Reduce Motion) ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  /* "You're booked": the circle pops, the tick draws itself */
+  .bk-done__check { animation: done-pop .45s var(--spring) both; }
+  .bk-done__check svg path, .bk-done__check svg polyline { stroke-dasharray: 40; stroke-dashoffset: 40; animation: done-draw .45s .22s var(--ease) forwards; }
+  /* a new booking slides in from above */
+  .is-arriving { animation: arrive .55s var(--spring) both; }
+  /* dashboard tabs: a soft fade */
+  .cab__view { animation: view-fade .22s var(--ease) both; }
+}
+@keyframes done-pop { from { opacity: 0; transform: scale(.6); } }
+@keyframes done-draw { to { stroke-dashoffset: 0; } }
+@keyframes arrive { from { opacity: 0; transform: translateY(-14px); } }
+@keyframes view-fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .press:active, .btn:active, .chip:active, .slot:active, .icon-btn:active, .nav-btn:active, .swatch:active,
+  .tile:active, .msg-action:active, .send:active, .pick:active, .day:active, .time:active, .cc-row:active { transform: none; }
+}
+.tour.is-wait { opacity: 0; pointer-events: none; }

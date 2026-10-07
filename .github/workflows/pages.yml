@@ -52,7 +52,7 @@ jobs:
         run: |
           mkdir _site
           # index.html + landing.* = the product page (satinbook.com); app.html = the app itself
-          cp -r index.html landing.css landing.js app.html 404.html app.css app.js backend.js cabinet.js admin.js config.js sw.js manifests img masters _site/
+          cp -r index.html landing.css landing.js privacy.html terms.html app.html 404.html app.css app.js backend.js cabinet.js admin.js config.js sw.js manifests img masters _site/
           # a domain of its own (README → "Switch to satinbook.com")
           if [ -f CNAME ]; then cp CNAME _site/; fi
 

@@ -36,6 +36,54 @@
     return new BackendError('unknown', msg);
   }
 
+  /* App errors → public.log_client_error: what broke, on which page and app version —
+     never a client's name, phone or email (the database scrubs them out once more).
+     Uncaught errors, unhandled promise rejections and Supabase calls that failed for
+     a reason that isn't an answer (slot_taken, invalid_phone… are answers). */
+  const errors = (() => {
+    const ctx = { slug: '', role: 'client' };
+    const seen = new Set();
+    let sent = 0;
+    const version = () => (window.caches ? caches.keys().then(k => (k.find(x => /-shell$/.test(x)) || '').replace(/-shell$/, '')).catch(() => '') : Promise.resolve(''));
+    async function report(kind, message, stack, source) {
+      message = String(message || '').trim().slice(0, 500);
+      if (!configured || !message || /^Script error\.?$|ResizeObserver loop/i.test(message)) return;
+      const key = kind + '|' + message + '|' + (source || '');
+      if (seen.has(key) || sent >= 15) return; // one of each per page, at most 15
+      seen.add(key);
+      sent++;
+      const p = { kind, role: ctx.role, slug: ctx.slug, message, stack: String(stack || '').slice(0, 2000), source: String(source || '').slice(0, 300),
+        page: location.pathname, ua: navigator.userAgent.slice(0, 300), version: await version() };
+      try {
+        await fetch(cfg.supabaseUrl + '/rest/v1/rpc/log_client_error', {
+          method: 'POST', keepalive: true,
+          headers: { apikey: cfg.supabaseAnonKey, Authorization: 'Bearer ' + cfg.supabaseAnonKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ p })
+        });
+      } catch (e) { /* offline: nothing to do */ }
+    }
+    window.addEventListener('error', e => {
+      // a picture that didn't load is not an error of ours; nor is a browser extension
+      if (!e.message || (e.filename && !e.filename.startsWith(location.origin))) return;
+      report('error', e.message, e.error && e.error.stack, `${String(e.filename || '').replace(location.origin, '')}:${e.lineno || 0}:${e.colno || 0}`);
+    });
+    window.addEventListener('unhandledrejection', e => {
+      const r = e.reason || {};
+      if (r instanceof BackendError) return; // a failed call is reported where it failed
+      report('rejection', r.message || String(r), r.stack, '');
+    });
+    return { report, context: c => Object.assign(ctx, c) };
+  })();
+  // a call that failed for a reason worth knowing: offline is not one, an answer (slot_taken…) neither
+  const ANSWERS = KNOWN.filter(c => c !== 'timeout' && c !== 'forbidden');
+  function fail(fn, err) {
+    const offline = err.code === 'network' && navigator.onLine === false;
+    if (!offline && !ANSWERS.includes(err.code) && !/^(invalid|bad|too|email|slug|not)_/.test(err.code === 'unknown' ? '' : err.code)) {
+      errors.report('request', fn + ' → ' + err.code, String(err.message || '').slice(0, 500), fn);
+    }
+    return err;
+  }
+
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       if (window.supabase && window.supabase.createClient) { resolve(); return; }
@@ -145,8 +193,8 @@
         await withTimeout(sb.auth.refreshSession(), 18000);
         res = await call();
       }
-    } catch (e) { throw toError(e); }
-    if (res.error) throw toError(res.error);
+    } catch (e) { throw fail(fn, toError(e)); }
+    if (res.error) throw fail(fn, toError(res.error));
     return res.data;
   }
 
@@ -161,11 +209,11 @@
         headers: { apikey: cfg.supabaseAnonKey, Authorization: 'Bearer ' + cfg.supabaseAnonKey, 'Content-Type': 'application/json' },
         body: JSON.stringify(args || {})
       }), 2 * FETCH_MS + 2000);
-    } catch (e) { throw toError(e); }
+    } catch (e) { throw fail(fn, toError(e)); }
     const text = await res.text();
     let body = null;
     try { body = text ? JSON.parse(text) : null; } catch (e) { body = text; }
-    if (!res.ok) throw toError(body && body.message ? body : { message: 'HTTP ' + res.status });
+    if (!res.ok) throw fail(fn, toError(body && body.message ? body : { message: 'HTTP ' + res.status }));
     return body;
   }
   // set-returning RPCs come back as [value] or [{fn: value}] depending on the server
@@ -362,12 +410,12 @@
         const s = r && r.data && r.data.session;
         if (s) res = await call(s);
       }
-    } catch (e) { throw toError(e); }
+    } catch (e) { throw fail(fn, toError(e)); }
     if (res.error) {
       let code = 'unknown';
       let msg = res.error.message;
       try { const j = await res.error.context.json(); code = j.error || code; msg = j.message || msg; } catch (e) { if (/fetch|network/i.test(msg || '')) code = 'network'; }
-      throw new BackendError(code, msg);
+      throw fail(fn, new BackendError(code, msg));
     }
     return res.data;
   }
@@ -384,10 +432,13 @@
     // "Start your free trial" on satinbook.com: the list, and status / notes / the studio made from it
     leads: () => rpc('admin_leads'),
     saveLead: (id, p) => rpc('admin_save_lead', { p_id: id, p }),
+    // app errors grouped (last 7 days) and the landing page's counts
+    errors: () => rpc('admin_errors'),
+    landing: days => rpc('admin_landing_stats', { p_days: days || 7 }),
     create: body => invoke('admin-create-master', body, 60000),
     resetPassword: id => invoke('admin-master-action', { action: 'reset_password', master_id: id }),
     remove: (id, slug) => invoke('admin-master-action', { action: 'delete', master_id: id, confirm: slug })
   };
 
-  window.StudioBackend = Object.assign({ configured, client, BackendError, auth, owner, admin, vapidPublicKey: cfg.vapidPublicKey || '' }, publicApi);
+  window.StudioBackend = Object.assign({ configured, client, BackendError, errors, auth, owner, admin, vapidPublicKey: cfg.vapidPublicKey || '' }, publicApi);
 })();

@@ -13,7 +13,7 @@ import { cors, json, requireAdmin, serviceClient, tempPassword } from '../_share
 import { TEMPLATES } from './templates.ts';
 
 const TZ = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Anchorage', 'Pacific/Honolulu'];
-const RESERVED = ['demo', 'admin', 'www', 'api', 'app', 'apps', 'test', 'studio', 'help', 'support', 'manifest', 'manifests', 'img', 'owner', 'login',
+const RESERVED = ['demo', 'admin', 'www', 'api', 'app', 'apps', 'test', 'studio', 'help', 'support', 'manifest', 'manifests', 'img', 'owner', 'login', 'privacy', 'terms', 'legal', 'landing',
   'masters', 'index', 'config', 'sw', 'assets', 'static']; // + the site's own paths (pretty links)
 const clean = (v: unknown, max: number) => String(v ?? '').trim().slice(0, max);
 const b64 = (s: string) => Uint8Array.from(atob(s), c => c.charCodeAt(0));

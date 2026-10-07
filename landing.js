@@ -19,21 +19,45 @@
   window.addEventListener('scroll', onScroll, { passive: true });
   onScroll();
 
-  /* ---------- reveal on scroll ---------- */
+  /* ---------- reveal on scroll: as soon as a block's top is 10% into the screen ---------- */
   const items = [...document.querySelectorAll('.reveal')];
-  if ('IntersectionObserver' in window) {
+  const still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if ('IntersectionObserver' in window && !still) {
     const io = new IntersectionObserver(entries => {
       entries.forEach(e => {
         if (!e.isIntersecting) return;
-        // neighbours that come in together arrive one after another
+        // neighbours that come in together arrive just one after another
         const sibs = [...e.target.parentElement.children].filter(x => x.classList.contains('reveal'));
-        e.target.style.transitionDelay = Math.min(sibs.indexOf(e.target), 5) * 70 + 'ms';
+        e.target.style.transitionDelay = Math.min(Math.max(0, sibs.indexOf(e.target)), 3) * 40 + 'ms';
         e.target.classList.add('is-in');
         io.unobserve(e.target);
       });
-    }, { rootMargin: '0px 0px -8% 0px', threshold: .08 });
+    }, { rootMargin: '0px 0px -10% 0px', threshold: 0 });
     items.forEach(el => io.observe(el));
   } else items.forEach(el => el.classList.add('is-in'));
+
+  /* ---------- counts: views, taps, form sends, “Powered by” visits (no cookies) ---------- */
+  const rpc = (fn, body) => (cfg.supabaseUrl && cfg.supabaseAnonKey ? fetch(cfg.supabaseUrl.replace(/\/$/, '') + '/rest/v1/rpc/' + fn, {
+    method: 'POST', keepalive: true,
+    headers: { 'Content-Type': 'application/json', apikey: cfg.supabaseAnonKey, Authorization: 'Bearer ' + cfg.supabaseAnonKey },
+    body: JSON.stringify(body)
+  }) : Promise.reject(new Error('no backend')));
+  const track = (kind, r) => rpc('track_event', { p_kind: kind, p_ref: r || '', p_path: location.pathname }).catch(() => null);
+  // once per visit (this tab): a view, and where she came from
+  const once = k => { try { if (sessionStorage.getItem('sb:' + k)) return false; sessionStorage.setItem('sb:' + k, '1'); } catch (e) { /* private mode */ } return true; };
+  if (once('view')) track('view');
+  if (ref && new URLSearchParams(location.search).get('ref') && once('ref:' + ref)) track('ref', ref);
+  document.addEventListener('click', e => { const a = e.target.closest('[data-track]'); if (a) track(a.dataset.track); });
+  // something broke on this page: Admin → Errors
+  const reported = new Set();
+  const report = (kind, message, stack, source) => {
+    message = String(message || '').slice(0, 500);
+    if (!message || /^Script error/i.test(message) || reported.has(message) || reported.size > 9) return;
+    reported.add(message);
+    rpc('log_client_error', { p: { kind, role: 'landing', message, stack: String(stack || '').slice(0, 2000), source: source || '', page: location.pathname, ua: navigator.userAgent.slice(0, 300) } }).catch(() => null);
+  };
+  window.addEventListener('error', e => { if (e.message && (!e.filename || e.filename.startsWith(location.origin))) report('error', e.message, e.error && e.error.stack, String(e.filename || '').replace(location.origin, '') + ':' + e.lineno); });
+  window.addEventListener('unhandledrejection', e => { const r = e.reason || {}; report('rejection', r.message || String(r), r.stack); });
 
   /* ---------- the form ---------- */
   const form = $('#lead'), err = $('#lead-err'), btn = form.querySelector('button[type=submit]');
@@ -75,6 +99,7 @@
         if (code === 'invalid_name') bad('name', true);
         throw Object.assign(new Error(code), { code });
       }
+      track('lead');
       form.hidden = true;
       $('#done-title').textContent = `Got it, ${name.split(/\s+/)[0]}!`;
       $('#done-text').textContent = `I’ll write to you at ${email} within a day to set up your app. Meanwhile, tap around the demo.`;

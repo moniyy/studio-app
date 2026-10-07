@@ -1175,6 +1175,8 @@
   }
   // "Powered by Satinbook" at the bottom of every studio's app (?ref=<slug>: where visitors came from)
   const poweredHTML = () => `<a class="foot-note" data-stagger href="${esc(APP_BASE + '?ref=' + encodeURIComponent(SLUG))}" ${ext}>Powered by <b>Satinbook</b></a>`;
+  // More: the fine print under it
+  const legalHTML = () => `<p class="foot-legal" data-stagger><a href="${esc(APP_BASE + 'terms')}" ${ext}>Terms</a> · <a href="${esc(APP_BASE + 'privacy')}" ${ext}>Privacy</a></p>`;
 
   /* ---------- Services tab ---------- */
   function categories() {
@@ -1746,7 +1748,8 @@
         <div class="list" data-stagger>
           <button class="row row--link row--danger" id="reset">Reset settings</button>
         </div>
-        ${poweredHTML()}`
+        ${poweredHTML()}
+        ${legalHTML()}`
     });
 
     views.more.style.setProperty('--brand', brandAccent);
@@ -2903,7 +2906,7 @@
     if (!foot) return;
     if (isBuiltin()) {
       const f = footBuiltin();
-      foot.innerHTML = `<div class="sheet__summary">${f.summary}</div>${f.action}`;
+      foot.innerHTML = `${f.legal || ''}<div class="sheet__summary">${f.summary}</div>${f.action}`;
       return;
     }
     let summary;
@@ -3515,7 +3518,8 @@
     };
     return {
       summary: `<b class="num">${s ? esc(price(svcPrice(s, bk.staff))) : ''}</b><span>${svcDeposit(s) ? esc(price(svcDeposit(s))) + ' deposit after booking' : 'Pay at the studio'}</span>`,
-      action: `<button class="btn btn--primary${bkx.agree ? '' : ' is-off'}" data-bk-confirm${bkx.busy ? ' disabled aria-busy="true"' : ''}${bkx.agree ? '' : ' aria-disabled="true"'}>${bkx.busy ? spinner() : 'Confirm'}</button>`
+      action: `<button class="btn btn--primary${bkx.agree ? '' : ' is-off'}" data-bk-confirm${bkx.busy ? ' disabled aria-busy="true"' : ''}${bkx.agree ? '' : ' aria-disabled="true"'}>${bkx.busy ? spinner() : 'Confirm'}</button>`,
+      legal: `<p class="bk-legal">By booking you agree to the studio’s policy and Satinbook’s <a href="${esc(APP_BASE + 'terms')}" ${ext}>Terms</a> &amp; <a href="${esc(APP_BASE + 'privacy')}" ${ext}>Privacy</a></p>`
     };
   }
   const spinner = () => '<i class="spin" aria-hidden="true"></i><span class="sr">Working…</span>';
@@ -4048,6 +4052,108 @@
     if (!isBuiltin()) { openOwner(opts); return; }
     loadCabinet().then(C => C.open(cabinetKit(), opts)).catch(() => toast(ERR_COPY.network, 'x'));
   }
+  /* ---------- A short tour: the screen dims, one thing is lit, a card says what it is ----------
+     steps: [{ el: () => Element, title, text, before: async () => {} }] — a step whose
+     element isn't there is skipped. Resolves 'done' or 'skip'. */
+  function tour(steps, opts) {
+    opts = opts || {};
+    return new Promise(resolve => {
+      const box = document.createElement('div');
+      box.className = 'tour is-wait' + (reducedMQ.matches ? ' is-still' : '');
+      box.setAttribute('role', 'dialog');
+      box.setAttribute('aria-modal', 'true');
+      box.setAttribute('aria-label', opts.label || 'Quick tour');
+      box.innerHTML = '<i class="tour__spot" aria-hidden="true"></i><div class="tour__card" role="document"></div>';
+      document.body.appendChild(box);
+      const spot = box.querySelector('.tour__spot');
+      const card = box.querySelector('.tour__card');
+      let i = -1;
+      let target = null;
+      const place = () => {
+        const W = window.innerWidth;
+        const H = window.innerHeight;
+        const w = Math.min(340, W - 32);
+        card.style.width = w + 'px';
+        if (!target || !target.isConnected) {
+          spot.style.opacity = '0';
+          card.style.left = Math.round((W - w) / 2) + 'px';
+          card.style.top = Math.round(H / 2 - card.offsetHeight / 2) + 'px';
+          return;
+        }
+        const r = target.getBoundingClientRect();
+        const pad = 6;
+        spot.style.opacity = '1';
+        spot.style.left = Math.round(r.left - pad) + 'px';
+        spot.style.top = Math.round(r.top - pad) + 'px';
+        spot.style.width = Math.round(r.width + pad * 2) + 'px';
+        spot.style.height = Math.round(r.height + pad * 2) + 'px';
+        spot.style.borderRadius = Math.min(22, Math.round(r.height / 2 + pad)) + 'px';
+        const left = Math.max(16, Math.min(W - w - 16, r.left + r.width / 2 - w / 2));
+        const below = r.top + r.height / 2 < H / 2;
+        const top = below ? r.bottom + pad + 12 : r.top - pad - 12 - card.offsetHeight;
+        card.style.left = Math.round(left) + 'px';
+        card.style.top = Math.round(Math.max(16, Math.min(H - card.offsetHeight - 16, top))) + 'px';
+      };
+      const end = how => {
+        window.removeEventListener('resize', place);
+        document.removeEventListener('keydown', onKey, true);
+        box.classList.add('is-out');
+        setTimeout(() => box.remove(), reducedMQ.matches ? 0 : 220);
+        resolve(how);
+      };
+      const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); end('skip'); } };
+      async function show(n) {
+        for (i = n; i < steps.length; i++) {
+          const s = steps[i];
+          if (s.before) { try { await s.before(); } catch (e) { /* show it anyway */ } }
+          target = s.el ? s.el() : null;
+          if (s.el && !target) continue; // not on this screen: the next one
+          break;
+        }
+        if (i >= steps.length) { end('done'); return; }
+        const s = steps[i];
+        const last = !steps.slice(i + 1).length;
+        if (target && target.scrollIntoView) target.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+        card.innerHTML = `
+          <span class="tour__n">${i + 1} of ${steps.length}</span>
+          <b class="tour__t">${esc(s.title)}</b>
+          ${s.text ? `<p class="tour__p">${esc(s.text)}</p>` : ''}
+          <div class="tour__row">
+            ${last ? '<span></span>' : '<button type="button" class="tour__skip" data-tour-skip>Skip</button>'}
+            <button type="button" class="btn btn--primary btn--sm" data-tour-next>${last ? 'Done' : 'Next'}</button>
+          </div>`;
+        place();
+        box.classList.remove('is-wait'); // the dim comes with the first hint, not before
+        card.classList.remove('is-in');
+        void card.offsetWidth;
+        card.classList.add('is-in');
+        const next = card.querySelector('[data-tour-next]');
+        if (next) next.focus({ preventScroll: true });
+      }
+      box.addEventListener('click', e => {
+        if (e.target.closest('[data-tour-skip]')) { haptic(); end('skip'); return; }
+        if (e.target.closest('[data-tour-next]')) { haptic(); show(i + 1); }
+      });
+      window.addEventListener('resize', place);
+      document.addEventListener('keydown', onKey, true);
+      show(0);
+    });
+  }
+
+  // The demo dashboard (?owner=1 on a demo studio): what she is looking at, once per visit
+  function demoTour() {
+    try { if (sessionStorage.getItem(KEY + ':demoTour')) return; sessionStorage.setItem(KEY + ':demoTour', '1'); } catch (e) { /* private mode */ }
+    const q = s => () => ownerEl && $(s, ownerEl);
+    const card = title => () => ownerEl && $$('.owner__card', ownerEl).find(c => (c.textContent || '').includes(title));
+    tour([
+      { el: q('.owner__bar'), title: 'This is the owner’s dashboard', text: 'A demo studio with sample numbers — yours shows your own.' },
+      { el: q('.owner__grid'), title: 'What your app did this week', text: 'Opens, questions your assistant answered, taps on Book — while your hands were busy.' },
+      { el: card('Top questions'), title: 'What clients ask', text: 'The questions your assistant answered for you, most asked first.' },
+      { el: card('Most viewed'), title: 'What clients look at', text: 'The services that get the most attention — and your looks that bring bookings.' },
+      { el: q('[data-owner-exit]'), title: 'See it as a client', text: 'Tap Exit to book, ask the assistant and browse looks like a client would.' }
+    ], { label: 'Demo dashboard tour' });
+  }
+
   function cabinetKit() {
     return {
       $, $$, esc, I, svg, art, Sheet, toast, haptic, springIn, popIn, G, ensure, pushOverlay, popOverlay,
@@ -4059,6 +4165,7 @@
       onCabinet: open => { cabOpen = open; syncOwnerSwitch(); },
       onDataChanged: () => { dropAllOpenings(); refreshOpenings(); },
       reloadStudio,
+      tour,
       // theme: 'light' / 'dark' (maison shades differ per theme); default = what is on screen now
       accentsFor: (st, theme) => (st === 'maison' ? ACCENTS_MAISON : st === 'noir' ? ACCENTS_NOIR : ACCENTS_SOFT).map(a => ({ id: a.id, name: a.name, color: accentFor(a, theme) })),
       theme: () => resolvedTheme(),
@@ -6758,7 +6865,7 @@
         </section>` : ''}
         <section class="owner__cta" data-stagger>
           <p>While you were working, your assistant replied to <b class="num">${esc(o.questions)}</b> clients 💬</p>
-          <a class="btn btn--dark btn--block" href="https://instagram.com/maksim.builds" ${ext}>Get this app for my studio ${I.arrowR}</a>
+          <a class="btn btn--dark btn--block" href="${esc(APP_BASE + '#start')}" ${ext}>Get this app for my studio ${I.arrowR}</a>
           <small>All numbers on this screen are demo data.</small>
         </section>
       </div>`;
@@ -6778,6 +6885,7 @@
     }, 350);
     pushOverlay(closeOwnerUI);
     syncOwnerBanner();
+    setTimeout(demoTour, reducedMQ.matches ? 300 : 1300);
   }
 
   function closeOwnerUI() {
@@ -7746,6 +7854,8 @@
      18. Init
      --------------------------------------------------------- */
   async function init() {
+    // app errors are reported with the studio and who was using it (Admin → Errors)
+    if (Backend.errors) Backend.errors.context({ slug: SLUG, role: ADMIN ? 'admin' : 'client' });
     app = $('#app');
     tabbar = $('#tabbar');
     sub = $('#subview');

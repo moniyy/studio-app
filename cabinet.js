@@ -153,6 +153,7 @@
   function close(fromHistory) {
     if (!root) return;
     K.onCabinet && K.onCabinet(false);
+    if (K.Backend.errors) K.Backend.errors.context({ role: 'client' });
     stopLive();
     if (S.authUnsub) { S.authUnsub(); S.authUnsub = null; }
     document.removeEventListener('visibilitychange', onVisible);
@@ -240,6 +241,7 @@
         ${msg ? `<p class="cab-auth__err" role="alert">${esc(msg)}</p>` : ''}
         <button type="button" class="cab-link" data-cab-forgot>Forgot password?</button>
         ${K.data.ownerDemo ? '<button type="button" class="cab-link" data-cab-demo>See the dashboard with demo data</button>' : ''}
+        <p class="cab-auth__legal">By signing in you agree to Satinbook’s <a href="${esc(K.appBase + 'terms')}" target="_blank" rel="noopener">Terms</a> &amp; <a href="${esc(K.appBase + 'privacy')}" target="_blank" rel="noopener">Privacy</a></p>
       </form>`;
     const f = $(S.email ? '#cab-pass' : '#cab-email');
     if (f && !K.IS_IOS) setTimeout(() => f.focus(), 350);
@@ -433,6 +435,7 @@
     }
     if (!S.studio || S.studio.id !== studio.id || S.studio.role !== studio.role) { S.team = null; S.scheds = {}; S.calStaff = null; S.hrsStaff = null; S.hsched = null; S.insStaff = null; }
     S.studio = studio;
+    if (K.Backend.errors) K.Backend.errors.context({ role: S.readonly ? 'admin' : isStaff() ? 'staff' : 'owner' });
     if (isStaff() && !STAFF_TABS.some(t => t.id === S.tab) && S.tab !== 'requests') S.tab = 'today';
     if (studio.id !== guess) {
       [sched, books] = await Promise.all([K.Backend.owner.schedule(studio.id).catch(() => null), windowBookings(studio.id, w).catch(() => null)]);
@@ -480,12 +483,15 @@
       await K.Backend.auth.updatePassword(a);
       await K.Backend.owner.passwordChanged();
       root.classList.remove('is-forcepw');
+      // her own password instead of the temporary one = her very first time here: the tour follows
+      const firstTime = !S.recovery;
       if (S.recovery) { S.recovery = false; S.recoveryDone = true; }
       K.haptic([10, 30, 10]);
       K.toast('Password saved — welcome!', 'ok');
       renderLoading();
       S.studio = null;
       await enter();
+      if (firstTime && S.studio && !S.readonly) setTimeout(() => startTour(), 900);
     } catch (e) {
       renderForcePassword(/different|same/i.test(e.message || '') ? 'Pick a password different from the temporary one' : /weak|short|least/i.test(e.message || '') ? 'Pick a stronger password' : err(e));
     }
@@ -618,6 +624,8 @@
       move: `Moved: ${b.client_name} · ${svc} → ${when}`
     }[kind];
     S.queue.push({ kind, text, id: b.id });
+    // a new one slides in from above on Today / Calendar
+    if (kind === 'new' || kind === 'request') (S.arriving = S.arriving || new Set()).add(b.id);
     if (kind !== 'request') {
       const t = spot(b.start_at).off === 0 ? 'today' : 'calendar';
       if (S.tab !== t) S.badges[t]++;
@@ -905,7 +913,7 @@
   function nextClientHTML(b) {
     const started = Date.parse(b.start_at) <= Date.now();
     return `
-      <section class="card cab-next" data-cab-b="${esc(b.id)}" role="button" tabindex="0">
+      <section class="card cab-next${arriving(b)}" data-cab-b="${esc(b.id)}" role="button" tabindex="0">
         <div class="cab-next__top"><span class="eyebrow">${started ? 'In the chair now' : 'Next client'}</span><span class="cab-next__in">${started ? 'until ' + K.fmtClock(spot(b.end_at).min) : K.countdown(b.start_at)}</span></div>
         <h2>${esc(b.client_name || 'Client')}${tagBadges(b.client_tags, b.client_no_shows)}</h2>
         <p class="num">${esc(b.service_name)} · ${timeRange(b)}${teamView() && b.staff_name ? ` · with ${esc(firstOf(b.staff_name))}` : ''}</p>
@@ -921,11 +929,12 @@
   }
 
   /* the day of a salon (owner): everyone's bookings in one list, the master on each */
+  const arriving = b => (S.arriving && S.arriving.has(b.id) ? ' is-arriving' : '');
   function crewListHTML(list) {
     const rows = list.filter(b => S.showCx || !b.status.startsWith('cancelled'));
     if (!rows.length) return '<p class="cab-muted">No bookings today.</p>';
     return `<div class="list crew-list">${rows.map(b => `
-      <button class="row row--link crew-row${b.status.startsWith('cancelled') ? ' is-cx' : ''}" data-cab-b="${esc(b.id)}">
+      <button class="row row--link crew-row${b.status.startsWith('cancelled') ? ' is-cx' : ''}${arriving(b)}" data-cab-b="${esc(b.id)}">
         <span class="crew-row__time num">${K.fmtClock(spot(b.start_at).min)}</span>
         <span class="row__label">${esc(b.client_name || 'Client')}<span class="row__sub">${esc(b.service_name)}${b.status === 'pending' ? ' · request' : b.status.startsWith('cancelled') ? ' · cancelled' : b.status === 'no_show' ? ' · no-show' : ''}</span></span>
         ${crewTag(b)}
@@ -1001,7 +1010,7 @@
         ${lines.join('')}
         ${offs.map(o => `<div class="tl__off" style="top:${y(Math.max(from, o.s))}px;height:${((Math.min(to, o.e) - Math.max(from, o.s)) * PX).toFixed(1)}px"><span>${esc(o.reason || 'Time off')}</span></div>`).join('')}
         ${items.map(({ b, s, e }) => `
-          <button class="tl__b tl__b--${b.status}${e - s < 40 ? ' is-short' : ''}" data-cab-b="${esc(b.id)}" style="top:${y(s)}px;height:${Math.max(26, (e - s) * PX - 3).toFixed(1)}px">
+          <button class="tl__b tl__b--${b.status}${e - s < 40 ? ' is-short' : ''}${arriving(b)}" data-cab-b="${esc(b.id)}" style="top:${y(s)}px;height:${Math.max(26, (e - s) * PX - 3).toFixed(1)}px">
             <b>${esc(b.client_name || 'Client')}${b.deposit_status === 'pending' && isActive(b) ? ' <em class="tl__dep" title="Deposit not received">$</em>' : ''}</b><span>${esc(b.service_name)}</span><small class="num">${timeRange(b)}</small>
           </button>`).join('')}
         ${cx.map(c => { const { b, s, e } = c; return `
@@ -1602,6 +1611,10 @@
       </button>`;
     return `
       <header class="cab-h"><span class="eyebrow">${esc(K.link().replace(/^https?:\/\//, ''))}</span><h1>Studio</h1></header>
+      <div class="card cab-linkcard">
+        <span class="cab-linkcard__txt"><b>Your link</b><small>${esc(K.link().replace(/^https?:\/\//, ''))} — put it in your Instagram bio</small></span>
+        <button class="btn btn--primary btn--sm" data-copy-link>${icon('<rect x="8" y="8" width="12" height="12" rx="3"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>')}Copy link</button>
+      </div>
       ${depositWarnHTML()}
       <div class="group-label">Your page</div>
       <div class="list">
@@ -1621,7 +1634,32 @@
         ${row('texts', '<path d="M6 4h12v16H6z"/><path d="M9 8h6M9 12h6M9 16h4"/>', 'Policies & texts')}
         ${row('faq', '<path d="M20.5 11.8a8.3 8.3 0 0 1-12.2 7.3L3.5 20.5l1.4-4.6a8.3 8.3 0 1 1 15.6-4.1z"/>', 'Assistant answers', (st.faq || []).length)}
       </div>
-      <button class="btn btn--soft btn--block" data-cab-close>${icon('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>')}See it as a client</button>`;
+      <button class="btn btn--soft btn--block" data-cab-close>${icon('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>')}See it as a client</button>
+      <button class="cab-link cab-tour-again" data-cab-tour>Show the tour again</button>`;
+  }
+
+  /* ---------- The first sign-in: a short tour of the dashboard (again from Studio) ---------- */
+  const pause = ms => new Promise(r => setTimeout(r, ms));
+  function startTour(force) {
+    if (!K.tour || !root || (!force && K.store.get('tourDone'))) return;
+    K.store.set('tourDone', true);
+    const tab = id => () => $(`#cab-tabs [data-cab-tab="${id}"]`);
+    // her data may still be on its way: wait (up to 3 s) for what the step points at
+    const onTab = (id, sel) => async () => {
+      if (S.tab !== id) { await go(id); await pause(350); }
+      for (let i = 0; sel && i < 15 && !$(sel); i++) await pause(200);
+    };
+    const steps = [
+      { before: onTab('today', '.cab-stats'), el: () => $('.cab-stats') || tab('today')(), title: 'Here are today’s bookings', text: 'Who’s coming, what you’ll earn and your free windows — the moment you open the app.' },
+      { el: tab('calendar'), title: 'Your calendar', text: 'Every booking by day or week. Tap a free spot to add a client yourself.' },
+      { el: tab('clients'), title: 'Every client and her lash map', text: 'Visits, notes, allergies and the lash map from her last set.' }
+    ].concat(isStaff() ? [
+      { el: tab('hours'), title: 'Your hours', text: 'When you work — clients only see the times you’re free.' }
+    ] : [
+      { el: tab('studio'), title: 'Change services, prices, photos here', text: 'Your page, services, hours, payments and policies — all in Studio.' },
+      { before: onTab('studio', '[data-copy-link]'), el: () => $('[data-copy-link]'), title: 'Copy your link for Instagram bio', text: 'Clients tap it, add your app to their Home Screen and book in two taps.' }
+    ]);
+    return K.tour(steps, { label: 'Dashboard tour' });
   }
 
   /* ---------- Team (a salon): Solo / Team, the masters, their sign-ins ---------- */
@@ -3675,6 +3713,8 @@
     if ((el = t.closest('[data-cab-demo]'))) { close(); setTimeout(() => K.demo(), 350); return; }
     if ((el = t.closest('[data-cab-signout]'))) { signOut(); return; }
     if ((el = t.closest('[data-cab-menu]'))) { openMenu(); return; }
+    if ((el = t.closest('[data-copy-link]'))) { K.haptic(); copyText(K.link(), 'Link copied — paste it in your Instagram bio'); return; }
+    if ((el = t.closest('[data-cab-tour]'))) { startTour(true); return; }
     if ((el = t.closest('[data-cab-retry]'))) { S.cache = {}; S.lastSync = 0; refreshView(true); return; }
     if ((el = t.closest('[data-cab-reenter]'))) { renderLoading(); enter(); return; }
     // anything she touches in a form: no quiet redraws until she leaves it
@@ -3890,6 +3930,8 @@
 
   function afterRender(tab, first) {
     if (tab === 'today') paintPush();
+    // the new bookings have slid in: next time they're just there
+    if (S.arriving && S.arriving.size && (tab === 'today' || tab === 'calendar')) setTimeout(() => S.arriving.clear(), 1200);
     if (tab === 'requests') bindSwipes();
     if (tab === 'services' || tab === 'looks') bindSortable();
     if (tab === 'calendar') { bindDaySwipe(); bindCrewScroll(); }

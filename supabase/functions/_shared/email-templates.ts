@@ -390,3 +390,25 @@ export function buildLead(l: { name: string; email: string; instagram?: string; 
   });
   return { subject: `New lead: ${l.name}${l.niche ? ' · ' + l.niche : ''}${l.city ? ' · ' + l.city : ''}`, ...L };
 }
+
+// Satinbook's own notes to hello@ / the owner: a test that sending works, a burst of app errors
+const SYS: Studio = { id: '', slug: '', name: 'Satinbook', style: 'noir', accent: '#F4A6B8', tz: 'America/New_York', kind: 'solo' };
+export function buildSystemTest(d: { note?: string }): Built {
+  const when = new Date().toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' });
+  const L = layout(SYS, {
+    preheader: 'Email sending works', eyebrow: 'Satinbook', title: 'Email sending works ✓',
+    intro: `This test went out through Resend from satinbook.com on ${when} (New York time).${d.note ? ' ' + d.note : ''}`,
+    rows: [['Sender', 'Satinbook &lt;hello@satinbook.com&gt;'], ['Service', 'Resend · Supabase Edge Function']]
+  });
+  return { subject: 'Satinbook · test email', ...L };
+}
+export function buildErrorsAlert(d: { count: number; top?: { message: string; n: number; slug?: string }[] }): Built {
+  const top = (d.top || []).slice(0, 5);
+  const L = layout(SYS, {
+    preheader: `${d.count} new app errors in the last hour`, eyebrow: 'Satinbook · errors', title: `${d.count} new errors in the last hour`,
+    intro: 'More than usual — the most frequent ones are below. Open Admin → Errors for the stacks and which studios they come from.',
+    rows: top.map(t => [`${t.n}×${t.slug ? ' · /' + t.slug : ''}`, esc(String(t.message).slice(0, 120))] as Row),
+    button: { label: 'Open Admin → Errors', url: 'https://satinbook.com/app.html?admin=1#errors' }
+  });
+  return { subject: `Satinbook: ${d.count} app errors in the last hour`, ...L };
+}
