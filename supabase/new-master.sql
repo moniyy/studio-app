@@ -3,7 +3,7 @@
 -- Paste into Supabase → SQL Editor, change the values, Run.
 -- Then: create her account (Authentication → Users → Add user → Create new user,
 -- Auto Confirm User) and run the update at the bottom of this file. She opens
--- https://moniyy.github.io/studio-app/?m=bella-nails&owner=1, signs in with that
+-- https://satinbook.com/bella-nails?owner=1, signs in with that
 -- email + password and manages hours and bookings herself.
 -- (Photos, texts, gallery, policies… can live in masters/bella-nails.json —
 --  add "bookingEngine": "builtin" there — or in "settings" below.)

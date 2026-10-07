@@ -1,4 +1,4 @@
-// send-email — the app's emails through the studio Gmail (SMTP).
+// send-email — the app's emails through Resend (the satinbook.com domain).
 //
 // POST from the database (header x-push-secret = PUSH_HOOK_SECRET): { process: true }
 //   → sends what is due in email_log (the queue), at most ~480 in 24 hours
@@ -6,7 +6,7 @@
 //   { preview: kind, master_id } → { subject, html, text } (Studio → Emails)
 //   { test: kind, master_id }    → the preview, sent to her own email
 //
-// Secrets: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, APP_BASE_URL, PUSH_HOOK_SECRET.
+// Secrets: RESEND_API_KEY, APP_BASE_URL, PUSH_HOOK_SECRET (MAIL_DRYRUN=1 for tests).
 import { createClient } from 'npm:@supabase/supabase-js@2.117.2';
 import { dryRun, sendMail, mailConfigured } from '../_shared/mail.ts';
 import {
@@ -70,8 +70,8 @@ async function send(row: any, built: Built, s: Studio, replyTo: string | null) {
   if (dryRun()) row.__dry = { text: built.text, ics: built.ics || null, reply_to: replyTo, unsub: built.unsub || null };
   const headers: Record<string, string> = {};
   if (built.unsub) { headers['List-Unsubscribe'] = `<${built.unsub}>`; headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'; }
-  await sendMail({
-    fromName: s.name, to: row.to_email, replyTo, subject: built.subject, html: built.html, text: built.text, headers,
+  row.__pid = await sendMail({
+    fromName: s.name, sender: 'studio', to: row.to_email, replyTo, subject: built.subject, html: built.html, text: built.text, headers,
     attachments: built.ics ? [{ filename: built.icsName || 'appointment.ics', content: built.ics, contentType: `text/calendar; charset=utf-8; method=${/METHOD:CANCEL/.test(built.ics) ? 'CANCEL' : 'PUBLISH'}` }] : undefined
   });
 }
@@ -128,11 +128,11 @@ async function processQueue() {
       let r: { status: string; subject?: string; error?: string };
       try { r = await processRow(row); } catch (e) { r = { status: 'failed', error: String((e as Error).message || e).slice(0, 300) }; }
       if (r.status === 'failed' && row.attempts < 3) {
-        // try again a bit later (Gmail hiccups)
+        // try again a bit later (the provider hiccuped)
         await admin.from('email_log').update({ status: 'queued', error: r.error, send_after: new Date(Date.now() + row.attempts * 5 * 60e3).toISOString() }).eq('id', row.id);
       } else {
         await admin.from('email_log').update({ status: r.status, subject: r.subject || null, error: r.error || null, sent_at: r.status === 'sent' ? new Date().toISOString() : null,
-          ...(row.__dry ? { data: { ...(row.data || {}), dry_run: row.__dry } } : {}) }).eq('id', row.id);
+          ...(row.__dry || row.__pid ? { data: { ...(row.data || {}), ...(row.__pid ? { provider_id: row.__pid } : {}), ...(row.__dry ? { dry_run: row.__dry } : {}) } } : {}) }).eq('id', row.id);
       }
       if (r.status === 'sent') sent++; else if (r.status === 'failed') failed++; else skipped++;
     }
@@ -167,7 +167,7 @@ Deno.serve(async req => {
   try { body = await req.json(); } catch { return json({ error: 'bad_json' }, 400); }
 
   if (HOOK_SECRET && req.headers.get('x-push-secret') === HOOK_SECRET) {
-    if (!mailConfigured()) return json({ error: 'smtp not configured' }, 500);
+    if (!mailConfigured()) return json({ error: 'mail not configured' }, 500);
     try { return json(await processQueue()); } catch (e) { return json({ error: String((e as Error).message || e) }, 500); }
   }
 
@@ -186,12 +186,12 @@ Deno.serve(async req => {
   let built: Built;
   try { built = await previewFor(kind, s); } catch { return json({ error: 'unknown_kind' }, 400); }
   if (body.preview) return json({ subject: built.subject, html: built.html, text: built.text });
-  if (!mailConfigured()) return json({ error: 'smtp not configured' }, 500);
+  if (!mailConfigured()) return json({ error: 'mail not configured' }, 500);
   // a test to herself is logged (and so counted toward the daily limit) like any email
   try {
-    await sendMail({ fromName: s.name, to: me.user.email!, subject: '[Test] ' + built.subject, html: built.html, text: built.text,
+    const pid = await sendMail({ fromName: s.name, sender: 'studio', to: me.user.email!, subject: '[Test] ' + built.subject, html: built.html, text: built.text,
       attachments: built.ics ? [{ filename: 'appointment.ics', content: built.ics, contentType: 'text/calendar; charset=utf-8; method=PUBLISH' }] : undefined });
-    await admin.from('email_log').insert({ master_id: s.id, kind: 'test', to_email: me.user.email, to_user: me.user.id, subject: '[Test] ' + built.subject, status: 'sent', sent_at: new Date().toISOString(), data: { of: kind } });
+    await admin.from('email_log').insert({ master_id: s.id, kind: 'test', to_email: me.user.email, to_user: me.user.id, subject: '[Test] ' + built.subject, status: 'sent', sent_at: new Date().toISOString(), data: { of: kind, provider_id: pid } });
     return json({ sent: true, to: me.user.email });
   } catch (e) {
     return json({ error: 'send_failed', message: String((e as Error).message || e) }, 502);

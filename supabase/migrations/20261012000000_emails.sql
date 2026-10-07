@@ -1,7 +1,7 @@
--- Part 5: emails to clients and masters through the studio Gmail (SMTP in the
--- send-email Edge Function). The database decides WHAT to send and WHEN; every
+-- Part 5: emails to clients and masters, sent by the send-email Edge Function.
+-- The database decides WHAT to send and WHEN; every
 -- email is a row in email_log (the log and the queue at once). The function
--- sends what is due, at most ~480 in 24 hours (Gmail's limit is ~500): the
+-- sends what is due within the email provider's limits (see 20261013000000): the
 -- rest waits in the queue until the window frees up.
 --
 -- What each studio sends: masters.settings.emails = { confirm, changes, reminders,
@@ -292,7 +292,7 @@ do $$ begin
   end if;
 end $$;
 
--- ---------- 5. the sender takes due emails (service role only) — within the Gmail limit ----------
+-- ---------- 5. the sender takes due emails (service role only) — within the provider's limit ----------
 create or replace function public.email_claim(p_limit int default 20) returns setof public.email_log
 language plpgsql security definer set search_path = '' as $$
 declare

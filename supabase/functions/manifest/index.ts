@@ -1,7 +1,7 @@
 // manifest — the web app manifest of one studio, made from the database, so a new
 // studio needs no file in the repo.
 //
-// GET ?m=<slug>&o=<where the app lives, e.g. https://moniyy.github.io/studio-app/>
+// GET ?m=<slug>&o=<where the app lives, e.g. https://satinbook.com/>
 // "Add to Home Screen" then installs that studio: its name, its icon and
 // start_url = <o><slug> — the pretty address (id stays <o>?m=<slug>, as installed before).
 import { cors, serviceClient } from '../_shared/admin.ts';

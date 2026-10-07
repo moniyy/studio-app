@@ -170,17 +170,19 @@
     }
     paintList();
   }
-  // Gmail sends ~500 emails a day: the last 24 hours, a warning from 400, what waits for tomorrow
+  // Resend Free: 100 emails a day, 3000 a month — a warning from 80 % of either; what waits
   function mailHTML() {
     const m = A.mail;
     if (!m) return '';
-    const warn = m.sent_24h >= 400;
+    const day = m.sent_24h / m.limit_day;
+    const month = m.sent_month / m.limit_month;
+    const warn = day >= 0.8 || month >= 0.8;
     return `
       <section class="adm-mail${warn ? ' is-warn' : ''}">
         <span class="adm-mail__ic">${icon('<rect x="3" y="5.5" width="18" height="13" rx="3"/><path d="m3.5 7 8.5 6.5L20.5 7"/>')}</span>
-        <span class="adm-mail__txt"><b>Emails · last 24 h: <span class="num">${m.sent_24h}</span> of ${m.limit}</b>
-          <small>${warn ? 'Close to Gmail’s daily limit — the rest will wait for tomorrow.' : 'Through the studio Gmail.'}${m.waiting ? ` · <b class="num">${m.waiting}</b> waiting for tomorrow` : ''}${m.failed_24h ? ` · <b class="num">${m.failed_24h}</b> failed` : ''}</small></span>
-        <i class="adm-mail__bar"><i style="width:${Math.min(100, Math.round((m.sent_24h / m.limit) * 100))}%"></i></i>
+        <span class="adm-mail__txt"><b>Emails · today <span class="num">${m.sent_24h}</span> of ${m.limit_day} · this month <span class="num">${m.sent_month}</span> of ${m.limit_month}</b>
+          <small>${warn ? `Close to the ${month >= 0.8 ? 'monthly' : 'daily'} limit of the free Resend plan — the rest will wait.` : 'Resend · satinbook.com'}${m.waiting ? ` · <b class="num">${m.waiting}</b> waiting` : ''}${m.failed_24h ? ` · <b class="num">${m.failed_24h}</b> failed` : ''}</small></span>
+        <i class="adm-mail__bar"><i style="width:${Math.min(100, Math.round(Math.max(day, month) * 100))}%"></i></i>
       </section>`;
   }
   /* ---------- billing: the master pays through a BSB Link, marked here by hand ---------- */

@@ -162,7 +162,7 @@
   }
 
   /* =========================================================
-     Sign in — email + password (emails come in part 2 with own SMTP)
+     Sign in — email + password ("Forgot password?": a code by email)
      ========================================================= */
   function renderAuth(msg) {
     $('#cab-tabs').hidden = true;
@@ -809,6 +809,7 @@
         <div><b class="num">${counted.length}</b><small>${counted.length === 1 ? 'Client' : 'Clients'}</small></div>
         <div><b class="num">${freeMin >= 60 ? Math.floor(freeMin / 60) + 'h' + (freeMin % 60 ? ' ' + (freeMin % 60) + 'm' : '') : freeMin + 'm'}</b><small>Free</small></div>
       </div>
+      ${movedHTML()}
       ${setupHTML()}
       <div id="cab-push"></div>
       ${next ? nextClientHTML(next) : `<div class="card cab-next cab-next--none"><b>${live.length ? 'All done for today' : 'No clients today'}</b><span>${free.length ? 'Free windows are below — tap one to book a client.' : 'Enjoy the quiet.'}</span></div>`}
@@ -2600,6 +2601,7 @@
     // deposits & payments, insights
     if ((el = t.closest('[data-dep-set]'))) { setDeposit(el.dataset.depSet, el); return true; }
     if ((el = t.closest('[data-setup-push]'))) { openPushSheet(); return true; }
+    if ((el = t.closest('[data-moved-ok]'))) { K.store.set('movedSeen', true); K.haptic(); repaint(); return true; }
     if ((el = t.closest('[data-setup-install]'))) { openInstallHelp(); return true; }
     if ((el = t.closest('[data-setup-installed]'))) {
       K.store.set('installedSeen', true);
@@ -2758,6 +2760,24 @@
       { label: 'Notifications on', done: (MEM.push || []).length > 0 || (S.push && S.push.state === 'on'), attr: 'data-setup-push' },
       { label: 'App on your Home Screen', done: isStandalone() || !!K.store.get('installedSeen') || !!S.studio.app_installed, attr: 'data-setup-install' }
     ];
+  }
+  /* The app moved to satinbook.com (October 2026): an app added to the Home Screen from the
+     old address keeps opening that one — it has to be added again. Once per device, for
+     studios made before the move. */
+  const MOVED_AT = Date.parse('2026-10-05T00:00:00Z');
+  function movedHTML() {
+    if (/\.github\.io$/.test(location.hostname) || K.store.get('movedSeen')) return '';
+    if (!(S.studio && S.studio.created_at && Date.parse(S.studio.created_at) < MOVED_AT)) return '';
+    return `
+      <section class="card moved">
+        <span class="moved__ic">${icon('<path d="M4 12h13M13 7l5 5-5 5"/><path d="M20 4v16"/>')}</span>
+        <span class="moved__txt"><b>We moved to ${esc(location.host)}</b>
+          <small>Re-add the app to your Home Screen: delete the old icon, then here in Safari tap Share → Add to Home Screen. Turn notifications on again in the new app.</small></span>
+        <div class="moved__acts">
+          <button class="btn btn--primary btn--sm" data-setup-install>Show me how</button>
+          <button class="btn btn--soft btn--sm" data-moved-ok>Got it</button>
+        </div>
+      </section>`;
   }
   function setupHTML() {
     if (isStaff() || K.store.get('setupDone')) return '';

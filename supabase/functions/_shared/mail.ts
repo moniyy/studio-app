@@ -1,12 +1,16 @@
-// Sending email through the studio Gmail (SMTP, port 465) — shared by send-email,
-// owner-invite-staff and admin-master-action. The address and the app password
-// live only in Supabase secrets: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS (SMTP_FROM optional).
-// Moving to a domain later = new secrets (README → "Switch to satinbook.com").
-import nodemailer from 'npm:nodemailer@6.9.16';
+// Sending email through Resend (https://resend.com, the satinbook.com domain) —
+// shared by send-email, owner-invite-staff and admin-master-action.
+// The API key lives only in Supabase secrets: RESEND_API_KEY.
+//
+// Two senders:
+//   studio — "<Studio name> <bookings@satinbook.com>", Reply-To the master's own email
+//   system — "Satinbook <hello@satinbook.com>" (invites, new passwords)
+// (MAIL_BOOKINGS / MAIL_SYSTEM secrets override the addresses.)
 
 export type Attachment = { filename: string; content: string; contentType: string };
 export type Mail = {
-  fromName: string;          // "Bella Brows" — the address itself is always the SMTP account
+  fromName: string;          // "Bella Brows" (studio) — ignored for system emails
+  sender?: 'studio' | 'system';
   to: string;
   replyTo?: string | null;   // the master's own email: clients' answers go to her
   subject: string;
@@ -16,47 +20,49 @@ export type Mail = {
   headers?: Record<string, string>;
 };
 
-// deno-lint-ignore no-explicit-any
-let transport: any = null;
-function tx() {
-  if (!transport) {
-    transport = nodemailer.createTransport({
-      host: Deno.env.get('SMTP_HOST') || 'smtp.gmail.com',
-      port: Number(Deno.env.get('SMTP_PORT') || 465),
-      secure: true,
-      auth: { user: Deno.env.get('SMTP_USER'), pass: Deno.env.get('SMTP_PASS') },
-      pool: true, maxConnections: 2, maxMessages: 50
-    });
-  }
-  return transport;
-}
+const KEY = () => Deno.env.get('RESEND_API_KEY') || '';
+export const BOOKINGS_FROM = () => Deno.env.get('MAIL_BOOKINGS') || 'bookings@satinbook.com';
+export const SYSTEM_FROM = () => Deno.env.get('MAIL_SYSTEM') || 'hello@satinbook.com';
 
-// SMTP_DRYRUN=1 (tests only): everything runs, nothing is sent — the email is kept in the log instead
-export const dryRun = () => Deno.env.get('SMTP_DRYRUN') === '1';
-export const mailConfigured = () => dryRun() || !!(Deno.env.get('SMTP_USER') && Deno.env.get('SMTP_PASS'));
+// MAIL_DRYRUN=1 (tests only): everything runs, nothing is sent — the email is kept in the log instead
+export const dryRun = () => Deno.env.get('MAIL_DRYRUN') === '1';
+export const mailConfigured = () => dryRun() || !!KEY();
 
+const b64 = (s: string) => {
+  const bytes = new TextEncoder().encode(s);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+};
+
+// → the provider's message id (for delivery checks)
 export async function sendMail(m: Mail): Promise<string> {
   if (dryRun()) return 'dry-run';
-  // the sender address: the Gmail itself, or SMTP_FROM (a domain address, e.g. with Resend)
-  const user = Deno.env.get('SMTP_FROM') || Deno.env.get('SMTP_USER')!;
-  // quotes and line breaks never reach the From header
-  const name = String(m.fromName || 'Studio App').replace(/["\r\n<>]/g, '').slice(0, 60);
-  const info = await tx().sendMail({
-    from: { name, address: user },
-    to: m.to,
-    replyTo: m.replyTo || undefined,
-    subject: m.subject,
-    html: m.html,
-    text: m.text,
-    attachments: m.attachments,
-    headers: m.headers
+  // quotes, brackets and line breaks never reach the From header
+  const clean = (s: string) => String(s || '').replace(/["\r\n<>]/g, '').slice(0, 60).trim();
+  const from = m.sender === 'system'
+    ? `Satinbook <${SYSTEM_FROM()}>`
+    : `${clean(m.fromName) || 'Satinbook'} <${BOOKINGS_FROM()}>`;
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${KEY()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from, to: [m.to], subject: m.subject, html: m.html, text: m.text,
+      ...(m.replyTo ? { reply_to: m.replyTo } : {}),
+      ...(m.headers && Object.keys(m.headers).length ? { headers: m.headers } : {}),
+      ...(m.attachments && m.attachments.length ? {
+        attachments: m.attachments.map(a => ({ filename: a.filename, content: b64(a.content), content_type: a.contentType }))
+      } : {})
+    })
   });
-  return String(info.messageId || '');
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`resend ${res.status}: ${(j && (j.message || j.name)) || 'error'}`);
+  return String(j.id || '');
 }
 
-// the app's address: one setting (APP_BASE_URL), e.g. https://moniyy.github.io/studio-app/
+// the app's address: one setting (APP_BASE_URL), e.g. https://satinbook.com/
 export const appBase = () => {
-  const b = Deno.env.get('APP_BASE_URL') || 'https://moniyy.github.io/studio-app/';
+  const b = Deno.env.get('APP_BASE_URL') || 'https://satinbook.com/';
   return b.endsWith('/') ? b : b + '/';
 };
 export const studioLink = (slug: string, query = '') => `${appBase()}${encodeURIComponent(slug)}${query ? '?' + query : ''}`;

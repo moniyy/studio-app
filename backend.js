@@ -263,7 +263,8 @@
 
     /* Web Push: this device's subscription, and a test message to all her devices */
     pushSubscribe: (mid, sub, label) => rpc('owner_push_subscribe', {
-      p_master_id: mid, p_endpoint: sub.endpoint, p_p256dh: sub.keys.p256dh, p_auth: sub.keys.auth, p_label: label || ''
+      p_master_id: mid, p_endpoint: sub.endpoint, p_p256dh: sub.keys.p256dh, p_auth: sub.keys.auth, p_label: label || '',
+      p_origin: location.origin // after a move, devices on the new address win (no double notifications)
     }),
     pushUnsubscribe: endpoint => rpc('owner_push_unsubscribe', { p_endpoint: endpoint }),
     pushDevices: mid => rpc('owner_push_devices', { p_master_id: mid }),
@@ -378,7 +379,7 @@
     // paid by the BSB Link: logs it, next payment date + one period of the plan
     markPaid: id => rpc('admin_mark_paid', { p_id: id }),
     undoPaid: paymentId => rpc('admin_undo_paid', { p_payment_id: paymentId }),
-    // the Gmail counter: sent in the last 24 h (of ~500), waiting for tomorrow, failed
+    // the email counter: today (of 100) and this month (of 3000) on Resend Free, waiting, failed
     emailStats: () => rpc('admin_email_stats'),
     create: body => invoke('admin-create-master', body, 60000),
     resetPassword: id => invoke('admin-master-action', { action: 'reset_password', master_id: id }),

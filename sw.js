@@ -3,7 +3,7 @@
      (so edits on GitHub Pages show up right away).
    - Photos, 3D icons, fonts, QR lib: cache first. */
 
-const VERSION = 'studio-app-v25';
+const VERSION = 'studio-app-v26';
 const SHELL_CACHE = VERSION + '-shell';
 const MEDIA_CACHE = VERSION + '-media';
 const MEDIA_LIMIT = 120;
@@ -67,7 +67,9 @@ async function networkFirst(req) {
     const res = await fetch(req);
     // a pretty address (…/bella-brows) is the app itself: GitHub answers it with 404.html —
     // the app's own page instead, straight away (it reads the studio from the address)
-    if (req.mode === 'navigate' && res.status === 404) {
+    // (one part only: anything deeper — an old /studio-app/<slug> path — is sorted out by 404.html)
+    const rel = new URL(req.url).pathname.slice(new URL(self.registration.scope).pathname.length);
+    if (req.mode === 'navigate' && res.status === 404 && /^[a-z0-9][a-z0-9_-]{0,60}$/i.test(rel)) {
       const page = (await cache.match('./index.html')) || (await fetch('./index.html').catch(() => null));
       if (page && page.ok) return page;
     }

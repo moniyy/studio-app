@@ -37,9 +37,12 @@ Deno.serve(async req => {
       const st = (m.settings || {}) as Record<string, string>;
       const studio: Studio = { id: m.id, slug: m.slug, name: m.name, style: m.style, accent: m.accent, tz: m.timezone, kind: m.kind, address: st.address, phone: st.phone };
       const mail = buildReset(studio, to, password);
-      try { await sendMail({ fromName: m.name, to, subject: mail.subject, html: mail.html, text: mail.text }); emailed = true; } catch (_) { /* still shown to copy */ }
+      // from "Satinbook <hello@…>"
+      let pid = '', why = '';
+      try { pid = await sendMail({ fromName: m.name, sender: 'system', to, subject: mail.subject, html: mail.html, text: mail.text }); emailed = true; }
+      catch (e) { why = String((e as Error).message || e).slice(0, 300); /* still shown to copy */ }
       await admin.from('email_log').insert({ master_id: m.id, kind: 'reset', to_email: to, to_user: m.owner_id, subject: mail.subject,
-        status: emailed ? 'sent' : 'failed', sent_at: emailed ? new Date().toISOString() : null });
+        status: emailed ? 'sent' : 'failed', error: why || null, sent_at: emailed ? new Date().toISOString() : null, data: pid ? { provider_id: pid } : {} });
     }
     return json({ email: to, password, emailed });
   }

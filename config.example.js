@@ -14,7 +14,7 @@ window.STUDIO_CONFIG = {
   supabaseUrl: 'https://YOUR-PROJECT-REF.supabase.co',
   supabaseAnonKey: 'YOUR-ANON-KEY',
   // where every link points (emails, QR cards, sharing); on Pages the workflow fills it in
-  baseUrl: 'https://moniyy.github.io/studio-app/',
+  baseUrl: 'https://satinbook.com/',
   // push notifications for the master: the PUBLIC VAPID key (README → Push)
   vapidPublicKey: 'YOUR-VAPID-PUBLIC-KEY'
 };

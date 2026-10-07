@@ -3,7 +3,7 @@
 Шаблон мобильного веб-приложения (PWA) для бьюти-мастера: услуги и цены, свободное время, ассистент, образы, запись в пару касаний.
 Чистый HTML/CSS/JS без сборки — работает прямо на GitHub Pages.
 
-**Демо:** https://moniyy.github.io/studio-app/ · **настоящая запись:** https://moniyy.github.io/studio-app/?m=test-studio (после подключения Supabase)
+**Сайт:** https://satinbook.com · **демо:** https://satinbook.com/demo · **настоящая запись:** https://satinbook.com/test-studio
 
 ## Два режима записи
 
@@ -19,7 +19,7 @@
 
 ### Обычный путь — админка `?admin=1` (5 минут, без файлов в репозитории)
 
-`https://moniyy.github.io/studio-app/?admin=1` → вход email + пароль. Пускает только аккаунты из таблицы `admins`
+`https://satinbook.com/?admin=1` → вход email + пароль. Пускает только аккаунты из таблицы `admins`
 (проверка в базе и в Edge Functions, не только в интерфейсе). Добавить админа (SQL Editor):
 ```sql
 insert into public.admins (user_id) select id from auth.users where email = '<your email>';
@@ -65,7 +65,7 @@ Yearly), сумма за период и дата следующей оплат�
 3. Файл установки на экран «Домой»: `node tools/make-manifest.js bella-nails` → `manifests/bella-nails.webmanifest`
    (иначе иконка на iPhone откроет последнего открытого мастера или demo).
 4. `git add . && git commit -m "Add bella-nails" && git push`
-5. Ссылка для клиенток: `https://moniyy.github.io/studio-app/?m=<slug>`
+5. Ссылка для клиенток: `https://satinbook.com/<slug>`
 
 ### Вариант B — своя запись вручную через SQL (если админка недоступна)
 
@@ -81,7 +81,7 @@ Yearly), сумма за период и дата следующей оплат�
    update public.masters set owner_id = (select id from auth.users where email = 'bella@example.com')
     where slug = 'bella-nails';
    ```
-6. Дайте мастеру ссылку `https://moniyy.github.io/studio-app/?m=<slug>&owner=1` и временный пароль.
+6. Дайте мастеру ссылку `https://satinbook.com/<slug>?owner=1` и временный пароль.
    Она входит (email + пароль) и сразу меняет пароль: значок аккаунта вверху → **Change password**.
    Дальше часы, отпуск, правила и записи — в кабинете.
    **На iPhone:** у приложения на экране «Домой» своё хранилище, отдельное от Safari — поэтому вход нужно сделать
@@ -104,12 +104,12 @@ Yearly), сумма за период и дата следующей оплат�
 3. **Project Settings → API Keys** (или кнопка **Connect**): скопируйте **Project URL** и **anon / publishable** ключ.
    Ключ **service_role / secret** никуда не копируйте — он обходит всю защиту и в браузере ему не место.
 4. **Authentication → URL Configuration**:
-   - Site URL: `https://moniyy.github.io/studio-app/`
-   - Redirect URLs: добавьте `https://moniyy.github.io/studio-app/**` и `http://127.0.0.1:5500/**` (для Live Server).
-5. **Authentication → Sign In / Providers → Email**: вход мастера — email + пароль, писем пока нет,
-   поэтому **Confirm email** выключен. Рекомендуется выключить и **Allow new users to sign up**:
+   - Site URL: `https://satinbook.com`
+   - Redirect URLs: `https://satinbook.com/**`, `https://www.satinbook.com/**` и `http://127.0.0.1:5500/**` (для Live Server).
+5. **Authentication → Sign In / Providers → Email**: вход мастера — email + пароль,
+   **Confirm email** выключен (аккаунты мастеров создаёт админка). Рекомендуется выключить и **Allow new users to sign up**:
    аккаунты мастеров создаются вручную (Add user), публичная регистрация не нужна.
-   Письма (подтверждения, напоминания, сброс пароля) — в части 2 через свой SMTP.
+   Письма (подтверждения, напоминания, сброс пароля) — через Resend, см. «Письма».
 
 ### В терминале (Windows, PowerShell, в папке проекта)
 
@@ -255,7 +255,7 @@ Owner → **Insights** считает по настоящим записям (ф
 
 ### Проверка на iPhone
 
-1. Откройте `https://moniyy.github.io/studio-app/?m=test-studio&owner=1` в **Safari** → карточка покажет, как добавить
+1. Откройте `https://satinbook.com/test-studio?owner=1` в **Safari** → карточка покажет, как добавить
    приложение на экран «Домой»: **Поделиться → На экран «Домой»**.
 2. Откройте **приложение с экрана «Домой»** (не Safari), войдите → Today → **Turn on notifications** → **Разрешить**.
 3. **Send test notification** — уведомление «Notifications are on ✓» придёт сразу.
@@ -277,12 +277,14 @@ node tools/make-icon.js --master bella-nails # для мастера → img/bel
 
 Для своего мастера добавьте в его JSON строку, которую напечатает скрипт: `"iconDir": "img/bella-nails/"`.
 
-## Письма (Gmail)
+## Письма (Resend, домен satinbook.com)
 
-Письма уходят через отдельный Gmail платформы (SMTP `smtp.gmail.com:465`, пароль приложения Google).
-Адрес и пароль — **только в секретах Supabase** (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`), не в коде и не в репозитории.
-Отправитель — название студии («Bella Brows <почта платформы>»), Reply-To — почта мастера: ответы клиенток приходят ей.
+Письма уходят через [Resend](https://resend.com) с домена `satinbook.com` (бесплатный тариф: 100 писем в день, 3000 в месяц).
+API-ключ — **только в секретах Supabase** (`RESEND_API_KEY`), не в коде и не в репозитории.
 
+- **Отправители**: письма студии — «Bella Brows <bookings@satinbook.com>», Reply-To — почта мастера (ответы клиенток приходят ей);
+  системные (сброс пароля, приглашения, новый пароль из админки) — «Satinbook <hello@satinbook.com>».
+  Адреса можно сменить секретами `MAIL_BOOKINGS` / `MAIL_SYSTEM`.
 - **Клиенткам** (если оставила email): подтверждение (кнопки «Add to calendar» и «Manage booking», вложение `.ics`),
   запрос принят, «пришлите депозит» (способы оплаты и срок), перенос и отмена (кем бы ни сделаны),
   напоминания за 24 ч и за 2 ч, «How was your visit?» (нужна ссылка на отзывы в Profile), «Time for your fill».
@@ -292,45 +294,52 @@ node tools/make-icon.js --master bella-nails # для мастера → img/bel
 - **Studio → Emails** — переключатель каждого типа, превью в стиле студии, «Send me a test», последние письма.
 - **Как устроено**: каждое письмо — строка `email_log` (и журнал, и очередь). Триггер на `bookings` и задача `pg_cron`
   (каждые 10 минут: напоминания, fill, «Your day») ставят письма в очередь; Edge Function `send-email` отправляет то, что пора.
-- **Лимит Gmail** (~500 писем в сутки): отправляется не больше 480 за скользящие 24 часа, остальное ждёт в очереди;
-  в админке счётчик «Emails · last 24 h» и предупреждение с 400.
-- **Сброс пароля мастера**: Supabase Auth через тот же Gmail (`[auth.email.smtp]` в `supabase/config.toml`, пароль подставляется
-  из переменной окружения при `supabase config push`). Письмо со ссылкой и кодом из 6 цифр; на iPhone в установленном приложении —
-  «Forgot password?» → код из письма → новый пароль, без перехода в Safari.
+  В `email_log.data.provider_id` — id письма в Resend (статус доставки: Resend → Emails).
+- **Лимиты Resend Free**: отправляется не больше 95 писем за 24 часа и 2950 за календарный месяц (запас — для писем
+  сброса пароля, их шлёт Supabase Auth через тот же Resend); остальное ждёт в очереди. В админке счётчик
+  «Emails · today … of 100 · this month … of 3000», предупреждение с 80 %.
+- **Сброс пароля мастера**: Supabase Auth → SMTP `smtp.resend.com:465`, пользователь `resend`, пароль — API-ключ
+  (`[auth.email.smtp]` в `supabase/config.toml`, ключ подставляется из переменной окружения:
+  `RESEND_API_KEY=re_… npx supabase config push`). Письмо со ссылкой и кодом из 6 цифр; на iPhone в установленном
+  приложении — «Forgot password?» → код из письма → новый пароль, без перехода в Safari.
+- **Ответы на hello@satinbook.com** пересылаются в почту владельца платформы (Cloudflare → Email → Email Routing).
 - **Деплой**: `npx supabase functions deploy send-email --use-api --no-verify-jwt` (и `email-unsubscribe`).
-- **Тесты без отправки**: секрет `SMTP_DRYRUN=1` — всё работает как обычно, но письмо не уходит, а его текст и `.ics`
-  сохраняются в `email_log.data.dry_run`; после тестов `npx supabase secrets unset SMTP_DRYRUN` и удалить эти строки журнала.
+- **Тесты без отправки**: секрет `MAIL_DRYRUN=1` — всё работает как обычно, но письмо не уходит, а его текст и `.ics`
+  сохраняются в `email_log.data.dry_run`; после тестов `npx supabase secrets unset MAIL_DRYRUN` и удалить эти строки журнала.
 
 ## Красивые ссылки
 
-Адрес студии — `https://moniyy.github.io/studio-app/bella-brows` (кабинет — `…/bella-brows?owner=1`).
+Адрес студии — `https://satinbook.com/bella-brows` (кабинет — `…/bella-brows?owner=1`, админка — `https://satinbook.com/?admin=1`).
 GitHub Pages отвечает на такой путь страницей `404.html`, она передаёт его приложению как `?m=bella-brows`, приложение
-возвращает красивый адрес; установленное приложение (service worker) открывает его сразу. Старые ссылки с `?m=` работают.
+возвращает красивый адрес; установленное приложение (service worker) открывает его сразу. Старые ссылки
+`moniyy.github.io/studio-app/…` GitHub перенаправляет на `satinbook.com/…`, ссылки с `?m=` тоже работают.
 Manifest («На экран Домой»), QR-карточки, Welcome kit, письма и push используют новый формат.
 
 Все ссылки строятся из **одной настройки BASE_URL**: `config.js → baseUrl` для приложения (workflow берёт её из переменной
 репозитория `APP_BASE_URL`, иначе из `CNAME`, иначе адрес GitHub Pages) и секрет Supabase `APP_BASE_URL` для писем.
 
-## Switch to satinbook.com
+## Домен satinbook.com
 
-1. **Купить домен** на Cloudflare (Registrar → Register domains → `satinbook.com`).
-2. **CNAME**: в корне репозитория файл `CNAME` с одной строкой `satinbook.com` — workflow скопирует его на сайт.
-3. **DNS** в Cloudflare (Proxy status — **DNS only**, серое облако):
-   - `A  @  185.199.108.153`, `A  @  185.199.109.153`, `A  @  185.199.110.153`, `A  @  185.199.111.153`
-   - `AAAA @ 2606:50c0:8000::153`, `…8001::153`, `…8002::153`, `…8003::153`
-   - `CNAME  www  moniyy.github.io`
-4. **GitHub** → Settings → Pages → Custom domain: `satinbook.com` → дождаться проверки → **Enforce HTTPS**.
-5. **BASE_URL**: `gh variable set APP_BASE_URL --body https://satinbook.com/` и
-   `npx supabase secrets set APP_BASE_URL=https://satinbook.com/`; затем пустой коммит, чтобы пересобрать `config.js`.
-6. **Supabase → Authentication → URL Configuration**: Site URL `https://satinbook.com/`, Redirect URLs `https://satinbook.com/**`
-   (в `supabase/config.toml`: `site_url`, `additional_redirect_urls`, затем `supabase config push`).
-7. **Почта домена** (вместо Gmail): Resend → Add domain `satinbook.com` → DNS-записи SPF/DKIM из Resend в Cloudflare →
-   API-ключ; в секретах `SMTP_HOST=smtp.resend.com`, `SMTP_USER=resend`, `SMTP_PASS=<API key>`, `SMTP_FROM=hello@satinbook.com`
-   (порт 465 тот же); в `config.toml` `[auth.email.smtp]` — те же значения, `supabase config push`.
-8. **Проверка**: `https://satinbook.com/bella-brows` открывает студию; старая ссылка `moniyy.github.io/studio-app/?m=bella-brows`
-   ведёт туда же (GitHub перенаправляет); «На экран Домой» → новая иконка открывает `satinbook.com/bella-brows`;
-   тестовое письмо из Studio → Emails — ссылки «Manage booking» на новый домен; «Forgot password?» — письмо приходит,
-   код работает; QR-карточка в Welcome kit — новый адрес.
+Домен куплен на Cloudflare и подключён к GitHub Pages (Settings → Pages → Custom domain, **Enforce HTTPS**; файл `CNAME`).
+DNS в Cloudflare (у записей сайта Proxy status — **DNS only**):
+
+| Type | Name | Content | Зачем |
+| --- | --- | --- | --- |
+| A | `@` | `185.199.108.153`, `185.199.109.153`, `185.199.110.153`, `185.199.111.153` | сайт (GitHub Pages) |
+| AAAA | `@` | `2606:50c0:8000::153`, `…8001::153`, `…8002::153`, `…8003::153` | сайт (IPv6) |
+| CNAME | `www` | `moniyy.github.io` | www → сайт |
+| TXT / MX | `send`, `resend._domainkey` | значения со страницы домена в Resend (добавлены автонастройкой Resend → Cloudflare) | отправка (SPF, DKIM) |
+| TXT | `_dmarc` | `v=DMARC1; p=none;` | DMARC |
+| MX, TXT | `@` | `route1/2/3.mx.cloudflare.net`, `v=spf1 include:_spf.mx.cloudflare.net ~all` | Email Routing: hello@ → почта владельца |
+
+- **Supabase Auth → URL Configuration**: Site URL `https://satinbook.com`, Redirect URLs `https://satinbook.com/**`,
+  `https://www.satinbook.com/**` (старый `moniyy.github.io/studio-app/**` оставлен на время переезда) — в `supabase/config.toml`.
+- **После переезда** приложения, добавленные на экран «Домой» со старого адреса, нужно добавить заново: вход, push и
+  локальные данные привязаны к адресу. В кабинете мастера один раз показывается плашка «We moved to satinbook.com —
+  re-add the app to your Home Screen». Push со старых установок перестают приходить, как только на новом адресе
+  включены уведомления (`push_subscriptions.app_origin`, без двойных уведомлений).
+- **Проверка**: `https://satinbook.com/bella-brows` открывает студию; `moniyy.github.io/studio-app/?m=bella-brows` ведёт туда же;
+  письмо «Send me a test» из Studio → Emails — ссылки на новый домен; «Forgot password?» — письмо приходит, код работает.
 
 ## Полезные параметры адреса
 

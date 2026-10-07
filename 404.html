@@ -3,17 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Studio App</title>
-  <!-- Pretty links: GitHub Pages answers /studio-app/bella-brows with this page.
+  <title>Satinbook</title>
+  <!-- Pretty links: GitHub Pages answers satinbook.com/bella-brows with this page.
        It hands over to the app as ?m=bella-brows (the app then shows the pretty
-       address again). On a domain of its own (satinbook.com/bella-brows) the same. -->
+       address again). On <user>.github.io the app lives under /<repo>/. -->
   <script>
     (function () {
       var parts = location.pathname.split('/').filter(Boolean);
-      // /<repo>/<slug> on github.io, /<slug> on a domain
-      var root = parts.length > 1 ? '/' + parts[0] + '/' : '/';
-      var slug = (parts.length > 1 ? parts[1] : parts[0] || '').toLowerCase();
-      if (!/^[a-z0-9][a-z0-9_-]{0,60}$/.test(slug)) { location.replace(root); return; }
+      var ok = /^[a-z0-9][a-z0-9_-]{0,60}$/;
+      // a project page on github.io: /<repo>/<slug>; a domain of its own: /<slug>
+      // (an old /studio-app/<slug> path on the domain still finds the studio: its last part)
+      var root = /\.github\.io$/.test(location.hostname) && parts.length > 1 ? '/' + parts[0] + '/' : '/';
+      var slug = (root === '/' ? parts[parts.length - 1] : parts[1] || '') || '';
+      slug = slug.toLowerCase();
+      if (!ok.test(slug)) { location.replace(root); return; }
       var q = location.search.replace(/^\?/, '');
       location.replace(root + '?m=' + encodeURIComponent(slug) + (q ? '&' + q : '') + location.hash);
     })();

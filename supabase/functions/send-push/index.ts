@@ -20,7 +20,7 @@ const HOOK_SECRET = Deno.env.get('PUSH_HOOK_SECRET') || '';
 const VAPID: Vapid = {
   publicKey: Deno.env.get('VAPID_PUBLIC_KEY') || '',
   privateKey: Deno.env.get('VAPID_PRIVATE_KEY') || '',
-  subject: Deno.env.get('VAPID_SUBJECT') || 'https://moniyy.github.io/studio-app/'
+  subject: Deno.env.get('VAPID_SUBJECT') || 'https://satinbook.com/'
 };
 
 const cors = {
@@ -120,8 +120,13 @@ Deno.serve(async req => {
   }
 
   if (!recipients.length) return json({ sent: 0, removed: 0, failed: [] });
-  const { data: all } = await admin.from('push_subscriptions').select('id, endpoint, p256dh, auth, user_id').eq('master_id', masterId);
-  const subs = (all || []).filter(s => recipients.includes(s.user_id || ownerId || ''));
+  const { data: all } = await admin.from('push_subscriptions').select('id, endpoint, p256dh, auth, user_id, app_origin').eq('master_id', masterId);
+  const mine = (all || []).filter(s => recipients.includes(s.user_id || ownerId || ''));
+  // the app moved (satinbook.com): once an account has a device on the current address,
+  // its devices from the old address get nothing more — no double notifications
+  const here = (() => { try { return new URL(Deno.env.get('APP_BASE_URL') || '').origin; } catch { return ''; } })();
+  const fresh = new Set(mine.filter(s => here && s.app_origin === here).map(s => s.user_id || ownerId));
+  const subs = mine.filter(s => !fresh.has(s.user_id || ownerId) || s.app_origin === here);
   const results = await Promise.all(subs.map(async s => {
     try { return { id: s.id, ...(await sendPush(s, message, VAPID)) }; } catch (e) { return { id: s.id, ok: false, status: 0, gone: false, text: String(e) }; }
   }));
