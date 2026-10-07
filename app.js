@@ -4049,7 +4049,7 @@
     return cabinetP;
   }
   function openCabinet(opts) {
-    if (!isBuiltin()) { openOwner(opts); return; }
+    if (!isBuiltin()) { if (data.ownerDemo) openDemoCabinet(opts); else toast('No dashboard for this studio', 'x'); return; }
     loadCabinet().then(C => C.open(cabinetKit(), opts)).catch(() => toast(ERR_COPY.network, 'x'));
   }
   /* ---------- A short tour: the screen dims, one thing is lit, a card says what it is ----------
@@ -4140,27 +4140,13 @@
     });
   }
 
-  // The demo dashboard (?owner=1 on a demo studio): what she is looking at, once per visit
-  function demoTour() {
-    try { if (sessionStorage.getItem(KEY + ':demoTour')) return; sessionStorage.setItem(KEY + ':demoTour', '1'); } catch (e) { /* private mode */ }
-    const q = s => () => ownerEl && $(s, ownerEl);
-    const card = title => () => ownerEl && $$('.owner__card', ownerEl).find(c => (c.textContent || '').includes(title));
-    tour([
-      { el: q('.owner__bar'), title: 'This is the owner’s dashboard', text: 'A demo studio with sample numbers — yours shows your own.' },
-      { el: q('.owner__grid'), title: 'What your app did this week', text: 'Opens, questions your assistant answered, taps on Book — while your hands were busy.' },
-      { el: card('Top questions'), title: 'What clients ask', text: 'The questions your assistant answered for you, most asked first.' },
-      { el: card('Most viewed'), title: 'What clients look at', text: 'The services that get the most attention — and your looks that bring bookings.' },
-      { el: q('[data-owner-exit]'), title: 'See it as a client', text: 'Tap Exit to book, ask the assistant and browse looks like a client would.' }
-    ], { label: 'Demo dashboard tour' });
-  }
-
   function cabinetKit() {
     return {
       $, $$, esc, I, svg, art, Sheet, toast, haptic, springIn, popIn, G, ensure, pushOverlay, popOverlay,
       get data() { return data; }, SLUG, store, Backend, price, fmtClock, fmtTime, fmtDuration, MONTHS, DAY_NAMES, DAY_SHORT, DAY_KEYS,
       tzParts, zonedMs, studioDate, studioSpot, dateKey, dayLabel, sized, safeUrl, ERR_COPY, errText, initials,
       maskPhone, phoneDigits, statusText, countdown, IS_IOS, reducedMQ, spinner, closeNotice,
-      demo: () => { if (data.ownerDemo) openOwner(); else toast('No demo data for this studio', 'x'); },
+      demo: () => { if (data.ownerDemo) openDemoCabinet(); else toast('No demo data for this studio', 'x'); },
       setOwnerHere,
       onCabinet: open => { cabOpen = open; syncOwnerSwitch(); },
       onDataChanged: () => { dropAllOpenings(); refreshOpenings(); },
@@ -5503,7 +5489,6 @@
      Owner demo mode — stats on the Looks, a banner to get back
      --------------------------------------------------------- */
   let ownerMode = false;
-  try { ownerMode = sessionStorage.getItem(KEY + ':owner') === '1'; } catch (e) { /* private mode */ }
   let ownerAfter = null;
 
   function setOwnerMode(on) {
@@ -6773,130 +6758,44 @@
   }
 
   /* ---------------------------------------------------------
-     Owner demo view — what the master sees when selling the app
-     (every number here is demo data from JSON and is labelled so)
+     The demo studio's dashboard: the real one (cabinet.js) running on demo
+     data kept in this page (demo-cabinet.js) — nothing is saved or sent, a
+     reload starts over. (The old "Your week" screen is a card in Insights now.)
      --------------------------------------------------------- */
   let ownerEl = null;
-  function openOwner(opts) {
-    const o = data.ownerDemo;
-    if (!o || ownerEl) return;
-    closeNotice();
-    ownerMode = true;
-    setOwnerMode(true);
-    const tl = topLook();
-    const tls = tl ? lookStats(tl) : null;
-    if (!(opts && opts.quiet)) haptic(); // the long-press already buzzed
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const DEMO_DAYS = [38, 45, 52, 41, 60, 49, 27];
-    const daily = DEMO_DAYS.map((d, i) => (o.daily && o.daily[i] != null ? +o.daily[i] || 0 : d));
-    const maxDay = Math.max(1, ...daily);
-    const top = (o.topServices || []).map(t => ({ s: data.services.find(x => x.id === t.id), views: +t.views || 0 })).filter(t => t.s).slice(0, 3);
-    const maxViews = Math.max(1, ...top.map(t => t.views));
-    const metric = (icon, value, label, opts) => `
-      <div class="metric stat" data-value="${+value}" data-decimals="${(opts && opts.decimals) || 0}">
-        ${art(icon)}
-        <b>${(opts && opts.prefix) || ''}<span class="stat__num num">${fmtStat(+value, (opts && opts.decimals) || 0)}</span>${(opts && opts.suffix) || ''}</b>
-        <small>${label}</small>
-      </div>`;
-    // Mon…Sun columns; today (studio time) in the accent
-    const todayIdx = (studioNow().day + 6) % 7;
-    const chart = days.map((d, i) => {
-      const v = daily[i] || 0;
-      return `
-        <div class="ochart__col${i === todayIdx ? ' is-today' : ''}">
-          <span class="ochart__v num">${v}</span>
-          <i class="ochart__bar" style="--h:${(v / maxDay).toFixed(3)}"></i>
-          <span class="ochart__d">${i === todayIdx ? 'Today' : d}</span>
-        </div>`;
-    }).join('');
-
-    ownerEl = document.createElement('div');
-    ownerEl.className = 'owner';
-    ownerEl.setAttribute('role', 'dialog');
-    ownerEl.setAttribute('aria-label', 'Owner view, demo data');
-    ownerEl.innerHTML = `
-      <div class="mesh" aria-hidden="true"><i></i><i></i><i></i></div>
-      <div class="owner__bar">
-        <span class="owner__badge">${svg('<path d="M12 3 5 6v5.5c0 4.3 2.9 7.9 7 9.5 4.1-1.6 7-5.2 7-9.5V6z"/>')}Owner view</span>
-        <span class="demo-tag">Demo data</span>
-        <button class="owner__exit" data-owner-exit>Exit</button>
-      </div>
-      <div class="owner__scroll">
-        <header class="owner__head" data-stagger>
-          <span class="eyebrow">This week · Demo data</span>
-          <h1>Your week</h1>
-          <p>What ${esc(data.name)} did for you while your hands were busy.</p>
-        </header>
-        <div class="owner__grid">
-          ${metric('eye', o.opens, 'App opens')}
-          ${metric('speech-balloon', o.questions, 'Questions answered by assistant')}
-          ${metric('calendar', o.bookTaps, 'Book taps')}
-          ${metric('gem-stone', o.hoursSaved, 'Time saved', { prefix: '~', suffix: ' h', decimals: 1 })}
-        </div>
-        <section class="card owner__card" data-stagger>
-          <div class="owner__h"><b>App opens by day</b><span class="demo-tag">Demo data</span></div>
-          <div class="ochart" role="img" aria-label="App opens by day of the week, demo data">${chart}</div>
-        </section>
-        <section class="card owner__card" data-stagger>
-          <div class="owner__h"><b>Top questions clients asked</b><span class="demo-tag">Demo data</span></div>
-          <ol class="owner__qs">
-            ${(o.topQuestions || []).slice(0, 5).map((q, i) => `<li><span class="owner__rank">${i + 1}</span><span class="owner__q">${esc(q.q)}</span><span class="owner__count num">${esc(q.count)}</span></li>`).join('')}
-          </ol>
-        </section>
-        <section class="card owner__card" data-stagger>
-          <div class="owner__h"><b>Most viewed services</b><span class="demo-tag">Demo data</span></div>
-          ${top.map(t => `
-            <div class="owner__svc">
-              <img src="${esc(photoSrc(t.s, 200))}"${phAttr(t.s)} alt="">
-              <div class="owner__svc-body">
-                <div class="owner__svc-top"><b>${esc(t.s.title)}</b><span class="num">${t.views} views</span></div>
-                <div class="owner__track"><i style="--p:${(t.views / maxViews).toFixed(3)}"></i></div>
-              </div>
-            </div>`).join('')}
-        </section>
-        ${tl ? `
-        <section class="card owner__card" data-stagger>
-          <div class="owner__h"><b>Your top look this month</b><span class="demo-tag">Demo data</span></div>
-          <div class="owner__toplook">
-            <img src="${esc(sized(safeUrl(tl.photo), 300))}" alt="">
-            <span><b>${esc(tl.title)}</b><span class="num">${tls.bookings} bookings · ${tls.views} views</span><small>Your Looks tab brings in bookings 📈</small></span>
-          </div>
-          <button class="btn btn--soft btn--block" data-owner-looks>See all looks with stats ${I.arrowR}</button>
-        </section>` : ''}
-        <section class="owner__cta" data-stagger>
-          <p>While you were working, your assistant replied to <b class="num">${esc(o.questions)}</b> clients 💬</p>
-          <a class="btn btn--dark btn--block" href="${esc(APP_BASE + '#start')}" ${ext}>Get this app for my studio ${I.arrowR}</a>
-          <small>All numbers on this screen are demo data.</small>
-        </section>
-      </div>`;
-    app.appendChild(ownerEl);
-
-    const g = G();
-    if (g) ensure(g.fromTo(ownerEl, { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.55, ease: SPRING, clearProps: 'opacity,transform' }));
-    springIn($$('[data-stagger], .metric', ownerEl), { delay: 0.12, stagger: 0.06 });
-    setTimeout(() => {
-      $$('.metric', ownerEl).forEach(countUp);
-      if (g) {
-        // bars grow from the bottom, the numbers ride up with them
-        ensure(g.fromTo($$('.ochart__bar', ownerEl), { scaleY: 0 }, { scaleY: 1, transformOrigin: '50% 100%', duration: 0.8, ease: SPRING, stagger: 0.06, clearProps: 'transform' }));
-        ensure(g.fromTo($$('.ochart__v', ownerEl), { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.5, stagger: 0.06, delay: 0.25, ease: SPRING, clearProps: 'opacity,transform' }));
-      }
-      $$('.owner__track i', ownerEl).forEach(i => i.classList.add('is-in'));
-    }, 350);
-    pushOverlay(closeOwnerUI);
-    syncOwnerBanner();
-    setTimeout(demoTour, reducedMQ.matches ? 300 : 1300);
+  let demoP = null;
+  let demoApi = null;
+  function loadDemo() {
+    if (!demoP) {
+      demoP = new Promise((resolve, reject) => {
+        if (window.StudioDemo) { resolve(window.StudioDemo); return; }
+        const s = document.createElement('script');
+        s.src = './demo-cabinet.js';
+        s.onload = () => resolve(window.StudioDemo);
+        s.onerror = () => { demoP = null; reject(new Error('demo')); };
+        document.head.appendChild(s);
+      });
+    }
+    return demoP;
   }
-
-  function closeOwnerUI() {
-    const el = ownerEl;
-    ownerEl = null;
-    if (!el) return;
-    syncOwnerBanner();
-    if (ownerAfter) { const next = ownerAfter; ownerAfter = null; setTimeout(next, 120); }
-    const g = G();
-    if (g) ensure(g.to(el, { opacity: 0, y: 24, duration: 0.3, ease: 'power2.in', onComplete: () => el.remove() }));
-    else el.remove();
+  // what the demo dashboard remembers lives here, not in localStorage: a reload is a fresh demo
+  const demoStore = (() => {
+    const m = new Map([['setupDone', true]]);
+    return { get: (k, d) => (m.has(k) ? m.get(k) : d), set: (k, v) => { m.set(k, v); }, remove: k => { m.delete(k); } };
+  })();
+  function openDemoCabinet(opts) {
+    Promise.all([loadCabinet(), loadDemo()]).then(([C, D]) => {
+      if (!demoApi) {
+        demoApi = D.create({ data, zonedMs, BackendError: Backend.BackendError, errors: Backend.errors, toast });
+        if (Backend.errors) Backend.errors.context({ role: 'owner' });
+      }
+      const kit = cabinetKit();
+      kit.Backend = demoApi;
+      kit.store = demoStore;
+      kit.getApp = APP_BASE + '#start';
+      kit.setOwnerHere = () => {}; // no Studio / Client view switch: Done goes back to the client's app
+      C.open(kit, opts);
+    }).catch(() => toast(ERR_COPY.network, 'x'));
   }
 
   /* Long-press (1s) on the hero avatar opens the owner view */

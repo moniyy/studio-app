@@ -315,7 +315,7 @@ API-ключ — **только в секретах Supabase** (`RESEND_API_KEY`
 ## Главная satinbook.com и заявки мастеров
 
 Корень сайта — **страница продукта** (`index.html` + `landing.css` / `landing.js`, английский, стиль noir): что это,
-проблемы → решения, возможности, демо (`/demo` как клиентка и `/demo?owner=1` — кабинет с демо-цифрами), цена (30 дней
+проблемы → решения, возможности, демо (`/demo` как клиентка и `/demo?owner=1` — настоящий кабинет на демо-данных, см. ниже), цена (30 дней
 бесплатно, потом $29/mo; founding $19/mo), FAQ и форма **Start your free trial**. Само приложение — `app.html`: ссылки для
 приложения (`?m=`, `?owner=1`, `?admin=1`, `?manage=`, `?look=`, ссылка сброса пароля) и установленное приложение главная
 сразу передаёт ему.
@@ -330,6 +330,19 @@ API-ключ — **только в секретах Supabase** (`RESEND_API_KEY`
 - **Powered by Satinbook** внизу каждого приложения студии ведёт на `https://satinbook.com/?ref=<slug>`; `ref` сохраняется
   в заявке («from /bella-brows») — видно, откуда пришла мастер.
 - Картинки: `img/brand/` (знак S., favicon, `og.png` 1200×630 для превью ссылок), `img/landing/` (скриншоты демо).
+
+## Демо-кабинет (`/demo?owner=1`)
+
+Кнопка «Open the owner dashboard» на главной (и `?owner=1` на `/demo`) открывает **настоящий кабинет** (`cabinet.js`:
+Today, Calendar, Clients, Insights, Studio) студии Aria — но вместо Supabase под ним `demo-cabinet.js`: те же вызовы и
+ответы той же формы, только всё живёт в памяти страницы. Ничего не уходит в базу, push и письма не отправляются — вместо
+них тосты «In your app this …». Перезагрузка или **Reset** в плашке «Demo · nothing here is real» начинают демо заново;
+«Get this app for my studio» ведёт на форму заявки. При открытии — тот же тур на 5 шагов, что у мастера при первом входе.
+
+Данные считаются от сегодняшнего дня (одинаковые в течение дня): 2 мастера (Aria — пн–сб, Jasmine — вт–вс), 10 клиенток
+с историей, заметками и картами ресниц, записи вчера / сегодня / неделю вперёд во всех статусах (confirmed, awaiting deposit,
+request, completed, cancelled + late cancel, no-show), 12 недель истории для Insights, 6 работ, депозиты через Cash App.
+Услуги и работы берутся из `masters/demo.json`. Старый экран «Your week» стал карточкой «What your app did this week» в Insights.
 
 ## Красивые ссылки
 
@@ -448,7 +461,7 @@ dashboard, отправка формы, переход по «Powered by Satinbo
 
 ## Файлы
 
-- `index.html`, `landing.css`, `landing.js` — главная satinbook.com; `app.html`, `app.css`, `app.js` — приложение; `backend.js` — работа с Supabase; `cabinet.js` — кабинет мастера; `admin.js` — админка
+- `index.html`, `landing.css`, `landing.js` — главная satinbook.com; `app.html`, `app.css`, `app.js` — приложение; `backend.js` — работа с Supabase; `cabinet.js` — кабинет мастера; `demo-cabinet.js` — демо-данные кабинета; `admin.js` — админка
 - `config.example.js` → `config.js` — ключи Supabase (не в репозитории)
 - `masters/*.json` — данные мастеров
 - `supabase/` — миграции, тестовые данные, шаблон нового мастера

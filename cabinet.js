@@ -38,6 +38,8 @@
   const ACTIVE = ['pending', 'confirmed'];
 
   /* ---------- small helpers ---------- */
+  // the demo studio (satinbook.com/demo?owner=1): its data lives in memory, nothing is sent
+  const isDemo = () => !!(K && K.Backend && K.Backend.demo);
   const $ = (s, el) => K.$(s, el || root);
   const $$ = (s, el) => K.$$(s, el || root);
   const esc = v => K.esc(v);
@@ -98,7 +100,13 @@
     root.className = 'cab';
     root.setAttribute('role', 'dialog');
     root.setAttribute('aria-label', 'Studio dashboard');
+    root.classList.toggle('is-demo', !!isDemo());
     root.innerHTML = `
+      ${isDemo() ? `<div class="cab-demo" role="note">
+        <span class="cab-demo__txt"><b>Demo</b> · nothing here is real</span>
+        <button class="cab-demo__reset" data-demo-reset>Reset</button>
+        <a class="cab-demo__get" href="${esc(K.getApp || '#')}" target="_blank" rel="noopener">Get this app<span class="cab-demo__long"> for my studio</span></a>
+      </div>` : ''}
       <header class="cab__bar">
         <span class="cab__mono">${esc(K.initials())}</span>
         <span class="cab__who"><b>${esc(K.data.name)}</b><small id="cab-live">Dashboard</small></span>
@@ -448,6 +456,8 @@
     startLive();
     if (!shown) go(S.tab, true); else refreshView();
     if (S.target) { const id = S.target; S.target = null; setTimeout(() => openBooking(id), shown ? 150 : 450); }
+    // the demo studio: the same tour a master gets on her first sign-in
+    else if (isDemo() && !K.store.get('tourDone')) setTimeout(() => startTour(), 900);
   }
   /* First sign-in with the temporary password from the admin: choose her own (noir screen) */
   function renderForcePassword(msg) {
@@ -746,7 +756,8 @@
     return S.scheds[S.hrsStaff] || null;
   }
   const insKey = () => 'ins:' + (S.insPer || 'week') + ':' + (S.insStaff || '');
-  const knownFresh = () => (S.known && Date.now() - (S.lastSync || 0) < 30000 ? null : syncChanges(true));
+  // a reload of what she already has: anything new in it is news (the banner, the slide-in) — only the very first load is quiet
+  const knownFresh = () => (S.known && Date.now() - (S.lastSync || 0) < 30000 ? null : syncChanges(!S.known));
   const LOAD = {
     today: () => Promise.all([knownFresh(), isStaff() ? null : loadSetup(), loadTeam().catch(() => null)]),
     requests: () => knownFresh(),
@@ -1638,6 +1649,31 @@
       <button class="cab-link cab-tour-again" data-cab-tour>Show the tour again</button>`;
   }
 
+  /* The demo studio's Insights: what the app itself did this week (the old "Your week" screen) */
+  function demoWeekHTML() {
+    const o = isDemo() && K.data.ownerDemo;
+    if (!o) return '';
+    const m = (v, l) => `<div><b class="num">${esc(v)}</b><small>${esc(l)}</small></div>`;
+    return `
+      <div class="card ins-app">
+        <div class="ins-app__h"><b>What your app did this week</b><span class="demo-tag">Demo data</span></div>
+        <div class="ins-app__grid">${m(o.opens, 'App opens')}${m(o.questions, 'Questions answered')}${m(o.bookTaps, 'Book taps')}${m('~' + o.hoursSaved + ' h', 'Time saved')}</div>
+        ${(o.topQuestions || []).length ? `<p class="cab-muted">Asked most: ${o.topQuestions.slice(0, 3).map(q => '“' + esc(q.q) + '”').join(', ')}</p>` : ''}
+      </div>`;
+  }
+  // the demo: start over (everything back as it was when the page opened)
+  function demoReset() {
+    if (!isDemo() || !K.Backend.reset) return;
+    if (K.Sheet.isOpen()) K.Sheet.close();
+    K.Backend.reset();
+    forgetAccount();
+    K.store.set('setupDone', true);
+    K.store.set('tourDone', true);
+    S.demoPush = false;
+    renderLoading();
+    enter().then(() => K.toast('Demo reset — everything is back', 'ok'));
+  }
+
   /* ---------- The first sign-in: a short tour of the dashboard (again from Studio) ---------- */
   const pause = ms => new Promise(r => setTimeout(r, ms));
   function startTour(force) {
@@ -2042,6 +2078,7 @@
   async function sendTestEmail(btn) {
     await busyBtn(btn, async () => {
       const r = await K.Backend.owner.emailTest(S.studio.id, S2.emlKind);
+      if (isDemo()) return; // the demo said what would happen instead
       K.toast(`Sent to ${r.to}`, 'ok');
       delete MEM.emailLog;
     });
@@ -3159,6 +3196,7 @@
       </header>
       ${teamView() && S.team && crew().length > 1 ? crewChipsHTML('data-crew-ins', S.insStaff) : ''}
       <p class="cab-muted">Last 12 ${per === 'month' ? 'months' : 'weeks'} · ${isStaff() ? 'your own bookings' : S.insStaff && crewById(S.insStaff) ? esc(firstOf(crewById(S.insStaff).name)) + '’s bookings' : isTeam() ? 'the whole studio' : 'from your bookings'}</p>
+      ${demoWeekHTML()}
       <div class="ins-kpi card">
         ${kpi(money(t.revenue), 'Revenue')}
         ${kpi(t.bookings, 'Bookings')}
@@ -3232,6 +3270,8 @@
   }
 
   async function pushState() {
+    // the demo: notifications can be "turned on" — nothing is subscribed or sent
+    if (isDemo()) return { state: S.demoPush ? 'on' : 'off', sub: null };
     if (!K.Backend.vapidPublicKey) return { state: 'nokey' };
     if (K.IS_IOS && !isStandalone()) return { state: 'install' };
     if (!pushApi()) return { state: 'unsupported' };
@@ -3249,7 +3289,7 @@
     try { st = await pushState(); } catch (e) { st = { state: 'unsupported' }; }
     S.push = st;
     if (S.readonly) st = { state: 'nokey' };
-    if (st.state === 'on' && !S.readonly) {
+    if (st.state === 'on' && !S.readonly && !isDemo()) {
       saveSub(st.sub, true); // keep the server copy fresh
       if (!(MEM.push || []).length) { MEM.push = [{ device_label: deviceLabel() }]; if (S.tab === 'today') repaint(); }
     }
@@ -3326,6 +3366,7 @@
 
   // called straight from the tap: the permission prompt needs that gesture
   async function pushOn(btn) {
+    if (isDemo()) { S.demoPush = true; K.toast('In your app this turns notifications on — every booking pings your phone', 'bell'); paintPush(); return; }
     if (!pushApi()) { paintPush(); return; }
     const perm = await Notification.requestPermission();
     if (perm !== 'granted') {
@@ -3356,6 +3397,7 @@
   }
 
   async function pushOff() {
+    if (isDemo()) { S.demoPush = false; K.toast('Notifications off (demo)', 'ok'); paintPush(); return; }
     try {
       const reg = await withTimeout(navigator.serviceWorker.ready, 5000);
       const sub = await reg.pushManager.getSubscription();
@@ -3370,6 +3412,7 @@
   }
 
   async function pushTest(btn) {
+    if (isDemo()) { K.toast('In your app this sends a push to your phone', 'bell'); return; }
     if (btn) { btn.disabled = true; btn.innerHTML = K.spinner(); }
     try {
       const r = await K.Backend.owner.sendTestPush(S.studio.id);
@@ -3711,7 +3754,9 @@
     if ((el = t.closest('[data-fg-save]'))) { e.preventDefault(); if (!el.disabled) saveResetPassword(); return; }
     if ((el = t.closest('[data-fg-back]'))) { S.forgot = null; renderAuth(); return; }
     if ((el = t.closest('[data-cab-demo]'))) { close(); setTimeout(() => K.demo(), 350); return; }
-    if ((el = t.closest('[data-cab-signout]'))) { signOut(); return; }
+    if ((el = t.closest('[data-demo-reset]'))) { K.haptic(); demoReset(); return; }
+    // the demo has no account to sign out of: back to the client's view
+    if ((el = t.closest('[data-cab-signout]'))) { if (isDemo()) { if (K.Sheet.isOpen()) K.Sheet.close(); close(); } else signOut(); return; }
     if ((el = t.closest('[data-cab-menu]'))) { openMenu(); return; }
     if ((el = t.closest('[data-copy-link]'))) { K.haptic(); copyText(K.link(), 'Link copied — paste it in your Instagram bio'); return; }
     if ((el = t.closest('[data-cab-tour]'))) { startTour(true); return; }

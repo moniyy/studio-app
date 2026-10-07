@@ -6460,3 +6460,30 @@ html.is-admin .app::after, html.is-admin .statusbar, html.is-admin .desk, html.i
   .tile:active, .msg-action:active, .send:active, .pick:active, .day:active, .time:active, .cc-row:active { transform: none; }
 }
 .tour.is-wait { opacity: 0; pointer-events: none; }
+
+/* ---------- The demo studio's dashboard: a thin "Demo" bar on top ---------- */
+.cab-demo {
+  position: relative; z-index: 4; flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px;
+  padding: calc(var(--safe-top) + 6px) 12px 6px 14px;
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg)); font-size: 12.5px; line-height: 1.2;
+}
+.cab.is-demo .cab__bar { padding-top: 8px; }
+.cab-demo__txt { flex: 1 1 auto; min-width: 0; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cab-demo__txt b { color: var(--text); font-weight: 700; }
+.cab-demo__reset, .cab-demo__get { flex: none; height: 28px; padding: 0 11px; border-radius: 999px; font-size: 12.5px; font-weight: 700; line-height: 28px; text-decoration: none; white-space: nowrap; }
+.cab-demo__reset { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+.cab-demo__get { background: var(--accent); color: var(--on-accent, #fff); }
+@media (max-width: 460px) { .cab-demo__long { display: none; } }
+/* inside the desktop phone frame too: the dashboard's own width decides */
+.cab.is-demo { container-type: inline-size; }
+@container (max-width: 460px) { .cab-demo__long { display: none; } }
+.cab-demo { flex-wrap: nowrap; }
+
+/* Insights (demo): what the app did this week */
+.ins-app { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; }
+.ins-app__h { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: var(--fs-15); }
+.ins-app__grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.ins-app__grid > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ins-app__grid b { font-size: var(--fs-20, 20px); letter-spacing: -.02em; }
+.ins-app__grid small { font-size: 11px; font-weight: 600; line-height: 1.25; color: var(--text-2); }
+.ins-app .cab-muted { margin: 0; }
