@@ -1,0 +1,46 @@
+# Supabase Free pauses a project after a week without activity. Once a day this asks
+# the database a tiny question (public.ping) — if the answer doesn't come, the run
+# fails (GitHub emails the repository owner) and an issue "Database ping failed" is opened.
+name: Keep the database awake
+
+on:
+  schedule:
+    - cron: '23 7 * * *'   # every day, 07:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the database
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o out.json -w '%{http_code}' -X POST "$SUPABASE_URL/rest/v1/rpc/ping" \
+              -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+              -H 'Content-Type: application/json' -d '{}' || echo 000)
+            if [ "$code" = "200" ] && grep -q '"ok" *: *true' out.json; then echo "ok: $(cat out.json)"; exit 0; fi
+            echo "try $i: HTTP $code $(head -c 300 out.json 2>/dev/null)"
+            sleep 30
+          done
+          exit 1
+
+      - name: Open an issue when it failed
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              title: `Database ping failed — ${new Date().toISOString().slice(0, 10)}`,
+              body: `The daily ping to Supabase didn't get an answer (3 tries).\n\n` +
+                    `- Run: ${run}\n- Check the project at https://supabase.com/dashboard/project/rhprhguicmesikmhzruv — if it says **Paused**, press **Restore**.\n` +
+                    `- Then run this workflow again (Actions → Keep the database awake → Run workflow).`
+            });
