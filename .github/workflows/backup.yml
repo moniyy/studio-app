@@ -1,7 +1,7 @@
 # Weekly database backup → the private repository moniyy/satinbook-backups.
-# roles.sql + schema.sql + data.sql (gzip) in a folder per date; only the last 8 are kept
+# schema.sql + data.sql (gzip) in a folder per date; only the last 8 are kept
 # (the repository is rewritten to a single commit each time, so old copies are really gone).
-# The dump connects as the read-only role satinbook_backup (secret SUPABASE_BACKUP_DB_URL)
+# pg_dump connects as the read-only role satinbook_backup (secret SUPABASE_BACKUP_DB_URL)
 # and pushes with a deploy key that can write only to that one repository (secret BACKUP_DEPLOY_KEY).
 # Restore: README → "Резервные копии".
 name: Weekly database backup
@@ -23,19 +23,22 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     steps:
-      - uses: supabase/setup-cli@v1
-        with:
-          version: latest
-
-      - name: Dump roles, schema and data
+      - name: Dump the schema and the data (pg_dump 17, read-only role)
         env:
           DB_URL: ${{ secrets.SUPABASE_BACKUP_DB_URL }}
         run: |
           d=$(date -u +%Y-%m-%d)
           mkdir -p "dump/$d"
-          supabase db dump --db-url "$DB_URL" --role-only -f "dump/$d/roles.sql"
-          supabase db dump --db-url "$DB_URL" -f "dump/$d/schema.sql"
-          supabase db dump --db-url "$DB_URL" --data-only --use-copy -f "dump/$d/data.sql"
+          dump() {
+            docker run --rm --user "$(id -u):$(id -g)" -e PGCONNECT_TIMEOUT=30 -v "$PWD/dump/$d:/out" \
+              postgres:17-alpine pg_dump "$DB_URL" --no-owner --no-privileges "$@"
+          }
+          # the app's tables and functions (the same as supabase/migrations, as of today)
+          dump --schema-only -n public -n private -f /out/schema.sql
+          # every row: studios, bookings, clients, accounts (auth), photo records (storage)
+          dump --data-only -n public -n private -n auth -n storage \
+            --exclude-table=auth.schema_migrations --exclude-table=storage.migrations --exclude-table=auth.audit_log_entries \
+            -f /out/data.sql
           # an empty data file means something went wrong
           test "$(wc -c < "dump/$d/data.sql")" -gt 1000
           gzip -9 dump/$d/*.sql
@@ -53,7 +56,7 @@ jobs:
           rm -rf "repo/$DAY" && cp -r "dump/$DAY" "repo/$DAY"
           cd repo
           ls -d 20??-??-??/ 2>/dev/null | sort | head -n -8 | xargs -r rm -rf
-          printf '# satinbook.com — database backups\n\nOne folder per week (UTC date), the last 8 only: roles.sql.gz, schema.sql.gz, data.sql.gz.\nHow to restore: README of moniyy/studio-app → "Резервные копии".\n\nKept now:\n' > README.md
+          printf '# satinbook.com — database backups\n\nOne folder per week (UTC date), the last 8 only: schema.sql.gz, data.sql.gz.\nHow to restore: README of moniyy/studio-app → "Резервные копии".\n\nKept now:\n' > README.md
           ls -d 20??-??-??/ | sort -r | sed 's#/##; s#^#- #' >> README.md
           git config user.name "satinbook-backup" && git config user.email "backup@satinbook.com"
           git checkout -q --orphan fresh && git add -A && git commit -q -m "Backups up to $DAY"
