@@ -1,5 +1,5 @@
 /* =========================================================
-   Studio App — the platform owner's admin (?admin=1).
+   Satinbook — the platform owner's admin (?admin=1).
    Loaded by app.js instead of a studio. Sign in with email + password;
    only accounts in public.admins get in (every call is checked by the
    database / the Edge Functions, not only here).
@@ -10,13 +10,15 @@
      icon is drawn here as a monogram and stored with the studio).
    • Welcome kit: links, the temporary password (shown once), a printable
      QR card and a ready message for the master.
+   • Leads: "Start your free trial" from satinbook.com — status, notes,
+     "Create studio" (New studio filled in from the lead).
    ========================================================= */
 (function () {
   'use strict';
 
   let K = null;
   let root = null;
-  const A = { session: null, list: null, view: 'list', q: '', form: null, kit: null, busy: false };
+  const A = { session: null, list: null, view: 'list', q: '', form: null, kit: null, busy: false, leads: null, leadFilter: 'all' };
 
   const $ = (s, el) => (el || root).querySelector(s);
   const $$ = (s, el) => Array.from((el || root).querySelectorAll(s));
@@ -69,14 +71,14 @@
     let ok = false;
     try { ok = await K.Backend.admin.isAdmin(); } catch (e) { renderSignIn(errText(e)); return; }
     if (!ok) { renderNotAdmin(); return; }
-    go('list');
+    go(location.hash === '#leads' ? 'leads' : 'list');
   }
 
   function renderSignIn(msg) {
     root.innerHTML = `
       <form class="adm-auth" id="adm-signin" autocomplete="on" novalidate>
         <span class="adm-auth__mark">SA</span>
-        <h1>Studio App · Admin</h1>
+        <h1>Satinbook Admin</h1>
         <p>Sign in with the platform owner’s account.</p>
         <label class="field"><span>Email</span><input id="adm-email" type="email" inputmode="email" autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="you@example.com"></label>
         <label class="field"><span>Password</span><input id="adm-pass" type="password" autocomplete="current-password" placeholder="Your password"></label>
@@ -121,20 +123,30 @@
      ========================================================= */
   function go(view) {
     A.view = view;
+    // …?admin=1#leads (the link in the "New lead" email) opens the leads
+    try { history.replaceState(history.state, '', location.pathname + location.search + (view === 'leads' ? '#leads' : '')); } catch (e) { /* file:// */ }
     if (view === 'list') renderList();
+    else if (view === 'leads') renderLeads();
     else if (view === 'new') renderNew();
     else if (view === 'kit') renderKit();
     root.scrollTop = 0;
     window.scrollTo(0, 0);
   }
-  const barHTML = (title, back) => `
+  const barHTML = (title, back, backTo) => `
     <header class="adm-bar">
-      ${back ? `<button class="adm-back" data-a-go="list">${K.I.chevL}Studios</button>` : '<b class="adm-logo">Studio App <em>Admin</em></b>'}
+      ${back ? `<button class="adm-back" data-a-go="${backTo || 'list'}">${K.I.chevL}${backTo === 'leads' ? 'Leads' : 'Studios'}</button>` : '<b class="adm-logo">Satinbook <em>Admin</em></b>'}
       <span class="adm-bar__sp"></span>
       ${back ? '' : `<button class="btn btn--primary btn--sm" data-a-go="new">${icon('<path d="M12 5v14M5 12h14"/>')}New studio</button>`}
       <button class="adm-ic" data-a-signout aria-label="Sign out" title="Sign out">${icon('<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l5-5-5-5M15 12H4"/>')}</button>
     </header>
     ${title ? `<h1 class="adm-title">${title}</h1>` : ''}`;
+  // Studios | Leads (new ones counted)
+  const newLeads = () => (A.leads || []).filter(l => l.status === 'new').length;
+  const tabsHTML = () => `
+    <div class="adm-tabs-wrap"><div class="segmented adm-tabs" role="tablist" style="--n:2;--idx:${A.view === 'leads' ? 1 : 0}"><i class="segmented__thumb"></i>
+      <button role="tab" data-a-go="list" aria-checked="${A.view !== 'leads'}">Studios</button>
+      <button role="tab" data-a-go="leads" aria-checked="${A.view === 'leads'}">Leads${newLeads() ? ` <span class="adm-tabs__n num">${newLeads()}</span>` : ''}</button>
+    </div></div>`;
 
   /* ---------- the list ---------- */
   const day = 864e5;
@@ -161,9 +173,11 @@
   const mono = name => String(name || '').trim().split(/\s+/).slice(0, 2).map(w => w.charAt(0)).join('').toUpperCase() || 'S';
 
   async function renderList() {
-    root.innerHTML = barHTML('') + '<main class="adm-main"><div class="adm-load"><i class="spin"></i></div></main>';
+    root.innerHTML = barHTML('') + tabsHTML() + '<main class="adm-main"><div class="adm-load"><i class="spin"></i></div></main>';
     try {
-      [A.list, A.mail] = await Promise.all([K.Backend.admin.studios(), K.Backend.admin.emailStats().catch(() => null)]);
+      [A.list, A.mail, A.leads] = await Promise.all([K.Backend.admin.studios(), K.Backend.admin.emailStats().catch(() => null), K.Backend.admin.leads().catch(() => A.leads)]);
+      const tabs = $('.adm-tabs-wrap');
+      if (tabs && A.view === 'list') tabs.outerHTML = tabsHTML();
     } catch (e) {
       $('.adm-main').innerHTML = `<div class="adm-empty"><b>${esc(errText(e))}</b><button class="btn btn--soft btn--sm" data-a-go="list">Try again</button></div>`;
       return;
@@ -215,7 +229,7 @@
       `Hi ${s.master_name || 'there'}! 👋`,
       '',
       ...(s.status === 'trial' && s.trial_ends_at ? [`Your ${trialDays(s)}-day free trial ${Date.parse(s.trial_ends_at) < Date.now() ? 'ended' : 'ends'} on ${fmtLong(s.trial_ends_at.slice(0, 10))}.`] : []),
-      `Your ${planOf(s)[1].toLowerCase()} Studio App plan for ${s.name} ${late ? 'was due' : 'is due'} on ${fmtLong(s.next_payment_at || todayISO())}: ${money(s.plan_amount)}.`,
+      `Your ${planOf(s)[1].toLowerCase()} Satinbook plan for ${s.name} ${late ? 'was due' : 'is due'} on ${fmtLong(s.next_payment_at || todayISO())}: ${money(s.plan_amount)}.`,
       '',
       `You can pay securely here: ${s.payment_link}`,
       '',
@@ -421,16 +435,128 @@
     } catch (e) { K.toast(errText(e), 'x'); }
   }
 
+  /* ---------- Leads: "Start your free trial" on satinbook.com ---------- */
+  const LEAD_ST = [['new', 'New'], ['contacted', 'Contacted'], ['trial', 'Trial'], ['lost', 'Lost']];
+  async function renderLeads() {
+    root.innerHTML = barHTML('') + tabsHTML() + '<main class="adm-main"><div class="adm-load"><i class="spin"></i></div></main>';
+    try { A.leads = await K.Backend.admin.leads(); } catch (e) {
+      $('.adm-main').innerHTML = `<div class="adm-empty"><b>${esc(errText(e))}</b><button class="btn btn--soft btn--sm" data-a-go="leads">Try again</button></div>`;
+      return;
+    }
+    const tabs = $('.adm-tabs-wrap');
+    if (tabs) tabs.outerHTML = tabsHTML();
+    paintLeads();
+  }
+  function paintLeads() {
+    const main = $('.adm-main');
+    if (!main || A.view !== 'leads') return;
+    const all = A.leads || [];
+    const f = A.leadFilter;
+    const list = f === 'all' ? all : all.filter(l => l.status === f);
+    const n = s => all.filter(l => l.status === s).length;
+    main.innerHTML = `
+      <div class="adm-head">
+        <div><h1>Leads</h1><p class="adm-muted">${all.length ? `${all.length} from satinbook.com${n('new') ? ` · <b class="adm-warn-text">${n('new')} new</b>` : ''}` : 'From “Start your free trial” on satinbook.com'}</p></div>
+      </div>
+      ${all.length ? `<div class="chips-wrap adm-lead-filter">${[['all', 'All', all.length], ...LEAD_ST.map(([v, l]) => [v, l, n(v)])].map(([v, l, c]) =>
+        `<button type="button" class="chip${v === f ? ' is-active' : ''}" data-a-lead-f="${v}">${l} <span class="num">${c}</span></button>`).join('')}</div>` : ''}
+      ${list.length ? `<div class="adm-grid">${list.map(leadHTML).join('')}</div>`
+        : `<div class="adm-empty"><b>${all.length ? 'Nothing here' : 'No leads yet'}</b>${all.length ? '' : `<span>When someone sends the form on <a href="${esc(APP())}" target="_blank" rel="noopener">${esc(APP().replace(/^https?:\/\//, '').replace(/\/$/, ''))}</a>, she shows up here — and you get an email.</span>`}</div>`}`;
+  }
+  function leadHTML(l) {
+    const ig = String(l.instagram || '').replace(/^@/, '');
+    const st = LEAD_ST.findIndex(x => x[0] === l.status);
+    return `
+      <article class="adm-card adm-lead is-${esc(l.status)}" data-lead="${esc(l.id)}">
+        <div class="adm-card__top">
+          <span class="adm-card__icon adm-card__icon--mono">${esc(mono(l.name))}</span>
+          <div class="adm-card__who"><b>${esc(l.name)}</b><small>${esc([l.niche, l.city].filter(Boolean).join(' · ') || '—')}</small>
+            <small>${esc(ago(l.created_at))} · ${esc(fmtDate(l.created_at))}${l.ref ? ` · from /${esc(l.ref)}` : ''}</small></div>
+          <span class="adm-pill adm-pill--${esc(l.status)}">${esc((LEAD_ST[st] || LEAD_ST[0])[1])}</span>
+        </div>
+        <div class="adm-lead__contact">
+          <a class="btn btn--soft btn--sm" href="mailto:${esc(l.email)}">${icon('<rect x="3" y="5.5" width="18" height="13" rx="3"/><path d="m3.5 7 8.5 6.5L20.5 7"/>')}<span>${esc(l.email)}</span></a>
+          ${ig ? `<a class="btn btn--soft btn--sm" href="https://instagram.com/${esc(encodeURIComponent(ig))}" target="_blank" rel="noopener">${icon('<rect x="3.5" y="3.5" width="17" height="17" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.2" cy="6.8" r=".6"/>')}<span>@${esc(ig)}</span></a>` : ''}
+        </div>
+        <div class="segmented adm-lead__st" role="radiogroup" aria-label="Status" style="--n:4;--idx:${Math.max(0, st)}"><i class="segmented__thumb"></i>
+          ${LEAD_ST.map(([v, t]) => `<button type="button" role="radio" data-a-lead-st="${v}" aria-checked="${v === l.status}">${t}</button>`).join('')}</div>
+        <label class="adm-notes"><span>Notes</span><textarea rows="2" maxlength="4000" data-a-lead-notes="${esc(l.id)}" placeholder="DM’d her on Instagram, call Tuesday…">${esc(l.notes || '')}</textarea></label>
+        <div class="adm-actions">
+          ${l.studio_id && l.studio_slug
+            ? `<a class="btn btn--soft btn--sm" href="${esc(clientLink(l.studio_slug))}" target="_blank" rel="noopener">Her studio · /${esc(l.studio_slug)}</a>`
+            : `<button class="btn btn--primary btn--sm" data-a-lead-new="${esc(l.id)}">${icon('<path d="M12 5v14M5 12h14"/>')}Create studio</button>`}
+        </div>
+      </article>`;
+  }
+  const leadById = id => (A.leads || []).find(l => l.id === id);
+  async function setLeadStatus(id, status, btn) {
+    const l = leadById(id);
+    if (!l || l.status === status) return;
+    const seg = btn.closest('.segmented');
+    seg.style.setProperty('--idx', LEAD_ST.findIndex(x => x[0] === status));
+    $$('[data-a-lead-st]', seg).forEach(b => b.setAttribute('aria-checked', String(b === btn)));
+    K.haptic();
+    try {
+      const row = await K.Backend.admin.saveLead(id, { status });
+      A.leads = A.leads.map(x => (x.id === id ? Object.assign({}, x, row, { studio_slug: x.studio_slug }) : x));
+      // the pill, the counters and the tab — the notes she may be typing stay
+      const card = $(`.adm-lead[data-lead="${id}"]`);
+      if (card) {
+        card.className = `adm-card adm-lead is-${status}`;
+        const p = $('.adm-pill', card);
+        p.className = `adm-pill adm-pill--${status}`;
+        p.textContent = LEAD_ST.find(x => x[0] === status)[1];
+      }
+      $$('[data-a-lead-f]').forEach(c => { const v = c.dataset.aLeadF; const k = $('.num', c); if (k) k.textContent = v === 'all' ? A.leads.length : A.leads.filter(x => x.status === v).length; });
+      const tabs = $('.adm-tabs-wrap');
+      if (tabs) tabs.outerHTML = tabsHTML();
+    } catch (e) { K.toast(errText(e), 'x'); paintLeads(); }
+  }
+  const leadNotesTimers = {};
+  function saveLeadNotes(id, text) {
+    A.leads = (A.leads || []).map(l => (l.id === id ? Object.assign({}, l, { notes: text }) : l));
+    clearTimeout(leadNotesTimers[id]);
+    leadNotesTimers[id] = setTimeout(() => { K.Backend.admin.saveLead(id, { notes: text }).catch(e => K.toast(errText(e), 'x')); }, 700);
+  }
+  // "Lashes & brows" → the niche template; "Austin, TX" → the time zone
+  const nicheTpl = v => ({ lashes: 'lashes', brows: 'brows', 'lashes & brows': 'lashes-brows', nails: 'nails', hair: 'hair', makeup: 'makeup' })[String(v || '').toLowerCase()] || 'lashes';
+  function tzFromCity(city) {
+    const st = (String(city || '').toUpperCase().match(/\b([A-Z]{2})\s*$/) || [])[1];
+    if (!st) return 'America/New_York';
+    if (['CA', 'WA', 'OR', 'NV'].includes(st)) return 'America/Los_Angeles';
+    if (['CO', 'UT', 'NM', 'MT', 'WY', 'ID', 'AZ'].includes(st)) return 'America/Denver';
+    if (['TX', 'IL', 'MN', 'WI', 'IA', 'MO', 'AR', 'LA', 'MS', 'AL', 'OK', 'KS', 'NE', 'SD', 'ND', 'TN'].includes(st)) return 'America/Chicago';
+    if (st === 'AK') return 'America/Anchorage';
+    if (st === 'HI') return 'Pacific/Honolulu';
+    return 'America/New_York';
+  }
+  function studioFromLead(id) {
+    const l = leadById(id);
+    if (!l) return;
+    const ig = String(l.instagram || '').replace(/^@/, '');
+    // a first guess at the studio name: her Instagram handle, readable ("bella.lashes" → "Bella Lashes")
+    const name = ig ? ig.replace(/[._]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/\b[a-z]/g, c => c.toUpperCase()).slice(0, 60) : '';
+    A.form = Object.assign(blankForm(), {
+      name, masterName: String(l.name || '').trim().split(/\s+/)[0], email: l.email, city: l.city || '',
+      timezone: tzFromCity(l.city), instagram: ig ? '@' + ig : '', template: nicheTpl(l.niche), leadId: l.id, leadName: l.name
+    });
+    A.form.slug = slugify(name);
+    go('new');
+    if (A.form.slug) checkSlug();
+  }
+
   /* ---------- New studio (one screen) ---------- */
+  const blankForm = () => ({ name: '', masterName: '', email: '', city: '', timezone: 'America/New_York', phone: '', instagram: '', slug: '', slugTouched: false, slugState: null, template: 'lashes', style: 'noir', accent: null, plan: 'monthly', amount: '29', founding: false, kind: 'solo', trial: 30 });
   function slugify(v) {
     return String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
       .replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
   }
   function renderNew() {
-    const f = A.form || (A.form = { name: '', masterName: '', email: '', city: '', timezone: 'America/New_York', phone: '', instagram: '', slug: '', slugTouched: false, slugState: null, template: 'lashes', style: 'noir', accent: null, plan: 'monthly', amount: '29', founding: false, kind: 'solo', trial: 30 });
-    root.innerHTML = barHTML('New studio', true) + `
+    const f = A.form || (A.form = blankForm());
+    root.innerHTML = barHTML('New studio', true, f.leadId ? 'leads' : 'list') + `
       <main class="adm-main">
         <form class="adm-form" id="adm-new" onsubmit="return false" autocomplete="off">
+          ${f.leadId ? `<p class="adm-from-lead">${icon('<path d="M20 12a8 8 0 1 1-3.2-6.4"/><path d="m9 11.5 3 3 8-8"/>')}<span>From the lead <b>${esc(f.leadName || '')}</b> — check the studio name and link. She’ll be marked <b>Trial</b>.</span></p>` : ''}
           <div class="adm-form__grid">
             <label class="field"><span>Studio name</span><input data-f="name" maxlength="60" value="${esc(f.name)}" placeholder="Bella Brows"></label>
             <label class="field"><span>App link</span>
@@ -581,8 +707,11 @@
         icons: { i512: png64(i512), i192: png64(i192), i180: png64(i180) }
       });
       A.kit = { id: r.id, slug: r.slug, name: r.name, masterName: r.masterName, email: r.email, password: r.password, trial_ends_at: r.trial_ends_at, trial_days: r.trial_days || f.trial, kind: f.kind, fresh: true };
+      // made from a lead: she is on a trial now, and the lead points to her studio
+      if (f.leadId) await K.Backend.admin.saveLead(f.leadId, { status: 'trial', studio_id: r.id }).catch(() => null);
       A.form = null;
       A.list = null;
+      A.leads = null;
       K.toast(`${r.name} is ready`, 'ok');
       go('kit');
     });
@@ -734,6 +863,9 @@
       if (s) { A.kit = { id: s.id, slug: s.slug, name: s.name, masterName: s.master_name, email: s.owner_email, password: null, trial_ends_at: s.status === 'trial' ? s.trial_ends_at : null, created_at: s.created_at, kind: s.kind }; go('kit'); }
       return;
     }
+    if ((el = t.closest('[data-a-lead-f]'))) { A.leadFilter = el.dataset.aLeadF; K.haptic(); paintLeads(); return; }
+    if ((el = t.closest('[data-a-lead-st]'))) { setLeadStatus(el.closest('[data-lead]').dataset.lead, el.dataset.aLeadSt, el); return; }
+    if ((el = t.closest('[data-a-lead-new]'))) { studioFromLead(el.dataset.aLeadNew); return; }
     if ((el = t.closest('[data-a-copy]'))) { copy(el.dataset.aCopy); return; }
     if ((el = t.closest('[data-a-copy-msg]'))) { copy(($('#adm-msg') || {}).value || '', 'Message copied'); return; }
     if ((el = t.closest('[data-a-print]'))) { window.print(); return; }
@@ -772,6 +904,7 @@
     const t = e.target;
     if (t.matches('[data-a-q]')) { A.q = t.value; const pos = t.selectionStart; paintList(); const q = $('[data-a-q]'); if (q) { q.focus(); try { q.setSelectionRange(pos, pos); } catch (x) { /* type=search */ } } return; }
     if (t.matches('[data-a-notes]')) { saveNotes(t.dataset.aNotes, t.value); return; }
+    if (t.matches('[data-a-lead-notes]')) { saveLeadNotes(t.dataset.aLeadNotes, t.value); return; }
     const k = t.dataset && t.dataset.f;
     if (!k || !A.form) return;
     A.form[k] = t.value;

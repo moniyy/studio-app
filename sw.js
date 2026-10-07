@@ -1,9 +1,9 @@
-/* Studio App — service worker
+/* Satinbook — service worker
    - App files & master JSON: network first, cache as offline fallback
      (so edits on GitHub Pages show up right away).
    - Photos, 3D icons, fonts, QR lib: cache first. */
 
-const VERSION = 'studio-app-v26';
+const VERSION = 'studio-app-v27';
 const SHELL_CACHE = VERSION + '-shell';
 const MEDIA_CACHE = VERSION + '-media';
 const MEDIA_LIMIT = 120;
@@ -11,6 +11,9 @@ const MEDIA_LIMIT = 120;
 const SHELL = [
   './',
   './index.html',
+  './landing.css',
+  './landing.js',
+  './app.html',
   './app.css',
   './app.js',
   './backend.js',
@@ -70,14 +73,16 @@ async function networkFirst(req) {
     // (one part only: anything deeper — an old /studio-app/<slug> path — is sorted out by 404.html)
     const rel = new URL(req.url).pathname.slice(new URL(self.registration.scope).pathname.length);
     if (req.mode === 'navigate' && res.status === 404 && /^[a-z0-9][a-z0-9_-]{0,60}$/i.test(rel)) {
-      const page = (await cache.match('./index.html')) || (await fetch('./index.html').catch(() => null));
+      const page = (await cache.match('./app.html')) || (await fetch('./app.html').catch(() => null));
       if (page && page.ok) return page;
     }
     if (res.ok) cache.put(req, res.clone());
     return res;
   } catch (err) {
     const hit = await cache.match(req) ||
-      (req.mode === 'navigate' && (await cache.match('./index.html') || await cache.match('./')));
+      // offline: a studio address → the app; the root → the landing page
+      (req.mode === 'navigate' && (new URL(req.url).pathname === new URL(self.registration.scope).pathname
+        ? await cache.match('./index.html') : await cache.match('./app.html')));
     return hit || Response.error();
   }
 }
@@ -128,7 +133,7 @@ self.addEventListener('push', event => {
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   const data = event.notification.data || {};
-  const url = new URL(data.url || './', self.registration.scope).href;
+  const url = new URL(data.url || './app.html', self.registration.scope).href;
   event.waitUntil((async () => {
     const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const win = wins.find(w => w.url.startsWith(self.registration.scope));

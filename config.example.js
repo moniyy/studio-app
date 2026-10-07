@@ -1,4 +1,4 @@
-/* Studio App — backend config (copy to config.js and fill in).
+/* Satinbook — backend config (copy to config.js and fill in).
    config.js is in .gitignore: GitHub Pages gets it from the deploy
    workflow (.github/workflows/pages.yml) using repository secrets.
 

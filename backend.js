@@ -1,5 +1,5 @@
 /* =========================================================
-   Studio App — backend (Supabase) data layer.
+   Satinbook — backend (Supabase) data layer.
    No UI here. supabase-js is loaded from the CDN only when a
    master with the built-in booking engine (or her dashboard)
    actually needs it — demo masters never load it.
@@ -381,6 +381,9 @@
     undoPaid: paymentId => rpc('admin_undo_paid', { p_payment_id: paymentId }),
     // the email counter: today (of 100) and this month (of 3000) on Resend Free, waiting, failed
     emailStats: () => rpc('admin_email_stats'),
+    // "Start your free trial" on satinbook.com: the list, and status / notes / the studio made from it
+    leads: () => rpc('admin_leads'),
+    saveLead: (id, p) => rpc('admin_save_lead', { p_id: id, p }),
     create: body => invoke('admin-create-master', body, 60000),
     resetPassword: id => invoke('admin-master-action', { action: 'reset_password', master_id: id }),
     remove: (id, slug) => invoke('admin-master-action', { action: 'delete', master_id: id, confirm: slug })

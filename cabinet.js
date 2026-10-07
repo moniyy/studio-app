@@ -1,5 +1,5 @@
 /* =========================================================
-   Studio App — the master's dashboard ("cabinet").
+   Satinbook — the master's dashboard ("cabinet").
    Loaded on demand (?owner=1 or a long press on the monogram /
    avatar) for studios with the built-in booking engine.
    Sign in by email + password → Today (with Requests), Calendar,
@@ -128,6 +128,15 @@
     document.addEventListener('visibilitychange', onVisible);
     try {
       S.session = await K.Backend.auth.session();
+      // the cabinet was open before with another account (this page): start clean
+      if (S.uid !== undefined && uidOf(S.session) !== S.uid) forgetAccount();
+      S.uid = uidOf(S.session);
+      // the sign-in is shared by every tab of this site: another account signed in (or out)
+      // in another tab → this dashboard starts over for it, nothing of the old one is kept
+      K.Backend.auth.onChange((event, session) => {
+        if (event === 'INITIAL_SESSION' || S.authBusy || !root) return;
+        if (uidOf(session) !== S.uid) accountChanged(session);
+      }).then(un => { if (root && !S.authUnsub) S.authUnsub = un; else un(); }).catch(() => null);
       // she opened the link from "Reset your password": a new password first
       if (S.session && K.recovery && !S.recoveryDone) { S.recovery = true; renderForcePassword(); return; }
       if (S.session) {
@@ -145,6 +154,7 @@
     if (!root) return;
     K.onCabinet && K.onCabinet(false);
     stopLive();
+    if (S.authUnsub) { S.authUnsub(); S.authUnsub = null; }
     document.removeEventListener('visibilitychange', onVisible);
     document.removeEventListener('click', onClick);
     document.removeEventListener('input', onInput);
@@ -159,6 +169,54 @@
 
   function renderLoading() {
     $('#cab-main').innerHTML = `<div class="cab-load"><i class="spin"></i></div>`;
+  }
+
+  /* ---------- one account at a time ---------- */
+  const uidOf = s => (s && s.user && s.user.id) || null;
+  // everything the dashboard knows about an account and its studio
+  function forgetAccount() {
+    stopLive();
+    S.studio = null;
+    S.readonly = false;
+    S.known = null;
+    S.knownFrom = S.knownTo = null;
+    S.cache = {};
+    S.pending = [];
+    S.clients = null;
+    S.ins = null;
+    S.team = null;
+    S.teamAt = 0;
+    S.scheds = {};
+    S.calStaff = S.hrsStaff = S.hsched = S.insStaff = null;
+    S.hrs = null;
+    S.hrsDirty = false;
+    S.lastSync = 0;
+    S.stale = false;
+    S.tab = 'today';
+    S.badges = { today: 0, calendar: 0, requests: 0 };
+    K.store.remove('cab');
+    Object.keys(MEM).forEach(k => delete MEM[k]);
+    S2.profile = S2.services = S2.looks = null;
+    if (root) {
+      root.classList.remove('is-readonly', 'is-forcepw');
+      const nav = $('#cab-tabs');
+      if (nav) delete nav.dataset.role;
+    }
+  }
+  // another tab signed in with another account, or signed out
+  function accountChanged(session) {
+    if (!root) return;
+    if (K.Sheet.isOpen()) K.Sheet.close();
+    forgetAccount();
+    S.session = session || null;
+    S.uid = uidOf(session);
+    if (!session) {
+      K.setOwnerHere && K.setOwnerHere(false);
+      renderAuth('You signed out in another tab — sign in again to continue.');
+      return;
+    }
+    renderLoading();
+    enter();
   }
 
   /* =========================================================
@@ -243,11 +301,15 @@
     if (pass.length < 8) { renderForgot('code', 'Use at least 8 characters for the password'); return; }
     S.busy = true;
     renderForgot('code');
+    S.authBusy = true;
     try {
       S.session = await K.Backend.auth.verifyRecovery(S.email, code);
+      if (uidOf(S.session) !== S.uid) forgetAccount();
+      S.uid = uidOf(S.session);
       await K.Backend.auth.updatePassword(pass);
       await K.Backend.owner.passwordChanged().catch(() => null);
       S.busy = false;
+      S.authBusy = false;
       S.forgot = null;
       K.haptic([10, 30, 10]);
       K.toast('Password saved — welcome back!', 'ok');
@@ -255,6 +317,7 @@
       await enter();
     } catch (e) {
       S.busy = false;
+      S.authBusy = false;
       renderForgot('code', e.code === 'bad_code' ? 'That code didn’t work — check the email or send a new one'
         : /different|same/i.test(e.message || '') ? 'Pick a password different from the old one'
         : /weak|short|least/i.test(e.message || '') ? 'Pick a stronger password' : err(e));
@@ -269,13 +332,19 @@
     if (!pass) { renderAuth('Enter your password'); return; }
     S.busy = true;
     renderAuth();
+    S.authBusy = true;
     try {
       S.session = await K.Backend.auth.signIn(email, pass);
+      // another account than the one on screen before: nothing of the old one stays
+      if (uidOf(S.session) !== S.uid) forgetAccount();
+      S.uid = uidOf(S.session);
       S.busy = false;
+      S.authBusy = false;
       K.haptic([10, 30, 10]);
       await enter();
     } catch (e) {
       S.busy = false;
+      S.authBusy = false;
       renderAuth(e.code === 'bad_login' ? 'Wrong email or password' : err(e));
     }
   }
@@ -435,9 +504,12 @@
   /* Back from the background (iOS freezes an installed app): token first,
      then the news — what's on screen stays until the fresh data is in */
   function onVisible() {
-    if (document.visibilityState !== 'visible' || !root || !S.studio) return;
-    K.Backend.auth.fresh().catch(() => null).then(() => {
-      if (!root || !S.studio) return;
+    if (document.visibilityState !== 'visible' || !root) return;
+    K.Backend.auth.fresh().catch(() => undefined).then(s => {
+      if (!root || S.authBusy) return;
+      // signed in with another account (or out) in another tab meanwhile
+      if (s !== undefined && uidOf(s) !== S.uid && (S.studio || S.uid)) { accountChanged(s); return; }
+      if (!S.studio) return;
       syncChanges();
       if (S.tab !== 'today' && S.tab !== 'calendar' && S.tab !== 'requests') refreshView();
     });
@@ -744,6 +816,11 @@
     try { await (LOAD[tab] ? LOAD[tab]() : null); } catch (e) {
       const view = $('.cab__view');
       if (!root || S.tab !== tab || !view) return;
+      // not allowed any more: most likely another account signed in in another tab
+      if (/forbidden|not_member|not_owner|42501/.test(String(e.code || '') + ' ' + String(e.message || '')) && !S.authBusy) {
+        const s = await K.Backend.auth.session().catch(() => undefined);
+        if (s !== undefined && uidOf(s) !== S.uid) { accountChanged(s); return; }
+      }
       if (view.__html == null) view.innerHTML = `<div class="cab-empty"><b>${esc(err(e))}</b><button class="btn btn--soft btn--sm" data-cab-retry>Try again</button></div>`;
       else { S.stale = true; setLiveLabel(); }
       return;
@@ -791,7 +868,10 @@
     const list = await bookingsFor(0, 1);
     const live = list.filter(b => !b.status.startsWith('cancelled'));
     const counted = live.filter(b => b.status !== 'no_show');
-    const revenue = counted.reduce((s, b) => s + (+b.price || 0), 0);
+    // confirmed (or done) vs everything still on the books today, requests included
+    const sum = arr => arr.reduce((s, b) => s + (+b.price || 0), 0);
+    const confirmed = sum(counted.filter(b => b.status === 'confirmed' || b.status === 'completed'));
+    const expected = sum(counted);
     const now = Date.now();
     const next = live.filter(b => isActive(b) && Date.parse(b.end_at) > now).sort((a, b) => Date.parse(a.start_at) - Date.parse(b.start_at))[0];
     // a salon (owner): free time of every master; the day as one list with the master on each
@@ -805,7 +885,7 @@
       <header class="cab-h"><span class="eyebrow">${K.DAY_NAMES[d.dow]}, ${K.MONTHS[d.month]} ${d.day}</span><h1>Today</h1></header>
       ${S.studio && S.studio.status === 'paused' ? '<div class="card dep-warn"><span><b>Your app is paused</b><small>Clients see a short-break page and can’t book right now. Reach out to turn it back on.</small></span></div>' : ''}
       <div class="cab-stats card">
-        <div><b class="num">${money(revenue)}</b><small>Revenue</small></div>
+        <div><b class="num">${money(confirmed)}</b><small>confirmed</small><small class="cab-stats__exp num">${money(expected)} expected</small></div>
         <div><b class="num">${counted.length}</b><small>${counted.length === 1 ? 'Client' : 'Clients'}</small></div>
         <div><b class="num">${freeMin >= 60 ? Math.floor(freeMin / 60) + 'h' + (freeMin % 60 ? ' ' + (freeMin % 60) + 'm' : '') : freeMin + 'm'}</b><small>Free</small></div>
       </div>
@@ -1182,7 +1262,7 @@
       <button class="row row--link cl-row" data-cab-client="${esc(c.id)}">
         <span class="cl-av">${esc(String(c.name || '?').trim().charAt(0).toUpperCase())}</span>
         <span class="row__label">${esc(c.name)}${tagBadges(c.tags, c.no_shows)}<span class="row__sub num">${esc(phoneText(c.phone))}${c.next_visit ? ' · next ' + esc(K.dayLabel(spot(c.next_visit).off, false)) : ''}</span></span>
-        <span class="row__value num">${c.visits ? c.visits + '×' : 'new'}</span>
+        <span class="row__value num">${c.visits ? c.visits + (c.visits === 1 ? ' visit' : ' visits') : 'new'}</span>
         <span class="row__chev">${K.I.chevR}</span>
       </button>`).join('')}</div>`;
   }
@@ -2751,6 +2831,8 @@
     const st = p.settings || {};
     const active = svcs.filter(s => s.active);
     return [
+      // clients see her name (Our team, Who, emails): the studio's name is no stand-in
+      { label: 'Your first name', done: !!String(st.masterName || '').trim(), attr: 'data-cab-tab="profile" data-setup-focus="masterName"' },
       { label: 'Cover and profile photo', done: !!(st.heroPhoto && st.avatar), attr: 'data-cab-tab="profile"' },
       { label: 'A photo on every service', done: active.length > 0 && active.every(s => s.photo), attr: 'data-cab-tab="services"' },
       { label: 'Working hours', done: ((S.sched && S.sched.hours) || []).length > 0, attr: 'data-cab-tab="hours"' },
@@ -2846,7 +2928,8 @@
     if (!(+b.deposit > 0) || b.deposit_status === 'none') return '';
     const live = isActive(b);
     const sub = {
-      pending: b.deposit_due_at ? `Not received yet · auto-cancels ${whenAt(b.deposit_due_at)} if it doesn’t arrive` : 'Not received yet',
+      // cancelled before it was sent: nothing is owed
+      pending: /^cancelled/.test(b.status) ? 'No deposit due — the booking was cancelled' : !live ? 'Not received' : b.deposit_due_at ? `Not received yet · auto-cancels ${whenAt(b.deposit_due_at)} if it doesn’t arrive` : 'Not received yet',
       paid: `Received${b.deposit_paid_at ? ' ' + ago(b.deposit_paid_at) : ''}`,
       waived: 'Not needed for this visit',
       expired: 'Never arrived — the booking was released'
@@ -3071,6 +3154,7 @@
       <div class="card ins-cl">
         <div class="ins-split">${clAll ? `<i class="ins-split__new" style="flex:${cl.new}"></i><i class="ins-split__ret" style="flex:${cl.returning}"></i>` : '<i class="ins-split__none"></i>'}</div>
         <div class="ins-legend"><span><i class="ins-dot"></i>New · <b class="num">${cl.new}</b></span><span><i class="ins-dot ins-dot--ret"></i>Returning · <b class="num">${cl.returning}</b></span></div>
+        <p class="ins-note">Clients with a completed visit in this period · Returning = 2+ visits</p>
       </div>
       <div class="group-label">Busiest days</div>
       <div class="card ins-wd">${order.map(i => `
@@ -3574,7 +3658,7 @@
     if ((el = t.closest('[data-fp-save]'))) { e.preventDefault(); saveForcedPassword(el); return; }
     // the admin's view: looking is fine, changing is not
     if (S.readonly && t.closest(RO_BLOCK)) { e.preventDefault(); e.stopPropagation(); readOnly(); return; }
-    if ((el = t.closest('[data-cab-tab]'))) { go(el.dataset.cabTab); return; }
+    if ((el = t.closest('[data-cab-tab]'))) { S.focusField = el.dataset.setupFocus || null; go(el.dataset.cabTab); return; }
     if ((el = t.closest('[data-pw-eye]'))) {
       const inp = el.parentElement.querySelector('input');
       inp.type = inp.type === 'password' ? 'text' : 'password';
@@ -3810,6 +3894,12 @@
     if (tab === 'services' || tab === 'looks') bindSortable();
     if (tab === 'calendar') { bindDaySwipe(); bindCrewScroll(); }
     if (tab === 'calendar' && S.cal === 'day' && first) scrollToNow();
+    // from the setup list: straight to the field it is about
+    if (S.focusField && first) {
+      const f = $(`[name="${S.focusField}"]`);
+      S.focusField = null;
+      if (f) setTimeout(() => { f.scrollIntoView({ block: 'center', behavior: 'smooth' }); if (!K.IS_IOS) f.focus(); f.closest('.field') && f.closest('.field').classList.add('is-hint'); }, 350);
+    }
   }
   // the day opens at the current time (or the first booking, or opening time), below the pinned header
   function scrollToNow() {
@@ -3899,19 +3989,14 @@
   }
 
   async function signOut() {
+    S.authBusy = true;
     try { await K.Backend.auth.signOut(); } catch (e) { /* offline: the local session is cleared anyway */ }
+    S.authBusy = false;
     if (K.Sheet.isOpen()) K.Sheet.close();
-    stopLive();
+    forgetAccount();
     S.session = null;
-    S.studio = null;
+    S.uid = null;
     K.setOwnerHere && K.setOwnerHere(false);
-    S.known = null;
-    S.team = null;
-    S.scheds = {};
-    S.calStaff = S.hrsStaff = S.hsched = S.insStaff = null;
-    K.store.remove('cab');
-    Object.keys(MEM).forEach(k => delete MEM[k]);
-    S2.profile = S2.services = S2.looks = null;
     K.toast('Signed out', 'ok');
     renderAuth();
   }

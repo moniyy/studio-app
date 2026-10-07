@@ -1,5 +1,5 @@
 /* =========================================================
-   Studio App — one template, many masters.
+   Satinbook — one template, many masters.
    ?m=slug  →  masters/slug.json   (no param → demo.json)
    All master content comes from JSON; nothing is hardcoded here.
    Motion: GSAP springs (back.out / elastic.out), iOS sheet curve
@@ -20,7 +20,7 @@
   const SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,60}$/;
   const tail = (() => { try { return decodeURIComponent(location.pathname.slice(ROOT.length)).toLowerCase(); } catch (e) { return ''; } })();
   const rawSlug = (params.get('m') || '').trim().toLowerCase()
-    || (SLUG_RE.test(tail) && tail !== 'index.html' ? tail : '')
+    || (SLUG_RE.test(tail) && tail !== 'index.html' && tail !== 'app.html' ? tail : '')
     || (() => { try { return localStorage.getItem('studio-app:last') || ''; } catch (e) { return ''; } })();
   const SLUG = SLUG_RE.test(rawSlug) ? rawSlug : 'demo';
   // the address always shows the studio as a path: /studio-app/bella-brows?owner=1
@@ -639,7 +639,7 @@
       if (hidden.length) {
         if (window.gsap) window.gsap.set(hidden, { opacity: 1, transform: 'none' });
         showNow(hidden); // then drop the inline styles so CSS press effects keep working
-        console.warn('[Studio App] failsafe revealed', hidden.length, 'element(s)');
+        console.warn('[Satinbook] failsafe revealed', hidden.length, 'element(s)');
       }
     }, ms == null ? 1500 : ms));
   }
@@ -1169,8 +1169,12 @@
               ${x.courseText ? `<p>${esc(x.courseText)}</p>` : ''}
             </span>
             <span class="course__go">${I.arrowR}</span>
-          </a>` : ''}`;
+          </a>` : ''}
+
+          ${poweredHTML()}`;
   }
+  // "Powered by Satinbook" at the bottom of every studio's app (?ref=<slug>: where visitors came from)
+  const poweredHTML = () => `<a class="foot-note" data-stagger href="${esc(APP_BASE + '?ref=' + encodeURIComponent(SLUG))}" ${ext}>Powered by <b>Satinbook</b></a>`;
 
   /* ---------- Services tab ---------- */
   function categories() {
@@ -1408,6 +1412,17 @@
     renderLookChips();
     renderLooks(false);
     renderOwnerLooks();
+    syncLooksTab();
+  }
+  // no looks yet: no Looks tab (nothing to browse), back Home if she was on it
+  function syncLooksTab() {
+    const none = !data.gallery.length;
+    const btn = $('.tab[data-tab="gallery"]', tabbar);
+    if (!btn || btn.hidden === none) return;
+    btn.hidden = none;
+    tabbar.classList.toggle('no-looks', none);
+    if (none && state.tab === 'gallery') go('home');
+    requestAnimationFrame(() => movePill(state.tab, false));
   }
 
   function renderLookChips() {
@@ -1731,7 +1746,7 @@
         <div class="list" data-stagger>
           <button class="row row--link row--danger" id="reset">Reset settings</button>
         </div>
-        <a class="foot-note" data-stagger href="https://instagram.com/maksim.builds" ${ext}>Made with <b>Studio App</b></a>`
+        ${poweredHTML()}`
     });
 
     views.more.style.setProperty('--brand', brandAccent);
@@ -2674,7 +2689,9 @@
       bkx.picked = false;
       bk.min = null;
       bk.iso = null;
-      bkx.notice = staff ? `${firstWord((staffById(staff) || {}).name)} isn’t free at that time — here’s when she is.` : 'That time isn’t open anymore — here’s what is.';
+      // the chips on Home are for the first service: a longer one may simply not fit there —
+      // that time isn't "gone", so no notice; only a master she picked who is busy then says so
+      bkx.notice = staff ? `${firstWord((staffById(staff) || {}).name)} isn’t free at that time — here’s when she is.` : '';
       goStep(ix('time'), true);
     }, () => goStep(ix('time'), true));
   }
@@ -3232,8 +3249,10 @@
         }));
       }
       // the masters (a salon): who does what, at her own price / duration
+      // the owner who hasn't given her first name yet: "Owner", never the studio's name
+      const noFirst = !String(out.masterName || '').trim();
       out.staff = (prof.staff || []).map(st => ({
-        id: st.id, name: st.name, title: st.title || '', photo: st.photo || '', bio: st.bio || '', color: st.color || '#8E8E93',
+        id: st.id, name: st.is_owner && noFirst ? 'Owner' : st.name, title: st.title || '', photo: st.photo || '', bio: st.bio || '', color: st.color || '#8E8E93',
         isOwner: !!st.is_owner,
         services: (st.services || []).map(x => ({ id: x.id, price: x.price != null ? +x.price : null, duration: x.duration != null ? +x.duration : null }))
       }));
@@ -3886,7 +3905,10 @@
         ${b.staff_name ? `<div class="bk-row"><span>With</span><b>${esc(b.staff_name)}</b></div>` : ''}
         ${b.duration_min ? `<div class="bk-row"><span>Duration</span><b>${esc(fmtDuration(b.duration_min))}</b></div>` : ''}
         ${b.price != null ? `<div class="bk-row"><span>Price</span><b class="num">${esc(price(+b.price))}</b></div>` : ''}
-        ${+b.deposit > 0 && b.deposit_status !== 'none' ? `<div class="bk-row"><span>Deposit</span><b class="num">${esc(price(+b.deposit))} · ${esc({ pending: 'not paid yet', paid: 'received ✓', waived: 'not needed', expired: 'not received' }[b.deposit_status] || '')}</b></div>` : ''}
+        ${+b.deposit > 0 && b.deposit_status !== 'none' ? (/^cancelled/.test(b.status) && b.deposit_status === 'pending'
+          // cancelled before it was sent: nothing to pay any more
+          ? '<div class="bk-row"><span>Deposit</span><b>No deposit due</b></div>'
+          : `<div class="bk-row"><span>Deposit</span><b class="num">${esc(price(+b.deposit))} · ${esc({ pending: 'not paid yet', paid: 'received ✓', waived: 'not needed', expired: 'not received' }[b.deposit_status] || '')}</b></div>`) : ''}
         ${data.address ? `<div class="bk-row bk-row--addr"><span>Address</span><b>${esc(data.address)}</b></div>` : ''}
         ${b.client_note ? `<div class="bk-row bk-row--addr"><span>Your note</span><b>${esc(b.client_note)}</b></div>` : ''}
       </div>
@@ -4374,6 +4396,59 @@
 
     if (!qt.length) return { text: `Ask me anything about ${askAbout()} 💕`, suggest: SUGGEST.start };
 
+    // "Cancel my appointment" / "reschedule" / "change my time": her booking, not free times
+    const wantsMove = has('reschedule', 'change my time', 'change the time', 'change time', 'change my appointment', 'change my booking',
+      'change appointment', 'move my', 'move appointment', 'move booking', 'push back', 'push it back');
+    const wantsCancel = has('cancel', 'cant make it', 'cannot make it', 'cant come', 'not coming', 'wont make it') &&
+      !has('policy', 'fee', 'charge', 'refund', 'what happen', 'what if', 'how late', 'how far', 'how many hour');
+    if (wantsMove || wantsCancel) {
+      add(12, () => {
+        if (!isBuiltin()) {
+          return {
+            text: `To ${wantsMove ? 'move' : 'cancel'} your appointment, use the link in your booking confirmation${data.instagram ? ` or message ${name}` : ''} 💕`,
+            action: data.instagram ? 'instagram' : null, suggest: SUGGEST.policy
+          };
+        }
+        const b = upcoming()[0];
+        if (!b) {
+          return {
+            text: 'I don’t see a booking on this phone 🤔 Open the link from your confirmation email — it has Reschedule and Cancel — or check My bookings.',
+            card: { type: 'nobooking' }, suggest: SUGGEST.policy
+          };
+        }
+        return {
+          text: `Your ${b.service_name} is ${whenText(b.start_at).replace(' · ', ' at ')} ✨ ${wantsMove && !wantsCancel ? 'Tap Reschedule to pick a new time.' : 'You can move or cancel it here.'}`,
+          card: { type: 'mybooking', token: b.token }, suggest: SUGGEST.policy
+        };
+      });
+    }
+
+    // "Do you do nails?" when the studio doesn't: what it does instead
+    const NICHE = [
+      ['lashes', ['lash', 'lashes', 'eyelash', 'eyelashes', 'lash lift', 'volume', 'hybrid', 'classic set']],
+      ['brows', ['brow', 'brows', 'eyebrow', 'eyebrows', 'lamination', 'microblading', 'brow tint']],
+      ['nails', ['nail', 'nails', 'manicure', 'mani', 'pedicure', 'pedi', 'gel x', 'acrylic', 'acrylics', 'dip powder']],
+      ['hair', ['hair', 'haircut', 'hair color', 'balayage', 'highlight', 'blowout', 'silk press', 'braid', 'braids', 'wig', 'perm', 'keratin', 'loc', 'locs']],
+      ['makeup', ['makeup', 'make up', 'glam', 'bridal makeup']],
+      ['waxing', ['wax', 'waxing', 'brazilian', 'sugaring']],
+      ['skin care', ['facial', 'facials', 'chemical peel', 'dermaplaning', 'microneedling', 'hydrafacial']],
+      ['massage', ['massage']], ['spray tans', ['spray tan', 'tan', 'tanning']], ['tattoos', ['tattoo', 'tattoos']],
+      ['piercings', ['piercing', 'piercings']], ['injectables', ['botox', 'filler', 'fillers', 'lip filler']]
+    ];
+    const offered = NICHE.filter(([, words]) => data.services.some(s => {
+      const st = ' ' + tokens(s.title + ' ' + (s.category || '')).join(' ') + ' ';
+      return words.some(w => st.includes(' ' + tokens(w).join(' ') + ' '));
+    })).map(([n]) => n);
+    const asked = NICHE.filter(([, words]) => has(...words)).map(([n]) => n);
+    const missing = asked.filter(n => !offered.includes(n));
+    if (missing.length && !asked.some(n => offered.includes(n)) && !wantsMove && !wantsCancel) {
+      const and = l => (l.length < 2 ? l.join('') : l.slice(0, -1).join(', ') + ' & ' + l[l.length - 1]);
+      add(10, () => ({
+        text: offered.length ? `We focus on ${and(offered.slice(0, 3))} — here’s what we offer 💕` : `We don’t do ${missing[0]} — here’s what we offer 💕`,
+        card: { type: 'cats' }, suggest: SUGGEST.service
+      }));
+    }
+
     // FAQ — curated keywords win most ties
     data.faq.forEach(f => {
       const score = (f.keywords || []).filter(k => has(k)).reduce((s, k) => s + 3 + tokens(k).length, 0);
@@ -4657,6 +4732,46 @@
     } else if (card.type === 'slots') {
       el.classList.add('chat-card--hours');
       el.innerHTML = `<div class="cc-label">Next openings</div>${chips(nextSlots(6))}`;
+    } else if (card.type === 'mybooking') {
+      // her nearest booking on this phone: Reschedule / Cancel and the studio's rule
+      const b = mine().find(x => x.token === card.token);
+      if (!b) return null;
+      const r = data.rules || {};
+      const dep = depositDue(b);
+      const late = r.cancelWindow && Date.parse(b.start_at) - Date.now() < r.cancelWindow * 3600e3;
+      el.classList.add('chat-card--mybk');
+      el.innerHTML = `
+        <button class="cc-row" data-manage="${esc(b.token)}">
+          <img class="cc-photo" src="${esc(photoSrc(b, 200))}"${phAttr(b)} alt="">
+          <span class="cc-row__text"><b>${esc(b.service_name)}</b><small>${esc(whenText(b.start_at))}${b.staff_name ? ` · with ${esc(firstWord(b.staff_name))}` : ''}</small>
+            <span class="bstat bstat--${dep ? 'deposit' : b.status}">${dep ? 'Awaiting deposit' : b.status === 'pending' ? 'Pending' : 'Confirmed'}</span></span>
+        </button>
+        <p class="cc-rule${late ? ' is-late' : ''}">${late
+          ? `${I.shield}<span>Less than ${r.cancelWindow} h to go — moving or cancelling now counts as late${+b.deposit > 0 && b.deposit_status === 'paid' ? ' and may lose the deposit' : ''}.</span>`
+          : `${I.clock}<span>${r.cancelWindow ? `Free to cancel or move up to ${r.cancelWindow} h before.` : 'Free to cancel or move any time before your visit.'}</span>`}</p>
+        <div class="cc-acts">
+          <button class="btn btn--soft btn--sm" data-mybk-move="${esc(b.token)}">Reschedule</button>
+          <button class="btn btn--soft btn--sm cc-acts__cancel" data-mybk-cancel="${esc(b.token)}">Cancel</button>
+        </div>`;
+    } else if (card.type === 'nobooking') {
+      el.classList.add('chat-card--hours');
+      el.innerHTML = `
+        <div class="cc-acts">
+          <button class="btn btn--soft btn--sm" data-sub="bookings">My bookings</button>
+          ${data.instagram ? `<a class="btn btn--soft btn--sm" href="${esc(igDmUrl())}" ${ext}>Message ${esc(brandName())}</a>` : data.phone ? `<a class="btn btn--soft btn--sm" href="${esc(telUrl())}">Call ${esc(brandName())}</a>` : ''}
+        </div>`;
+    } else if (card.type === 'cats') {
+      // what the studio does: one row per category, "from $X" → Services on that category
+      el.innerHTML = categories().filter(c => c !== 'All').slice(0, 6).map(c => {
+        const list = data.services.filter(s => s.category === c);
+        const from = Math.min(...list.map(s => +s.price || 0).filter(v => v > 0));
+        return `
+          <button class="cc-row" data-ask-cat="${esc(c)}">
+            <img class="cc-photo" src="${esc(photoSrc(list[0], 200))}"${phAttr(list[0])} alt="">
+            <span class="cc-row__text"><b>${esc(c)}</b><small>${list.length} service${list.length === 1 ? '' : 's'}</small></span>
+            ${isFinite(from) ? `<span class="cc-price">from ${esc(price(from))}</span>` : ''}
+          </button>`;
+      }).join('');
     } else if (card.type === 'steps') {
       el.innerHTML = `
         <ol class="cc-steps">
@@ -4744,7 +4859,7 @@
 
     const nodes = [];
     if (answer.text) nodes.push(bubble('bot', answer.text));
-    if (answer.card) nodes.push(chatCard(answer.card));
+    if (answer.card) nodes.push(chatCard(answer.card) || null);
     if (answer.action) nodes.push(actionButton(answer.action));
     regroup();
     popMessages(nodes);
@@ -5235,12 +5350,7 @@
   }
 
   /* ---------- sharing & links ---------- */
-  function lookLink(l) {
-    const u = new URL('./', location.href);
-    u.searchParams.set('m', SLUG);
-    u.searchParams.set('look', l.id);
-    return u.href;
-  }
+  const lookLink = l => studioUrl('look=' + encodeURIComponent(l.id));
   async function shareLook(l) {
     if (!l) return;
     const s = lookSvc(l);
@@ -5845,6 +5955,14 @@
       if ((el = t.closest('[data-share-saved]'))) { shareSavedLooks(); return; }
       if ((el = t.closest('[data-ask]'))) { ask(el.dataset.ask); return; }
 
+      // the assistant's "here's what we offer": Services, on that category
+      if ((el = t.closest('[data-ask-cat]'))) {
+        state.category = el.dataset.askCat;
+        go('services');
+        syncChips(false);
+        applyServiceFilter(false);
+        return;
+      }
       if ((el = t.closest('[data-cat]'))) {
         if (state.category === el.dataset.cat) return;
         state.category = el.dataset.cat;
@@ -6473,7 +6591,7 @@
       data.prep.length ? 'Before your visit: ' + data.prep.join('; ') : ''
     ].filter(Boolean).join('\n');
     const ics = [
-      'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Studio App//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
+      'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Satinbook//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
       'BEGIN:VEVENT',
       `UID:${SLUG}-${local(start)}-${s.id}@studio-app`,
       `DTSTAMP:${stamp}`,
@@ -7493,7 +7611,7 @@
     document.documentElement.classList.add('is-admin'); // full screen on a computer too, no phone frame
     adoptStyle('noir');
     applySettings();
-    document.title = 'Studio App · Admin';
+    document.title = 'Satinbook Admin';
     const s = document.createElement('script');
     s.src = './admin.js';
     s.onload = () => window.StudioAdmin.open({
@@ -7660,7 +7778,7 @@
       // no deposits here: the assistant doesn't offer to talk about them
       if (isBuiltin() && !depositsOn()) Object.values(SUGGEST).forEach(l => l.forEach((q, i) => { if (/deposit/i.test(q)) l[i] = 'How can I pay?'; }));
     } catch (e) {
-      console.error('[Studio App] Could not load master "' + SLUG + '":', e);
+      console.error('[Satinbook] Could not load master "' + SLUG + '":', e);
       // no network (and nothing in the service-worker cache) → offline screen
       if (!e.http && (!navigator.onLine || e instanceof TypeError || e.code === 'network')) showOffline();
       else showError();
@@ -7711,7 +7829,9 @@
         const d = e.data || {};
         if (d.type !== 'open-booking' || !d.url) return;
         const u = new URL(d.url, location.href);
-        if ((u.searchParams.get('m') || 'demo') !== SLUG || !data) { location.href = u.href; return; }
+        // the studio of the notification: …/<slug>?owner=1&booking=… (or an old ?m=<slug>)
+        const its = u.searchParams.get('m') || decodeURIComponent(u.pathname.replace(/^.*\//, '')) || 'demo';
+        if (its !== SLUG || !data) { location.href = u.href; return; }
         openCabinet({ booking: d.booking || u.searchParams.get('booking') });
       });
     }

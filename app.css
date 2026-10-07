@@ -1,5 +1,5 @@
 /* =========================================================
-   Studio App — design system + components
+   Satinbook — design system + components
    Depth: background mesh → cards → glass (bars, sheets).
    Every color, radius and font size goes through variables,
    so theme / accent / text size settings apply everywhere.
@@ -5315,6 +5315,7 @@ input, select, textarea { font-size: max(16px, 1em); }
 .cab-stats > div { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .cab-stats > div + div { box-shadow: inset 1px 0 0 var(--line); }
 .cab-stats b { font-size: var(--fs-22); font-weight: 700; letter-spacing: -.02em; }
+.cab-stats small.cab-stats__exp { font-size: var(--fs-12); font-weight: 600; color: var(--text-2); opacity: .8; }
 .cab-stats small { font-size: var(--fs-12); color: var(--text-2); font-weight: 500; }
 .cab-next { display: flex; flex-direction: column; gap: 6px; padding: 18px; text-align: left; cursor: pointer; }
 .cab-next__top { display: flex; align-items: center; justify-content: space-between; }
@@ -5671,14 +5672,14 @@ input::-ms-reveal, input::-ms-clear { display: none; }
 .tl__b.is-narrow.is-short { flex-direction: column; align-items: flex-start; gap: 0; }
 
 /* "Studio · Client view" — the master signed in on this device.
-   The top inset grows by 44px so nothing sits under the switch. */
-.app.has-ownsw { --safe-top: calc(env(safe-area-inset-top, 0px) + 44px); }
-@media (min-width: 760px) { .app.has-ownsw { --safe-top: 94px; } }
-@media (display-mode: standalone) { .app.has-ownsw { --safe-top: calc(env(safe-area-inset-top, 0px) + 12px + 44px); } }
+   The top inset grows by 50px so nothing sits under the switch. */
+.app.has-ownsw { --safe-top: calc(env(safe-area-inset-top, 0px) + 50px); }
+@media (min-width: 760px) { .app.has-ownsw { --safe-top: 100px; } }
+@media (display-mode: standalone) { .app.has-ownsw { --safe-top: calc(env(safe-area-inset-top, 0px) + 12px + 50px); } }
 .ownsw {
   position: absolute;
   left: 50%;
-  top: calc(var(--safe-top) - 40px);
+  top: calc(var(--safe-top) - 46px); /* 12px clear of the header row (her monogram / photo) */
   z-index: 60;
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -5710,6 +5711,7 @@ input::-ms-reveal, input::-ms-clear { display: none; }
 :root[data-theme="dark"] .ownsw__thumb { background: #3A3A3F; }
 .app.has-ownsw .cab__done { display: none; }
 .app.has-sheet .ownsw { opacity: 0; pointer-events: none; }
+@media (max-width: 360px) { .ownsw { width: 200px; margin-left: -100px; } }
 
 /* Confirm before "I agree": dimmed, but it answers the tap with a hint */
 .btn.is-off { opacity: .4; box-shadow: none; }
@@ -5889,6 +5891,7 @@ h2 .ctag { font-family: system-ui, sans-serif; }
 .ins-bar small { height: 14px; font-size: 10px; font-weight: 600; color: var(--text-2); text-align: center; white-space: nowrap; overflow: visible; }
 .ins-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 0 4px; font-size: var(--fs-12); color: var(--text-2); }
 .ins-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.ins-note { margin: 8px 4px 0; font-size: var(--fs-12); line-height: 1.4; color: var(--text-2); }
 .ins-dot { width: 9px; height: 9px; border-radius: 3px; background: var(--accent); }
 .ins-dot--exp { background: color-mix(in srgb, var(--accent) 25%, transparent); }
 .ins-dot--ret { background: color-mix(in srgb, var(--text) 30%, transparent); }
@@ -6308,3 +6311,75 @@ html.is-admin .app::after, html.is-admin .statusbar, html.is-admin .desk, html.i
 .moved__txt small { display: block; margin-top: 2px; font-size: var(--fs-13); line-height: 1.45; color: var(--text-2); }
 .moved__acts { grid-column: 1 / -1; display: flex; gap: 8px; }
 .moved__acts .btn { flex: 1; }
+
+/* =========================================================
+   Admin: Studios | Leads, and comfortable on a phone
+   ========================================================= */
+.adm-logo { white-space: nowrap; }
+.adm-tabs-wrap { max-width: 1120px; margin: 14px auto 0; padding: 0 16px; }
+.adm-tabs { max-width: 360px; border-radius: 12px; }
+.adm-tabs .segmented__thumb { border-radius: 10px; }
+.adm-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 38px; font-size: var(--fs-15); }
+.adm-tabs__n { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--accent); color: var(--on-accent, #fff); font-size: 12px; font-weight: 800; line-height: 20px; }
+.adm-grid { grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); }
+.adm-card, .adm-card__top, .adm-stats > div { min-width: 0; }
+.adm-lead-filter .chip .num { opacity: .6; font-weight: 700; }
+.adm-lead__contact { display: flex; flex-wrap: wrap; gap: 6px; }
+.adm-lead__contact .btn { flex: 1 1 auto; min-width: 0; max-width: 100%; }
+.adm-lead__contact .btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adm-lead__st button { height: 36px; }
+.adm-lead.is-new { box-shadow: inset 0 0 0 2px var(--accent), var(--shadow-sm); }
+.adm-lead.is-lost { opacity: .7; }
+.adm-pill--new { background: var(--accent); color: var(--on-accent, #fff); }
+.adm-pill--contacted { background: color-mix(in srgb, #AF52DE 16%, transparent); color: #8E3FC0; }
+.adm-pill--lost { background: var(--fill); color: var(--text-2); }
+:root[data-theme="dark"] .adm-pill--contacted { color: #D59CF5; }
+:root[data-theme="dark"] .adm-pill--trial { color: #64A8FF; }
+:root[data-theme="dark"] .adm-pill--active { color: #4CD964; }
+.adm-empty span { max-width: 340px; font-size: var(--fs-14); line-height: 1.5; }
+.adm-empty a { color: var(--accent); }
+.adm-from-lead { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 14px; background: color-mix(in srgb, var(--accent) 12%, var(--card)); font-size: var(--fs-14); line-height: 1.45; }
+.adm-from-lead svg { flex: none; width: 20px; height: 20px; color: var(--accent); }
+
+@media (max-width: 560px) {
+  .adm-bar { gap: 8px; }
+  .adm-bar .btn--sm { height: 40px; padding: 0 14px; }
+  .adm-tabs { max-width: none; }
+  .adm-head h1 { font-size: 28px; }
+  .adm-search { flex: 1 1 100%; }
+  .adm-main .btn--sm { height: 44px; padding: 0 16px; font-size: var(--fs-15); border-radius: 14px; }
+  .adm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .adm-actions .btn { width: 100%; }
+  .adm-actions .btn:only-child { grid-column: 1 / -1; }
+  .adm-bill { gap: 8px; }
+  .adm-bill__when { flex: 1 1 100%; }
+  .adm-bill .btn, .adm-due__row .btn { flex: 1 1 140px; }
+  .adm-due__who { flex: 1 1 calc(100% - 50px); }
+  .adm-edit__grid { grid-template-columns: 1fr; }
+  .adm-edit summary { padding: 8px 0; }
+  .adm-lead__contact .btn { flex: 1 1 100%; }
+  .adm-card__who small { white-space: normal; overflow-wrap: break-word; }
+  .adm-card__top { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: start; column-gap: 12px; row-gap: 8px; }
+  .adm-card__top > .adm-pill { grid-column: 2; justify-self: start; }
+  .adm-mail { flex-wrap: wrap; }
+}
+
+/* Assistant: "cancel / reschedule" → her booking; "do you do nails?" → what we offer */
+.chat-card--mybk { padding-bottom: 12px; }
+.chat-card--mybk .cc-row { align-items: flex-start; }
+.chat-card--mybk .cc-row__text b { white-space: normal; }
+.chat-card--mybk .cc-row__text .bstat { display: inline-flex; margin-top: 6px; }
+.cc-rule { display: flex; align-items: flex-start; gap: 7px; margin: 0 14px 10px; font-size: var(--fs-13); line-height: 1.4; color: var(--text-2); }
+.cc-rule svg { flex: none; width: 15px; height: 15px; margin-top: 1px; }
+.cc-rule.is-late { color: #C2410C; }
+:root[data-theme="dark"] .cc-rule.is-late { color: #FDBA74; }
+.cc-acts { display: flex; gap: 8px; padding: 0 14px; }
+.chat-card--hours .cc-acts { padding: 0; }
+.cc-acts .btn { flex: 1; }
+.cc-acts__cancel { color: #FF3B30 !important; }
+
+/* No looks yet: four tabs, no Looks */
+.tabbar.no-looks { grid-template-columns: repeat(4, 1fr); }
+.tabbar .tab[hidden] { display: none; }
+/* the field the setup list sent her to */
+.cab .field.is-hint input { box-shadow: inset 0 0 0 2px var(--accent); }

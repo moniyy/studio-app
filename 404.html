@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Satinbook</title>
   <!-- Pretty links: GitHub Pages answers satinbook.com/bella-brows with this page.
-       It hands over to the app as ?m=bella-brows (the app then shows the pretty
+       It hands over to the app (app.html?m=bella-brows; the app then shows the pretty
        address again). On <user>.github.io the app lives under /<repo>/. -->
   <script>
     (function () {
@@ -18,7 +18,7 @@
       slug = slug.toLowerCase();
       if (!ok.test(slug)) { location.replace(root); return; }
       var q = location.search.replace(/^\?/, '');
-      location.replace(root + '?m=' + encodeURIComponent(slug) + (q ? '&' + q : '') + location.hash);
+      location.replace(root + 'app.html?m=' + encodeURIComponent(slug) + (q ? '&' + q : '') + location.hash);
     })();
   </script>
   <style>

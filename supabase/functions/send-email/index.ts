@@ -10,7 +10,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.117.2';
 import { dryRun, sendMail, mailConfigured } from '../_shared/mail.ts';
 import {
-  buildAlert, buildClientEmail, buildDay, buildInvite, sample, dayLong,
+  buildAlert, buildClientEmail, buildDay, buildInvite, buildLead, sample, dayLong,
   type Booking, type Built, type Studio
 } from '../_shared/email-templates.ts';
 
@@ -79,6 +79,14 @@ async function send(row: any, built: Built, s: Studio, replyTo: string | null) {
 // one row of the queue → an email (or a reason not to send it any more)
 // deno-lint-ignore no-explicit-any
 async function processRow(row: any): Promise<{ status: string; subject?: string; error?: string }> {
+  // a lead from satinbook.com → hello@ (from "Satinbook", the reply goes to her)
+  if (row.kind === 'lead') {
+    const { data: l } = await admin.from('leads').select('*').eq('id', row.data && row.data.lead_id).maybeSingle();
+    if (!l) return { status: 'skipped', error: 'lead gone' };
+    const built = buildLead(l);
+    row.__pid = await sendMail({ fromName: 'Satinbook', sender: 'system', to: row.to_email, replyTo: l.email, subject: built.subject, html: built.html, text: built.text });
+    return { status: 'sent', subject: built.subject };
+  }
   const { data: m } = await admin.from('masters').select(STUDIO_COLS).eq('id', row.master_id).maybeSingle();
   if (!m) return { status: 'skipped', error: 'studio gone' };
   const s = toStudio(m);

@@ -2,7 +2,7 @@
   "name": "Aria Lash Studio",
   "short_name": "Aria Lash",
   "description": "Lashes & brows that wake up ready",
-  "start_url": "../?m=demo",
+  "start_url": "../demo",
   "scope": "../",
   "display": "standalone",
   "orientation": "portrait",

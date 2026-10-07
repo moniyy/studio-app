@@ -2,194 +2,296 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <!-- Supabase keys (gitignored; the Pages workflow writes it) — first, so the line below can use them -->
-  <script src="./config.js"></script>
-  <!-- Per-master install: before anything else, point the manifest at this studio's own one
-       (start_url = …/<slug>), so "Add to Home Screen" opens the studio it was added from.
-       Studios in the database: made on the fly by the manifest Edge Function (no file per
-       studio in the repo). The demo: manifests/demo.webmanifest. The studio: the pretty path
-       (…/bella-brows), an old ?m= link, or the last studio opened here → demo. -->
+  <!-- satinbook.com — the product page for beauty artists. A link meant for the app
+       (?m=, ?owner=1, ?admin=1, ?manage=…, a password-reset link) or an installed app
+       that starts here goes straight on to app.html. -->
   <script>
     (function () {
-      var ok = /^[a-z0-9][a-z0-9_-]{0,60}$/, m = (new URLSearchParams(location.search).get('m') || '').trim().toLowerCase();
-      var base = location.origin + location.pathname.replace(/[^/]*$/, ''), tail = location.pathname.replace(/^.*\//, '').toLowerCase();
-      if (!ok.test(m) && ok.test(tail) && tail !== 'index.html') m = tail;
-      if (!ok.test(m)) { try { m = localStorage.getItem('studio-app:last') || ''; } catch (e) { m = ''; } }
-      if (!ok.test(m)) m = 'demo';
-      var c = window.STUDIO_CONFIG || {}, href = './manifests/' + m + '.webmanifest';
-      if (m !== 'demo' && /^https:\/\//.test(c.supabaseUrl || '') && !/YOUR-/i.test(c.supabaseUrl)) {
-        href = c.supabaseUrl.replace(/\/$/, '') + '/functions/v1/manifest?m=' + encodeURIComponent(m) + '&o=' + encodeURIComponent(base);
-      }
-      document.write('<link rel="manifest" href="' + href + '">');
+      var q = location.search, h = location.hash;
+      var forApp = /[?&](m|admin|owner|manage|look|book|booking|style|splash|reset)=/.test(q) ||
+        /access_token=|type=recovery|error_description=/.test(h);
+      var installed = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+      if (forApp || installed) { document.documentElement.style.display = 'none'; location.replace('app.html' + q + h); return; }
+      document.documentElement.className = 'js';
     })();
   </script>
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
-  <title>Studio App</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Satinbook — your own booking app for lash &amp; beauty artists</title>
+  <meta name="description" content="Your own booking app with your name on your clients’ phones. Booking 24/7 in 2 taps, deposits via Cash App, Zelle and Venmo, reminders, no-show rules. 30 days free, then $29/mo — I set everything up for you.">
+  <link rel="canonical" href="https://satinbook.com/">
+  <meta name="theme-color" content="#0A0A0B">
+  <meta name="color-scheme" content="dark">
 
-  <meta name="theme-color" content="#F7F5F2">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Studio">
-  <meta name="format-detection" content="telephone=no">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Satinbook">
+  <meta property="og:url" content="https://satinbook.com/">
+  <meta property="og:title" content="Satinbook — your own booking app">
+  <meta property="og:description" content="Your name on your clients’ phones. Booking 24/7 in 2 taps, deposits, reminders, fewer no-shows. 30 days free.">
+  <meta property="og:image" content="https://satinbook.com/img/brand/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Satinbook — a booking app with the artist’s own name on the client’s phone">
+  <meta name="twitter:card" content="summary_large_image">
 
-  <noscript><link rel="manifest" href="./manifests/demo.webmanifest"></noscript>
-  <link rel="icon" type="image/png" href="./img/icon-192.png">
-  <link rel="apple-touch-icon" href="./img/apple-touch-icon.png">
+  <link rel="icon" href="img/brand/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="img/brand/icon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="img/brand/icon-180.png">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./app.css">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;1,9..144,400&family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="landing.css">
+  <link rel="preload" as="image" href="img/landing/client.webp">
 
-  <!-- GSAP drives the spring animations (deferred: it runs before app init) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.13.0/gsap.min.js" defer></script>
-  <!-- Loaded in <head> on purpose: the first lines apply saved theme / accent / text size before the first paint. -->
-  <!-- the data layer -->
-  <script src="./backend.js"></script>
-  <script src="./app.js"></script>
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"SoftwareApplication","name":"Satinbook","applicationCategory":"BusinessApplication",
+   "operatingSystem":"iOS, Android, Web","url":"https://satinbook.com/",
+   "description":"A booking app with the beauty artist’s own name and icon on her clients’ phones.",
+   "offers":{"@type":"Offer","price":"29","priceCurrency":"USD","description":"30 days free, then $29/mo"}}
+  </script>
 </head>
 <body>
-  <div class="stage">
-    <div class="device">
-      <div class="app is-splash" id="app">
+  <a class="skip" href="#main">Skip to content</a>
 
-        <!-- Everything that shrinks back when a bottom sheet opens -->
-        <div class="shell" id="shell">
-
-        <!-- Slowly drifting accent "mesh" behind everything -->
-        <div class="mesh" aria-hidden="true"><i></i><i></i><i></i></div>
-
-
-        <main class="views" id="views">
-          <section class="view view--home" data-view="home" hidden></section>
-          <section class="view" data-view="services" hidden></section>
-          <section class="view view--chat" data-view="ask" hidden></section>
-          <section class="view" data-view="gallery" hidden></section>
-          <section class="view" data-view="more" hidden></section>
-        </main>
-
-        <!-- Pushed screen (Policies / Aftercare / Hours) -->
-        <section class="view view--sub" id="subview" hidden></section>
-
-        <!-- Floating "liquid glass" tab bar -->
-        <nav class="tabbar glass" id="tabbar" role="tablist" aria-label="Main">
-          <i class="tabbar__pill" aria-hidden="true"></i>
-          <button class="tab" role="tab" data-tab="home">
-            <span class="tab__icon">
-              <svg class="i-line" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 10.5 12 3.5l8.5 7V19a1.5 1.5 0 0 1-1.5 1.5h-4v-6h-6v6H5A1.5 1.5 0 0 1 3.5 19z"/></svg>
-              <svg class="i-fill" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3.5 10.5 12 3.5l8.5 7V19a1.5 1.5 0 0 1-1.5 1.5h-4v-6h-6v6H5A1.5 1.5 0 0 1 3.5 19z"/></svg>
-            </span>
-            <span class="tab__label">Home</span>
-          </button>
-          <button class="tab" role="tab" data-tab="services">
-            <span class="tab__icon">
-              <svg class="i-line" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.5l1.8 4.9 4.9 1.8-4.9 1.8L10 16.9l-1.8-4.9-4.9-1.8 4.9-1.8z"/><path d="M18 15.5v5M15.5 18h5"/></svg>
-              <svg class="i-fill" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.5l1.8 4.9 4.9 1.8-4.9 1.8L10 16.9l-1.8-4.9-4.9-1.8 4.9-1.8z" fill="currentColor"/><path d="M18 15.5v5M15.5 18h5" stroke-width="2.2"/></svg>
-            </span>
-            <span class="tab__label">Services</span>
-          </button>
-          <button class="tab" role="tab" data-tab="ask">
-            <span class="tab__icon">
-              <svg class="i-line" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.8a8.3 8.3 0 0 1-12.2 7.3L3.5 20.5l1.4-4.6a8.3 8.3 0 1 1 15.6-4.1z"/></svg>
-              <svg class="i-fill" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20.5 11.8a8.3 8.3 0 0 1-12.2 7.3L3.5 20.5l1.4-4.6a8.3 8.3 0 1 1 15.6-4.1z"/></svg>
-            </span>
-            <span class="tab__label">Ask</span>
-          </button>
-          <button class="tab" role="tab" data-tab="gallery">
-            <span class="tab__icon">
-              <svg class="i-line" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="4"/><circle cx="9" cy="9.5" r="1.5"/><path d="m20.5 15-4-4L7 20"/></svg>
-              <svg class="i-fill" viewBox="0 0 24 24"><defs><mask id="tm-gal"><rect width="24" height="24" fill="#fff"/><circle cx="9" cy="9.5" r="1.8" fill="#000"/><path d="m21 15-4.5-4.5L6.5 20.5" stroke="#000" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" fill="none"/></mask></defs><rect x="3" y="3.5" width="18" height="17" rx="4.5" fill="currentColor" mask="url(#tm-gal)"/></svg>
-            </span>
-            <span class="tab__label">Looks</span>
-          </button>
-          <button class="tab" role="tab" data-tab="more">
-            <span class="tab__icon">
-              <svg class="i-line" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M8 12h.01M12 12h.01M16 12h.01" stroke-width="2.4"/></svg>
-              <svg class="i-fill" viewBox="0 0 24 24"><defs><mask id="tm-more"><rect width="24" height="24" fill="#fff"/><circle cx="8" cy="12" r="1.3" fill="#000"/><circle cx="12" cy="12" r="1.3" fill="#000"/><circle cx="16" cy="12" r="1.3" fill="#000"/></mask></defs><circle cx="12" cy="12" r="9.4" fill="currentColor" mask="url(#tm-more)"/></svg>
-            </span>
-            <span class="tab__label">More</span>
-          </button>
-        </nav>
-
-        </div><!-- /shell -->
-
-        <!-- Fake status bar, only shown inside the desktop phone frame -->
-        <div class="statusbar" aria-hidden="true">
-          <span id="sb-time">9:41</span>
-          <i class="statusbar__island"></i>
-          <span class="statusbar__icons">
-            <svg viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></svg>
-            <svg viewBox="0 0 27 13" fill="none"><rect x=".5" y=".5" width="22" height="12" rx="3.5" stroke="currentColor" opacity=".4"/><rect x="2" y="2" width="19" height="9" rx="2" fill="currentColor"/><path d="M24 4.5v4c.8-.3 1.5-1 1.5-2s-.7-1.7-1.5-2z" fill="currentColor" opacity=".5"/></svg>
-          </span>
-        </div>
-
-        <!-- Backing under the iOS status bar (installed app) -->
-        <div class="sb-scrim" aria-hidden="true"></div>
-
-        <!-- Sheet backdrop -->
-        <div class="scrim" id="scrim"></div>
-
-        <!-- Universal bottom sheet (service details, booking) -->
-        <section class="sheet" id="sheet" role="dialog" aria-modal="true" hidden>
-          <div class="sheet__grab" aria-hidden="true"><i></i></div>
-          <div class="sheet__content"></div>
-        </section>
-
-        <!-- Stories viewer -->
-        <div class="stories" id="stories" hidden>
-          <div class="stories__stage">
-            <img class="stories__img" alt="">
-            <div class="stories__shade"></div>
-            <div class="stories__bars"></div>
-            <header class="stories__head">
-              <img class="stories__avatar" alt="">
-              <span class="stories__title"></span>
-              <span class="stories__count"></span>
-              <button class="stories__close" aria-label="Close">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-              </button>
-            </header>
-            <div class="stories__foot is-empty"></div>
-          </div>
-        </div>
-
-        <!-- Notification popover -->
-        <div class="notice" id="notice" hidden>
-          <div class="notice__card glass" role="status"></div>
-        </div>
-
-        <!-- Fullscreen photo viewer -->
-        <div class="lightbox" id="lightbox" hidden>
-          <div class="lightbox__bg"></div>
-          <div class="lightbox__track"></div>
-          <button class="lightbox__close" aria-label="Close">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-          </button>
-          <div class="lightbox__bar">
-            <div class="lightbox__count"></div>
-            <button class="lightbox__like" aria-label="Like" aria-pressed="false">
-              <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-            </button>
-          </div>
-        </div>
-
-        <div class="toast glass" id="toast" role="status" aria-live="polite"></div>
-
-        <div class="splash" id="splash">
-          <div class="splash__inner"></div>
-        </div>
-
-      </div>
+  <header class="nav" id="nav">
+    <div class="wrap nav__in">
+      <a class="logo" href="#top" aria-label="Satinbook — to the top">
+        <img src="img/brand/favicon.svg" alt="" width="30" height="30"><span>Satinbook</span>
+      </a>
+      <nav class="nav__links" aria-label="Sections">
+        <a href="#features">Features</a>
+        <a href="#demo">Demo</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <a class="btn btn--sm btn--light" href="#start">Start free</a>
     </div>
+  </header>
 
-    <!-- Shown next to the phone frame on desktop -->
-    <aside class="desk">
-      <span class="desk__eyebrow">Studio App</span>
-      <h2 class="desk__title">Open on your phone to install</h2>
-      <div class="desk__qr" id="qr"></div>
-      <p class="desk__hint">Scan the code with your camera, then tap Share → Add to Home Screen.</p>
-    </aside>
-  </div>
+  <main id="main">
+    <!-- ============ Hero ============ -->
+    <section class="hero" id="top">
+      <div class="wrap hero__in">
+        <div class="hero__copy">
+          <p class="eyebrow reveal">For lash, brow &amp; beauty artists</p>
+          <h1 class="reveal">Your own booking app. <em>Your name on your clients’ phones.</em></h1>
+          <p class="lead reveal">Clients add your app to their Home Screen in one tap, see your prices and free times, and book in two taps — with a deposit. You get a push. No more “how much?” in your DMs.</p>
+          <div class="hero__cta reveal">
+            <a class="btn btn--accent" href="#start">Try it free for 30 days</a>
+            <a class="btn btn--ghost" href="#demo">See the demo</a>
+          </div>
+          <p class="fine reveal">No card needed · I set everything up for you</p>
+        </div>
+
+        <div class="hero__art reveal" aria-hidden="true">
+          <div class="glow"></div>
+          <div class="phone phone--hero">
+            <img src="img/landing/client.webp" alt="" width="390" height="844">
+          </div>
+          <div class="float float--push">
+            <img src="img/brand/icon-180.png" alt="" width="34" height="34">
+            <div><b>New booking <i>now</i></b><span>Jessica · Full Set · Sat 11 AM</span></div>
+          </div>
+          <div class="float float--pay">
+            <span class="dot"></span><div><b>Deposit $30</b><span>Cash App · paid</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Problem → solution ============ -->
+    <section class="sec" id="why">
+      <div class="wrap">
+        <p class="eyebrow reveal">Sound familiar?</p>
+        <h2 class="reveal">Less time in your DMs. More time doing lashes.</h2>
+        <ol class="pains">
+          <li class="pain reveal">
+            <div class="pain__q"><span class="pain__tag">Before</span><p>“How much is a full set?” “Anything Saturday?” — thirty DMs a day, answered between clients.</p></div>
+            <div class="pain__a"><span class="pain__tag pain__tag--ok">With your app</span><p>Prices, free times and your rules are one tap away. Clients book themselves, 24/7.</p></div>
+          </li>
+          <li class="pain reveal">
+            <div class="pain__q"><span class="pain__tag">Before</span><p>No-shows and last-minute cancels leave holes in your week — and in your income.</p></div>
+            <div class="pain__a"><span class="pain__tag pain__tag--ok">With your app</span><p>A deposit holds the spot, clients agree to your cancel policy, and reminders go out 24 h and 2 h before.</p></div>
+          </li>
+          <li class="pain reveal">
+            <div class="pain__q"><span class="pain__tag">Before</span><p>A new client waits for your reply — and books with whoever answered first.</p></div>
+            <div class="pain__a"><span class="pain__tag pain__tag--ok">With your app</span><p>Your app answers in a second, even at midnight, even while you’re mid-set.</p></div>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ============ Features ============ -->
+    <section class="sec" id="features">
+      <div class="wrap">
+        <p class="eyebrow reveal">What’s inside</p>
+        <h2 class="reveal">Everything a busy artist needs. Nothing she doesn’t.</h2>
+        <div class="grid">
+          <article class="feat reveal">
+            <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4M9 15l2 2 4-4"/></svg>
+            <h3>Booking 24/7 in 2 taps</h3>
+            <p>Service, time, done. Only real free times from your schedule — no double bookings.</p>
+          </article>
+          <article class="feat reveal">
+            <svg viewBox="0 0 24 24"><path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>
+            <h3>A push for every booking</h3>
+            <p>New booking, cancel or reschedule — on your phone the second it happens.</p>
+          </article>
+          <article class="feat reveal">
+            <svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10.5h18M7 15h3"/></svg>
+            <h3>Deposits: Cash App, Zelle, Venmo</h3>
+            <p>Ask for a deposit to hold the spot. Mark it paid with one tap.</p>
+          </article>
+          <article class="feat reveal">
+            <svg viewBox="0 0 24 24"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 8.2-7.5 9.5-4.3-1.3-7.5-5-7.5-9.5V6z"/><path d="M9 12l2 2 4-4"/></svg>
+            <h3>Your rules &amp; late-cancel fee</h3>
+            <p>Clients agree to your policy before they book. Late cancels and no-shows are on record.</p>
+          </article>
+          <article class="feat reveal">
+            <svg viewBox="0 0 24 24"><path d="M2.5 13c2.6-3.8 5.8-5.7 9.5-5.7s6.9 1.9 9.5 5.7"/><path d="M5 10.6 3.6 8.4M8.4 8.5 7.6 6M12 7.3V4.7M15.6 8.5l.8-2.5M19 10.6l1.4-2.2"/><circle cx="12" cy="14.5" r="3"/></svg>
+            <h3>Lash map for every client</h3>
+            <p>Lengths, curls, thickness and mapping saved — every fill matches the last set.</p>
+          </article>
+          <article class="feat reveal">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.5"/><path d="M12 9.5V13l2.5 1.5M4.5 4.5 7 3M19.5 4.5 17 3"/></svg>
+            <h3>Client reminders</h3>
+            <p>Emails 24 h and 2 h before, and a nudge when it’s time for a fill.</p>
+          </article>
+          <article class="feat reveal">
+            <svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><circle cx="9" cy="9" r="1.8"/><path d="m20.5 15-5-5-9.5 10.5"/></svg>
+            <h3>Gallery with “Book this look”</h3>
+            <p>Your best work with a button: a client taps a look and books exactly that.</p>
+          </article>
+          <article class="feat reveal">
+            <svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5c.6-3.2 3-5 6-5s5.4 1.8 6 5"/><path d="M15.5 5.6a3.2 3.2 0 0 1 0 5.8M17.5 14.8c1.9.7 3.1 2.3 3.5 4.7"/></svg>
+            <h3>Salons &amp; teams</h3>
+            <p>Several artists, each with her own schedule and services. Clients pick who.</p>
+          </article>
+          <article class="feat reveal">
+            <svg viewBox="0 0 24 24"><path d="M4 20.5h16"/><rect x="5" y="12" width="3" height="6" rx="1"/><rect x="10.5" y="8" width="3" height="10" rx="1"/><rect x="16" y="4.5" width="3" height="13.5" rx="1"/></svg>
+            <h3>Your numbers</h3>
+            <p>Bookings, income, returning clients and no-shows — at a glance, every week.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Demo ============ -->
+    <section class="sec demo" id="demo">
+      <div class="wrap demo__in">
+        <div class="demo__copy">
+          <p class="eyebrow reveal">Try it now</p>
+          <h2 class="reveal">Tap around a real app.</h2>
+          <p class="lead reveal">Meet Aria Lash Studio — a demo studio. Book a set, ask the assistant, open the owner dashboard. Nothing is real, nothing gets sent.</p>
+          <div class="demo__cta reveal">
+            <a class="btn btn--light" href="demo">Open as a client</a>
+            <a class="btn btn--ghost" href="demo?owner=1">Open the owner dashboard</a>
+          </div>
+          <p class="fine reveal">Best on your phone. On a computer it opens in a phone-sized window.</p>
+        </div>
+        <div class="demo__phones reveal" aria-hidden="true">
+          <div class="phone phone--a"><img src="img/landing/book.webp" alt="" width="390" height="844" loading="lazy"></div>
+          <div class="phone phone--b"><img src="img/landing/owner.webp" alt="" width="390" height="844" loading="lazy"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Pricing ============ -->
+    <section class="sec" id="pricing">
+      <div class="wrap">
+        <div class="price reveal">
+          <span class="badge">Founding price $19/mo for the first studios</span>
+          <p class="eyebrow">Pricing</p>
+          <h2>30 days free, then <span class="nowrap">$29/mo.</span></h2>
+          <p class="lead">Cancel anytime. I set everything up for you.</p>
+          <ul class="ticks">
+            <li>Your app with your name, photos and icon</li>
+            <li>Unlimited bookings and clients</li>
+            <li>Push for you, email reminders for clients</li>
+            <li>Deposits, cancel rules, lash maps, gallery</li>
+            <li>Setup done for you — services, prices, photos</li>
+          </ul>
+          <a class="btn btn--accent btn--wide" href="#start">Start your free trial</a>
+          <p class="fine">No card for the trial. No contracts.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ FAQ ============ -->
+    <section class="sec" id="faq">
+      <div class="wrap wrap--narrow">
+        <p class="eyebrow reveal">FAQ</p>
+        <h2 class="reveal">Questions artists ask</h2>
+        <div class="faq">
+          <details class="reveal">
+            <summary>Do I need to set anything up?</summary>
+            <p>No. Send me your Instagram and price list — I build your app with your services, photos, hours and rules, and send you the link. You check it and share it with your clients. Later changes take a minute in your dashboard.</p>
+          </details>
+          <details class="reveal">
+            <summary>I already use Booksy or GlossGenius. Does it work with that?</summary>
+            <p>Yes. Keep your booking system: the Book button in your app can open your Booksy, GlossGenius or Vagaro page, while your app gives clients your prices, looks, aftercare and answers. Switch to the built-in booking whenever you’re ready.</p>
+          </details>
+          <details class="reveal">
+            <summary>How do clients install it?</summary>
+            <p>They open your link — <b>satinbook.com/your-name</b> — and tap Share → Add to Home Screen on iPhone, or Install on Android. Your icon and name land on their Home Screen. No App Store, nothing to download.</p>
+          </details>
+          <details class="reveal">
+            <summary>What if I cancel?</summary>
+            <p>Your app shows clients a short “taking a break” page, and you can come back any time with everything in place. No contracts, no fees. Want your client list? Ask and I’ll send it to you.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ The form ============ -->
+    <section class="sec start" id="start">
+      <div class="wrap wrap--narrow">
+        <div class="card reveal">
+          <p class="eyebrow">Free for 30 days</p>
+          <h2>Start your free trial</h2>
+          <p class="lead">Tell me a little about you — I’ll write within a day and set up your app.</p>
+          <form id="lead" novalidate>
+            <div class="row2">
+              <label class="field"><span>Your name</span><input name="name" autocomplete="given-name" required maxlength="80" placeholder="Jasmine"></label>
+              <label class="field"><span>Instagram</span><input name="instagram" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="60" placeholder="@yourstudio"></label>
+            </div>
+            <label class="field"><span>Email</span><input name="email" type="email" autocomplete="email" required maxlength="120" placeholder="you@email.com"></label>
+            <div class="row2">
+              <label class="field"><span>What do you do?</span>
+                <select name="niche">
+                  <option value="">Choose…</option>
+                  <option>Lashes</option><option>Brows</option><option>Lashes &amp; brows</option>
+                  <option>Nails</option><option>Hair</option><option>Makeup</option><option>Other</option>
+                </select>
+              </label>
+              <label class="field"><span>City</span><input name="city" autocomplete="address-level2" maxlength="80" placeholder="Atlanta, GA"></label>
+            </div>
+            <!-- for bots only -->
+            <label class="hp" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
+            <p class="form-err" id="lead-err" role="alert" hidden></p>
+            <button class="btn btn--accent btn--wide" type="submit">Start my free trial</button>
+            <p class="fine">No card needed. I’ll only use your email to set up your app.</p>
+          </form>
+          <div class="done" id="lead-done" hidden tabindex="-1">
+            <div class="done__icon"><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></div>
+            <h3 id="done-title">Got it!</h3>
+            <p id="done-text">I’ll write to you within a day to set up your app.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap foot__in">
+      <a class="logo" href="#top"><img src="img/brand/favicon.svg" alt="" width="26" height="26"><span>Satinbook</span></a>
+      <p>Your own booking app for beauty artists.</p>
+      <p><a href="mailto:hello@satinbook.com">hello@satinbook.com</a> · <a href="demo">Demo</a></p>
+      <p class="fine">© 2026 Satinbook</p>
+    </div>
+  </footer>
+
+  <script src="config.js"></script>
+  <script src="landing.js" defer></script>
 </body>
 </html>

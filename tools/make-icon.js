@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * Studio App — Home Screen icon generator
+ * Satinbook — Home Screen icon generator
  *
  * Builds the app icon from a Fluent 3D emoji (the same one as on the splash)
  * on a dark night-sky background with a soft accent glow and a few tiny stars.

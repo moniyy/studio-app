@@ -162,7 +162,7 @@ const icsText = (s: string) => String(s || '').replace(/\\/g, '\\\\').replace(/;
 export function ics(s: Studio, b: Booking, cancel = false): string {
   const manage = studioLink(s.slug, 'manage=' + b.manageToken);
   return [
-    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Studio App//EN', 'CALSCALE:GREGORIAN', `METHOD:${cancel ? 'CANCEL' : 'PUBLISH'}`,
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Satinbook//EN', 'CALSCALE:GREGORIAN', `METHOD:${cancel ? 'CANCEL' : 'PUBLISH'}`,
     'BEGIN:VEVENT',
     `UID:${b.id}@studio-app`,
     `SEQUENCE:${Math.floor(Date.now() / 1000)}`,
@@ -341,7 +341,7 @@ export function buildDay(s: Studio, list: Booking[], forStaff: string | null, to
 export function buildInvite(s: Studio, name: string, email: string, password: string): Built {
   const L = layout(s, {
     preheader: `Your sign-in for ${s.name}`, eyebrow: 'Welcome', title: `You’re on the team at ${s.name}`,
-    intro: `Hi ${esc(first(name) || 'there')}! Your bookings, clients and hours are in the studio app.`,
+    intro: `Hi ${esc(first(name) || 'there')}! Your bookings, clients and hours are in Satinbook.`,
     rows: [['Email', esc(email)], ['Temporary password', `<span style="font-family:Menlo,Consolas,monospace;letter-spacing:.04em;">${esc(password)}</span>`]],
     sections: [{ title: 'Set it up', html: '1. On your iPhone, open the button below in Safari.<br>2. Tap Share → Add to Home Screen, then open the app from there.<br>3. Sign in and choose your own password.<br>4. On Today, turn on notifications.', text: '1. On your iPhone, open the link below in Safari.\n2. Tap Share → Add to Home Screen, then open the app from there.\n3. Sign in and choose your own password.\n4. On Today, turn on notifications.' }],
     button: { label: 'Open your dashboard', url: studioLink(s.slug, 'owner=1') },
@@ -371,4 +371,22 @@ export function sample(s: Studio, staffName?: string | null): Booking {
     depositDue: new Date(Date.now() + 12 * 3600e3).toISOString(), manageToken: '00000000-0000-4000-8000-000000000000',
     status: 'confirmed', staffName: staffName || null, clientName: 'Jasmine Carter', clientPhone: '(404) 555-0123'
   };
+}
+
+// a new lead from satinbook.com → hello@satinbook.com (reply goes straight to her)
+export function buildLead(l: { name: string; email: string; instagram?: string; niche?: string; city?: string; ref?: string; created_at?: string }): Built {
+  const s: Studio = { id: '', slug: '', name: 'Satinbook', style: 'noir', accent: '#F4A6B8', tz: 'America/New_York', kind: 'solo' };
+  const ig = String(l.instagram || '').replace(/^@/, '');
+  const L = layout(s, {
+    preheader: `${l.name} wants a free trial`, eyebrow: 'New lead', title: `${l.name} wants a free trial`,
+    intro: 'From the form on satinbook.com. Reply to this email to write to her.',
+    rows: [
+      ['Name', esc(l.name)], ['Email', `<a href="mailto:${esc(l.email)}">${esc(l.email)}</a>`],
+      ...(ig ? [['Instagram', `<a href="https://instagram.com/${esc(encodeURIComponent(ig))}">@${esc(ig)}</a>`] as Row] : []),
+      ...(l.niche ? [['Niche', esc(l.niche)] as Row] : []), ...(l.city ? [['City', esc(l.city)] as Row] : []),
+      ...(l.ref ? [['Came from', esc(l.ref)] as Row] : [])
+    ],
+    button: { label: 'Open Admin → Leads', url: 'https://satinbook.com/app.html?admin=1#leads' }
+  });
+  return { subject: `New lead: ${l.name}${l.niche ? ' · ' + l.niche : ''}${l.city ? ' · ' + l.city : ''}`, ...L };
 }
