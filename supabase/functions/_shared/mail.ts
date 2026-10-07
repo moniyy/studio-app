@@ -38,6 +38,8 @@ const b64 = (s: string) => {
 // → the provider's message id (for delivery checks)
 export async function sendMail(m: Mail): Promise<string> {
   if (dryRun()) return 'dry-run';
+  // reserved test domains never deliver (RFC 2606): a bounce would only hurt the domain's reputation
+  if (/@(example\.(com|org|net)|[^@]+\.(test|invalid|example|localhost))$/i.test(m.to)) throw new Error('reserved test domain — not sent');
   // quotes, brackets and line breaks never reach the From header
   const clean = (s: string) => String(s || '').replace(/["\r\n<>]/g, '').slice(0, 60).trim();
   const from = m.sender === 'system'
