@@ -17,6 +17,7 @@ export type Booking = {
   deposit?: number | null; depositStatus?: string; depositDue?: string | null; manageToken: string;
   status: string; cancelReason?: string | null; staffName?: string | null; clientName?: string; clientPhone?: string;
   priceAsk?: boolean; // a service she prices individually: no price row
+  priceLabel?: string; // her label instead of the price ("$15 off")
 };
 export type Built = { subject: string; html: string; text: string; ics?: string; icsName?: string; unsub?: string };
 
@@ -212,7 +213,7 @@ function bookingRows(s: Studio, b: Booking, extra: Row[] = []): Row[] {
     ['Date', esc(dayLong(b.start, s.tz))],
     ['Time', esc(clock(b.start, s.tz))],
     ...(s.address ? [['Address', esc(s.address)] as Row] : []),
-    ...(b.price != null && !b.priceAsk ? [['Price', esc(money(b.price))] as Row] : []),
+    ...(b.priceLabel ? [['Price', esc(b.priceLabel)] as Row] : b.price != null && !b.priceAsk ? [['Price', esc(money(b.price))] as Row] : []),
     ...extra
   ];
 }

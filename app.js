@@ -325,6 +325,14 @@
   // src for a service picture (or the placeholder); pair with data-ph so a broken photo falls back too
   const photoSrc = (x, w) => { const p = x && (x.photo || x.service_photo); return p ? sized(safeUrl(p), w) : phSrc(svcKind(x)); };
   const phAttr = x => ` data-ph="${svcKind(x)}"`;
+  /* Look & feel → "Services without a photo as rows": no grey placeholder anywhere —
+     such a service is a text row (name, time, price), and Home shows only the ones with a photo */
+  const noThumb = s => !!data.plainRows && !!s && !s.photo;
+  const homeServices = () => {
+    if (!data.plainRows) return data.services;
+    const withPhoto = data.services.filter(s => s.photo);
+    return withPhoto.length ? withPhoto.slice(0, 8) : data.services;
+  };
 
   /* Line icons */
   const svg = (d, extra) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"' + (extra || '') + '>' + d + '</svg>';
@@ -1120,11 +1128,11 @@
             </div>
           </div>` : ''}
 
-          ${data.services.length ? `
+          ${homeServices().length ? `
           <div class="section" data-stagger>
             <div class="section-head"><h2>Services</h2><button class="link-btn" data-go="services">See all</button></div>
             <div class="rail">
-              ${data.services.map(s => `
+              ${homeServices().map(s => `
                 <div class="svc-card" role="button" tabindex="0" data-open-service="${esc(s.id)}">
                   <span class="svc-card__photo">
                     <img src="${esc(photoSrc(s, 400))}"${phAttr(s)} alt="" loading="lazy">
@@ -1206,11 +1214,11 @@
         </div>
         <div class="svc-list${{ maison: ' svc-list--menu', noir: ' svc-list--grouped' }[STYLE] || ''}" id="svc-list">
           ${STYLE === 'maison' ? menuHTML() : STYLE === 'noir' ? groupedHTML() : data.services.map(s => `
-            <div class="card svc2" role="button" tabindex="0" data-stagger data-svc="${esc(s.id)}" data-open-service="${esc(s.id)}">
-              <span class="svc2__media">
+            <div class="card svc2${noThumb(s) ? ' svc2--plain' : ''}" role="button" tabindex="0" data-stagger data-svc="${esc(s.id)}" data-open-service="${esc(s.id)}">
+              ${noThumb(s) ? '' : `<span class="svc2__media">
                 <img class="svc2__photo" src="${esc(photoSrc(s, 300))}"${phAttr(s)} alt="" loading="lazy">
                 ${favButton('svc:' + s.id, 'fav--photo fav--sm')}
-              </span>
+              </span>`}
               <span class="svc2__info">
                 <span class="svc2__cat">${esc(s.category)}</span>
                 <span class="svc2__title">${esc(s.title)}</span>
@@ -1257,8 +1265,8 @@
         <h3 class="group-label">${esc(c)}</h3>
         <div class="list">
           ${data.services.filter(s => s.category === c).map(s => `
-            <div class="svc2 nrow" role="button" tabindex="0" data-svc="${esc(s.id)}" data-open-service="${esc(s.id)}">
-              <img class="nrow__thumb" src="${esc(photoSrc(s, 160))}"${phAttr(s)} alt="" loading="lazy">
+            <div class="svc2 nrow${noThumb(s) ? ' nrow--plain' : ''}" role="button" tabindex="0" data-svc="${esc(s.id)}" data-open-service="${esc(s.id)}">
+              ${noThumb(s) ? '' : `<img class="nrow__thumb" src="${esc(photoSrc(s, 160))}"${phAttr(s)} alt="" loading="lazy">`}
               <span class="nrow__text"><b>${esc(s.title)}</b>${s.duration || s.onlyDays ? `<small>${esc([s.duration, onlyDaysText(s)].filter(Boolean).join(' · '))}</small>` : ''}</span>
               <span class="nrow__price num">${esc(price(s.price))}</span>
               <span class="row__chev">${I.chevR}</span>
@@ -2388,15 +2396,15 @@
     const notes = goodToKnow();
     return `
       <div class="sheet__scroll" data-sheet-scroll>
-        <div class="sd-photo">
-          <img src="${esc(photoSrc(s, 900))}"${phAttr(s)} alt="">
+        <div class="sd-photo${noThumb(s) ? ' sd-photo--none' : ''}">
+          ${noThumb(s) ? '' : `<img src="${esc(photoSrc(s, 900))}"${phAttr(s)} alt="">`}
           <button class="sheet__x sheet__x--float" data-sheet-close aria-label="Close">${I.x}</button>
           ${favButton('svc:' + s.id, 'fav--photo fav--lg')}
         </div>
         <div class="sd-body">
           <span class="svc2__cat">${esc(s.category)}</span>
           <h2 class="sd-title">${esc(s.title)}</h2>
-          <div class="sd-meta">
+          <div class="sd-meta${s.priceLabel || s.priceAsk ? ' sd-meta--text' : ''}">
             <span class="sd-price">${esc(price(s.price))}</span>
             ${s.duration ? `<span class="sd-chip">${I.clock}${esc(s.duration)}</span>` : ''}
             ${s.onlyDays ? `<span class="sd-chip">${svg(DAYS_ICON)}${esc(onlyDaysText(s))}</span>` : ''}
@@ -2536,7 +2544,11 @@
   const firstWord = n => String(n || '').trim().split(/\s+/)[0];
   const monoOf = n => String(n || '?').trim().split(/\s+/).slice(0, 2).map(w => w.charAt(0)).join('').toUpperCase();
   // the price of a service with this master (her own, if she set one)
-  const svcPrice = (s, staffId) => { const o = staffSvc(staffById(staffId), s && s.id); return o && o.price != null ? o.price : s && s.price; };
+  const svcPrice = (s, staffId) => {
+    if (s && s.priceLabel) return s.priceLabel; // her label wins over any master's price
+    const o = staffSvc(staffById(staffId), s && s.id);
+    return o && o.price != null ? o.price : s && s.price;
+  };
   const svcDuration = (s, staffId) => { const o = staffSvc(staffById(staffId), s && s.id); return o && o.duration ? fmtDuration(o.duration) : s && s.duration; };
   const staffAvatar = (st, w) => (st && st.photo
     ? `<img src="${esc(sized(safeUrl(st.photo), w || 200))}" alt="">`
@@ -2674,8 +2686,8 @@
       <p class="bk-sub">${st ? `With ${esc(st.name)}.` : esc(pricesFrom())}</p>
       <div class="pick-list">
         ${list.map(s => `
-          <button class="pick${s.id === bk.service ? ' is-selected' : ''}" data-bk-svc="${esc(s.id)}">
-            <img src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="" loading="lazy">
+          <button class="pick${s.id === bk.service ? ' is-selected' : ''}${noThumb(s) ? ' pick--plain' : ''}" data-bk-svc="${esc(s.id)}">
+            ${noThumb(s) ? '' : `<img src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="" loading="lazy">`}
             <span class="pick__text"><b>${esc(s.title)}</b><small>${esc([(st ? svcDuration(s, st.id) : s.duration) || '', onlyDaysText(s)].filter(Boolean).join(' · '))}</small></span>
             <span class="pick__price">${esc(price(st ? svcPrice(s, st.id) : s.price))}</span>
             <span class="pick__check">${I.check}</span>
@@ -2745,8 +2757,8 @@
       <h2 class="bk-title">${moving ? 'Pick a new time' : 'Pick a day & time'}</h2>
       ${builtin && bkx.notice ? `<div class="bk-notice">${I.clock}<span>${esc(bkx.notice)}</span></div>` : ''}
       ${s && !moving ? `
-      <button class="bk-chosen" data-bk-step="0">
-        <img src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">
+      <button class="bk-chosen${noThumb(s) ? ' bk-chosen--plain' : ''}" data-bk-step="0">
+        ${noThumb(s) ? '' : `<img src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">`}
         <span><b>${esc(s.title)}</b><small>${esc([isTeam() && bk.staff ? 'with ' + firstWord((staffById(bk.staff) || {}).name) : '', svcDuration(s, bk.staff), price(svcPrice(s, bk.staff)), onlyDaysText(s)].filter(Boolean).join(' · '))}</small></span>
         <em>Change</em>
       </button>` : ''}
@@ -2875,7 +2887,7 @@
       ${lookRefHTML()}
       <div class="card bk-sum">
         <div class="bk-sum__svc">
-          <img src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">
+          ${noThumb(s) ? '' : `<img src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">`}
           <span><b>${esc(s.title)}</b><small>${esc(s.category)}</small></span>
         </div>
         <div class="bk-row"><span>Date</span><b>${esc(dayLabel(bk.off, true))}</b></div>
@@ -3196,7 +3208,8 @@
   /* A studio in the database shows only what its master set in her dashboard —
      never numbers, reviews or offers from a template. Empty field = no block. */
   const OWN_KEYS = ['tagline', 'city', 'address', 'parking', 'phone', 'instagram', 'reviewUrl', 'heroPhoto', 'heroVideo', 'avatar',
-    'policies', 'prep', 'aftercare', 'faq', 'payments', 'defaultAccent', 'splashStyle', 'splashEmoji', 'iconDir', 'firstName', 'masterName', 'icons', 'depositMode', 'monogram'];
+    'policies', 'prep', 'aftercare', 'faq', 'payments', 'defaultAccent', 'splashStyle', 'splashEmoji', 'iconDir', 'firstName', 'masterName', 'icons', 'depositMode', 'monogram',
+    'splashMark', 'shortName', 'eyebrow', 'plainRows'];
   const takesDeposits = p => Object.values(p || {}).some(v => String(v || '').trim());
   function ownSettings(base, st) {
     st = st || {};
@@ -3250,9 +3263,10 @@
     if (m.booking_engine === 'builtin') {
       out.services = (prof.services || []).map(s => ({
         id: s.id, category: s.category, title: s.name, description: s.description,
-        // priced individually: no number anywhere ("On request"); a "from $" price stays a text
-        includes: s.includes || [], price: s.price_on_request ? 'On request' : s.price_from ? 'from ' + price(+s.price) : +s.price, deposit: +s.deposit || 0,
-        priceAsk: !!s.price_on_request, onlyDays: Array.isArray(s.only_days) && s.only_days.length ? s.only_days.map(Number) : null,
+        // priced individually: no number anywhere ("On request"); a "from $" price stays a text;
+        // her own price label ("$15 off", "Save $175") is shown instead of either
+        includes: s.includes || [], price: s.price_label ? String(s.price_label) : s.price_on_request ? 'On request' : s.price_from ? 'from ' + price(+s.price) : +s.price, deposit: +s.deposit || 0,
+        priceAsk: !!s.price_on_request, priceLabel: s.price_label ? String(s.price_label) : '', onlyDays: Array.isArray(s.only_days) && s.only_days.length ? s.only_days.map(Number) : null,
         photo: s.photo || '', duration: fmtDuration(+s.duration_min), buffer: +s.buffer_min || 0,
         fillWeeks: +s.fill_weeks || 0
       }));
@@ -3488,7 +3502,7 @@
       ${lookRefHTML()}
       <div class="card bk-sum">
         <div class="bk-sum__svc">
-          <img src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">
+          ${noThumb(s) ? '' : `<img src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">`}
           <span><b>${esc(s.title)}</b><small>${esc(s.category)}</small></span>
         </div>
         <div class="bk-row"><span>Date</span><b>${esc(dayLabel(bk.off, true))}</b></div>
@@ -3497,7 +3511,7 @@
         ${svcDuration(s, bk.staff) ? `<div class="bk-row"><span>Duration</span><b>${esc(svcDuration(s, bk.staff))}</b></div>` : ''}
         <div class="bk-row"><span>Price</span><b class="num">${esc(price(svcPrice(s, bk.staff)))}</b></div>
         ${svcDeposit(s) ? `<div class="bk-row bk-row--accent"><span>${depWord(1)}</span><b class="num">${esc(price(svcDeposit(s)))} · after booking</b></div>` : ''}
-        ${svcDeposit(s) && feeMode() ? `<div class="bk-row"><span>At the appointment</span><b class="num">${esc(price(svcPrice(s, bk.staff)))}</b></div>` : ''}
+        ${svcDeposit(s) && feeMode() && !s.priceLabel ? `<div class="bk-row"><span>At the appointment</span><b class="num">${esc(price(svcPrice(s, bk.staff)))}</b></div>` : ''}
         <div class="bk-row"><span>Name</span><b>${esc(d.name)}</b></div>
         <div class="bk-row"><span>Phone</span><b class="num">${esc(maskPhone(d.phone))}</b></div>
       </div>
@@ -4582,6 +4596,7 @@
       if (list.length === 1) {
         const s = list[0];
         const text = durIntent && !priceIntent ? `${s.title} takes about ${s.duration} ⏱`
+          : s.priceLabel ? `${s.title}: ${s.priceLabel} ✨`
           : s.priceAsk ? `${s.title}: ${firstName()} prices it for you — ask when you book ✨` : `${s.title} is ${price(s.price)} ✨`;
         return { text, card: { type: 'service', id: s.id }, suggest: SUGGEST.service };
       }
@@ -4793,8 +4808,8 @@
     const el = document.createElement('div');
     el.className = 'chat-card';
     const svcRow = s => `
-      <button class="cc-row" data-open-service="${esc(s.id)}">
-        <img class="cc-photo" src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">
+      <button class="cc-row${noThumb(s) ? ' cc-row--plain' : ''}" data-open-service="${esc(s.id)}">
+        ${noThumb(s) ? '' : `<img class="cc-photo" src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">`}
         <span class="cc-row__text"><b>${esc(s.title)}</b><small>${esc(s.duration || '')}</small></span>
         <span class="cc-price">${esc(price(s.price))}</span>
       </button>`;
@@ -4805,7 +4820,7 @@
       el.classList.add('chat-card--svc');
       el.innerHTML = `
         <div class="cc-svc" data-open-service="${esc(s.id)}">
-          <img class="cc-photo cc-photo--lg" src="${esc(photoSrc(s, 500))}"${phAttr(s)} alt="">
+          ${noThumb(s) ? '' : `<img class="cc-photo cc-photo--lg" src="${esc(photoSrc(s, 500))}"${phAttr(s)} alt="">`}
           <div class="cc-svc__body">
             <span class="svc2__cat">${esc(s.category)}</span>
             <b>${esc(s.title)}</b>
@@ -7426,6 +7441,11 @@
     if (data.splashEmoji) return data.splashEmoji;
     return isNails() ? 'Nail polish' : 'Sparkles';
   }
+  /* Look & feel → Splash mark: the 3D emoji (default) or her monogram, pearl on a dark medallion */
+  function splashMarkHTML() {
+    if (data.splashMark !== 'monogram') return `<img class="splash__emoji" src="${esc(icon3d(splashEmoji()))}" alt="">`;
+    return `<span class="splash__mono" aria-hidden="true"><span class="splash__mono-txt">${esc(initials())}</span></span>`;
+  }
   const splashStyle = () => {
     const s = SPLASH_PARAM || data.splashStyle;
     return s === 'photo' && data.heroPhoto ? 'photo' : 'clean';
@@ -7466,7 +7486,7 @@
     $('.splash__inner', splash).innerHTML = `
       <div class="splash__stack">
         <div class="splash__art">
-          <div class="splash__float"><img class="splash__emoji" src="${esc(icon3d(splashEmoji()))}" alt=""></div>
+          <div class="splash__float">${splashMarkHTML()}</div>
           <i class="splash__shadow"></i>
         </div>
         ${logoHTML('splash__logo')}
@@ -7475,7 +7495,10 @@
       <div class="splash__dots" aria-hidden="true"><i></i><i></i><i></i></div>`;
     createCosmos(splash, { quick: short });
     const img = $('.splash__emoji', splash);
-    return Promise.race([img.decode ? img.decode().catch(() => {}) : null, wait(500)]).then(() => new Promise(resolve => {
+    // the emoji decoded, or her monogram's serif loaded — within the same half second
+    const ready = img ? (img.decode ? img.decode().catch(() => {}) : null)
+      : document.fonts && document.fonts.load ? document.fonts.load("300 50px 'Fraunces'").catch(() => {}) : null;
+    return Promise.race([ready, wait(500)]).then(() => new Promise(resolve => {
       const g = G();
       const shell = $('#shell');
       const finish = () => {
@@ -7709,7 +7732,8 @@
     // a studio made in the admin has its own monogram icons in Storage
     const touchIcon = (data.icons && (data.icons.i180 || data.icons.i512)) || abs(dir + 'apple-touch-icon.png');
 
-    const manifest = { short_name: data.name.length > 14 ? data.name.split(/\s+/).slice(0, 2).join(' ') : data.name };
+    // her own short name for the Home screen (Profile), else the first two words of a long name
+    const manifest = { short_name: data.shortName ? String(data.shortName) : data.name.length > 14 ? data.name.split(/\s+/).slice(0, 2).join(' ') : data.name };
     void startUrl;
     void icons;
     // a studio without its own manifests/<slug>.webmanifest (made by tools/make-manifest.js):

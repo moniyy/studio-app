@@ -533,7 +533,7 @@
       saveService(mid, p) {
         let s = p.id && serviceOf(p.id);
         if (!s) { s = { id: 'svc-' + uuid().slice(0, 8), sort: DB.svcs.length, created_at: iso(Date.now()), photo: null, includes: [], active: true, deposit: 0, buffer_min: 15, fill_weeks: null, price_from: false, description: '', category: '' }; DB.svcs.push(s); }
-        ['name', 'price', 'duration_min', 'buffer_min', 'deposit', 'category', 'description', 'includes', 'photo', 'active', 'fill_weeks', 'price_from', 'sort', 'price_on_request', 'only_days'].forEach(k => { if (k in p) s[k] = p[k]; });
+        ['name', 'price', 'duration_min', 'buffer_min', 'deposit', 'category', 'description', 'includes', 'photo', 'active', 'fill_weeks', 'price_from', 'sort', 'price_on_request', 'only_days', 'price_label'].forEach(k => { if (k in p) s[k] = p[k]; });
         if (!p.id) DB.staff.forEach(st => { if (st.is_owner) st.services.push({ id: s.id, price: null, duration: null }); });
         return reply(s);
       },

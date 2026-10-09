@@ -49,11 +49,12 @@ function toBooking(b: any): Booking {
     deposit: b.deposit, depositStatus: b.deposit_status, depositDue: b.deposit_due_at, manageToken: b.manage_token,
     status: b.status, cancelReason: b.cancel_reason, staffName: b.staff ? b.staff.name : null,
     clientName: b.clients ? b.clients.name : '', clientPhone: b.clients ? b.clients.phone : '',
-    priceAsk: !!(b.services && b.services.price_on_request)
+    priceAsk: !!(b.services && b.services.price_on_request),
+    priceLabel: (b.services && b.services.price_label) || ''
   };
 }
 const STUDIO_COLS = 'id, slug, name, style, accent, timezone, kind, settings, cancel_window_hours, owner_id';
-const BOOKING_COLS = 'id, master_id, service_id, service_name, start_at, end_at, price, deposit, deposit_status, deposit_due_at, manage_token, status, cancel_reason, staff_id, client_id, clients(name, phone, email, unsub_token, marketing_opt_out), staff(name, user_id), services(price_on_request)';
+const BOOKING_COLS = 'id, master_id, service_id, service_name, start_at, end_at, price, deposit, deposit_status, deposit_due_at, manage_token, status, cancel_reason, staff_id, client_id, clients(name, phone, email, unsub_token, marketing_opt_out), staff(name, user_id), services(price_on_request, price_label)';
 
 const emails = new Map<string, string>();
 async function emailOf(uid?: string | null) {

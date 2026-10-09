@@ -6493,3 +6493,47 @@ html.is-admin .app::after, html.is-admin .statusbar, html.is-admin .desk, html.i
 .dep-mode__dot { display: grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--line); color: transparent; }
 .dep-mode__dot svg { width: 14px; height: 14px; }
 .dep-mode .row[aria-checked="true"] .dep-mode__dot { background: var(--accent); box-shadow: none; color: var(--on-accent, #fff); }
+
+/* Look & feel → Splash mark: her monogram — pearl serif letters on a dark medallion, softly glowing */
+.splash__mono {
+  display: grid;
+  place-items: center;
+  width: 128px;
+  height: 128px;
+  border-radius: 50%;
+  background:
+    radial-gradient(120% 120% at 30% 16%, rgba(236, 236, 244, .30), rgba(236, 236, 244, 0) 55%),
+    #0B0B0D;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, .22),
+    inset 0 1px 0 rgba(255, 255, 255, .38),
+    0 0 0 7px rgba(214, 214, 228, .07),
+    0 18px 36px rgba(0, 0, 0, .30),
+    0 0 64px rgba(214, 214, 232, .30);
+}
+.splash__mono-txt {
+  padding-left: .06em; /* balances the tracking */
+  font-family: 'Fraunces', Georgia, 'Times New Roman', serif;
+  font-size: 50px;
+  font-weight: 300;
+  font-variation-settings: 'opsz' 144;
+  letter-spacing: .06em;
+  line-height: 1;
+  background: linear-gradient(160deg, #FFFFFF 0%, #EDEDF3 26%, #A8A8B5 50%, #F8F8FB 68%, #C2C2CC 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, .28));
+}
+
+/* Look & feel → services without a photo as rows: text only, no grey square */
+.svc2.nrow.nrow--plain { min-height: 56px; padding-left: 16px; }
+.nrow:not([hidden]) ~ .nrow--plain:not([hidden])::before { left: 16px; }
+.pick.pick--plain { min-height: 56px; padding: 10px 14px; }
+.svc2.svc2--plain { padding: 16px; }
+.cc-row.cc-row--plain { padding-left: 14px; }
+.cc-row + .cc-row--plain::before { left: 14px; }
+.sd-photo.sd-photo--none { height: 60px; background: none; }
+/* a text price ("$15 off", "On request"): kept on one line, the chips move below if needed */
+.sd-meta.sd-meta--text { flex-wrap: wrap; row-gap: 8px; }
+.sd-meta--text .sd-price, .sd-meta--text .sd-chip { white-space: nowrap; }

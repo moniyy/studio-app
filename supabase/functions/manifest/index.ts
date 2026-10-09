@@ -29,7 +29,8 @@ Deno.serve(async req => {
   const manifest = {
     id,
     name,
-    short_name: name.length > 14 ? name.split(/\s+/).slice(0, 2).join(' ').slice(0, 14) : name,
+    // her own short name (Profile → Name under the app icon), else the first two words of a long name
+    short_name: st.shortName ? String(st.shortName).slice(0, 16) : name.length > 14 ? name.split(/\s+/).slice(0, 2).join(' ').slice(0, 14) : name,
     description: String(st.tagline || ''),
     start_url: start,
     scope: base,

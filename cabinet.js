@@ -44,6 +44,11 @@
   const feeMode = () => ((S2.profile && S2.profile.settings) || (K && K.data) || {}).depositMode === 'fee';
   const depWord = cap => (feeMode() ? (cap ? 'Booking fee' : 'booking fee') : (cap ? 'Deposit' : 'deposit'));
   const dayList = days => (days || []).slice().sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map(d => K.DAY_SHORT[d]).join(', ');
+  // a service priced individually or with her label ("$15 off"): its bookings never read "$0"
+  const bkPrice = b => {
+    const s = ((K && K.data && K.data.services) || []).find(x => x.id === b.service_id);
+    return s && (s.priceLabel || s.priceAsk) && !(+b.price > 0) ? (s.priceLabel || 'On request') : money(b.price);
+  };
   const $ = (s, el) => K.$(s, el || root);
   const $$ = (s, el) => K.$$(s, el || root);
   const esc = v => K.esc(v);
@@ -1337,7 +1342,7 @@
         <div class="group-label">History</div>
         <div class="list">${h.length ? h.map(b => `
           <button class="row row--link" data-cab-b="${esc(b.id)}">
-            <span class="row__label">${esc(b.service_name)}<span class="row__sub num">${esc(whenLine(b))}${b.price != null ? ' · ' + money(b.price) : ''}</span></span>
+            <span class="row__label">${esc(b.service_name)}<span class="row__sub num">${esc(whenLine(b))}${b.price != null ? ' · ' + esc(bkPrice(b)) : ''}</span></span>
             <span class="cl-tags">${b.late_cancel ? '<em class="tl__tag tl__tag--late">Late</em>' : ''}<span class="bstat bstat--${b.status}">${esc(statusLabel(b.status))}</span></span>
           </button>`).join('') : '<div class="row"><span class="row__label">No visits yet</span></div>'}</div>`;
       K.springIn(K.$$('.ob > *', K.Sheet.el()), { stagger: 0.03, y: 10, duration: 0.45 });
@@ -2092,6 +2097,8 @@
   const PROFILE_FIELDS = [
     ['masterName', 'Your first name', 'Aria'],
     ['tagline', 'Subtitle', 'Lashes & brows that wake up ready'],
+    ['eyebrow', 'Line above the name (optional)', 'Lash artistry · Atlanta'],
+    ['shortName', 'Name under the app icon (optional)', 'Aria Lash'],
     ['city', 'City', 'Atlanta, GA'],
     ['address', 'Address', '1080 Peachtree St NE, Suite 4B'],
     ['parking', 'Parking', 'Free 2-hour parking in the garage'],
@@ -2113,7 +2120,7 @@
         ${PROFILE_FIELDS.map(([k, label, ph]) => `
           <label class="field"><span>${esc(label)}</span>
             ${k === 'parking' ? `<textarea name="${k}" rows="2" maxlength="300" placeholder="${esc(ph)}">${esc(st[k] || '')}</textarea>`
-              : `<input name="${k}" maxlength="${k === 'reviewUrl' ? 300 : 120}" value="${esc(st[k] || '')}" placeholder="${esc(ph)}"${k === 'phone' ? ' type="tel" inputmode="tel"' : k === 'reviewUrl' ? ' type="url" inputmode="url" autocapitalize="off"' : ''}></label>`}
+              : `<input name="${k}" maxlength="${{ reviewUrl: 300, eyebrow: 40, shortName: 16 }[k] || 120}" value="${esc(st[k] || '')}" placeholder="${esc(ph)}"${k === 'phone' ? ' type="tel" inputmode="tel"' : k === 'reviewUrl' ? ' type="url" inputmode="url" autocapitalize="off"' : ''}></label>`}
           `).join('')}
         <div class="group-label">Numbers on your page</div>
         <p class="cab-muted">Only what’s true — leave a field empty and that block isn’t shown.</p>
@@ -2175,7 +2182,8 @@
   async function styleHTML() {
     const p = need(S2.profile);
     const st = p.settings || {};
-    S2.edit = { kind: 'style', style: p.style || 'noir', accent: st.defaultAccent || null, pv: (K.theme && K.theme()) === 'dark' ? 'dark' : 'light' };
+    S2.edit = { kind: 'style', style: p.style || 'noir', accent: st.defaultAccent || null, pv: (K.theme && K.theme()) === 'dark' ? 'dark' : 'light',
+      mark: st.splashMark === 'monogram' ? 'monogram' : 'emoji', mono: st.monogram || '', rows: !!st.plainRows };
     return `
       ${backHTML('style')}
       <header class="cab-h"><h1>Look & feel</h1></header>
@@ -2210,6 +2218,16 @@
         </div>
       </div>
       <div class="sty-block">
+        <span class="sty-label">Splash mark</span>
+        <div class="segmented" role="radiogroup" style="--n:2;--idx:${e.mark === 'monogram' ? 1 : 0}"><i class="segmented__thumb"></i>
+          <button role="radio" data-sty-mark="emoji" aria-checked="${e.mark !== 'monogram'}">Emoji</button><button role="radio" data-sty-mark="monogram" aria-checked="${e.mark === 'monogram'}">Monogram</button>
+        </div>
+        ${e.mark === 'monogram' ? `<label class="field"><span>Letters <em>empty = the first letters of the studio name</em></span><input data-sty-mono maxlength="3" autocapitalize="characters" value="${esc(e.mono)}" placeholder="${esc(K.initials())}"></label>` : ''}
+      </div>
+      <div class="sty-block">
+        <label class="tick"><input type="checkbox" data-sty-rows${e.rows ? ' checked' : ''}><i aria-hidden="true">${K.I.check}</i><span>Services without a photo as simple rows — Home shows only the ones with a photo</span></label>
+      </div>
+      <div class="sty-block">
         <span class="sty-label sty-label--row">Preview
           <span class="segmented sty-pv" role="radiogroup" aria-label="Preview theme" style="--n:2;--idx:${e.pv === 'dark' ? 1 : 0}"><i class="segmented__thumb"></i>
             <button role="radio" data-sty-pv="light" aria-checked="${e.pv !== 'dark'}">Light</button><button role="radio" data-sty-pv="dark" aria-checked="${e.pv === 'dark'}">Dark</button></span></span>
@@ -2223,11 +2241,25 @@
       </div>
       </div>`;
   }
+  // what's typed / ticked in the style box survives a repaint of it
+  function grabStyleInputs() {
+    const e = S2.edit, mono = $('[data-sty-mono]'), rows = $('[data-sty-rows]');
+    if (!e || e.kind !== 'style') return;
+    if (mono) e.mono = mono.value;
+    if (rows) e.rows = rows.checked;
+  }
   async function saveStyle(btn) {
+    grabStyleInputs();
     const e = S2.edit;
     const acc = K.accentsFor(e.style, 'light').find(a => a.id === e.accent); // the brand color is the light one
     await busyBtn(btn, async () => {
-      S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { style: e.style, accent: /^#[0-9a-f]{6}$/i.test(acc && acc.color) ? acc.color : null, settings: { defaultAccent: e.accent } });
+      S2.profile = await K.Backend.owner.saveProfile(S.studio.id, {
+        style: e.style, accent: /^#[0-9a-f]{6}$/i.test(acc && acc.color) ? acc.color : null,
+        settings: {
+          defaultAccent: e.accent, splashMark: e.mark === 'monogram' ? 'monogram' : null,
+          monogram: String(e.mono || '').replace(/\s+/g, '').toUpperCase().slice(0, 3) || null, plainRows: e.rows ? true : null
+        }
+      });
       K.toast('Look saved — clients see it now', 'ok');
       published();
     });
@@ -2250,7 +2282,7 @@
           <img class="svc-row__img" src="${esc(K.photoSrc({ photo: s.photo, category: s.category, title: s.name }, 160))}" data-ph="${K.svcKind({ category: s.category, title: s.name })}" alt="">
           <button class="svc-row__main" data-svc-edit="${esc(s.id)}">
             <b>${esc(s.name)}</b>
-            <small class="num">${esc(s.category)} · ${durText(s.duration_min)}${s.buffer_min ? ' + ' + s.buffer_min + 'm' : ''} · ${s.price_on_request ? 'price on request' : (s.price_from ? 'from ' : '') + money(s.price)}${+s.deposit ? ' · ' + depWord() + ' ' + money(s.deposit) : ''}${s.only_days && s.only_days.length ? ' · ' + esc(dayList(s.only_days)) + ' only' : ''}${s.active ? '' : ' · hidden'}</small>
+            <small class="num">${esc(s.category)} · ${durText(s.duration_min)}${s.buffer_min ? ' + ' + s.buffer_min + 'm' : ''} · ${s.price_label ? '“' + esc(s.price_label) + '”' : s.price_on_request ? 'price on request' : (s.price_from ? 'from ' : '') + money(s.price)}${+s.deposit ? ' · ' + depWord() + ' ' + money(s.deposit) : ''}${s.only_days && s.only_days.length ? ' · ' + esc(dayList(s.only_days)) + ' only' : ''}${s.active ? '' : ' · hidden'}</small>
           </button>
           <span class="row__chev">${K.I.chevR}</span>
         </div>`).join('')}</div>` : `<div class="cab-empty">${K.art('sparkles')}<b>No services yet</b><span>Add your first one — clients can book it right away.</span></div>`}`;
@@ -2281,6 +2313,7 @@
             </div>
             <label class="tick"><input type="checkbox" name="price_from"${s.price_from ? ' checked' : ''}><i aria-hidden="true">${K.I.check}</i><span>Show as “from $” (the price can be higher)</span></label>
             <label class="tick"><input type="checkbox" name="price_on_request"${s.price_on_request ? ' checked' : ''}><i aria-hidden="true">${K.I.check}</i><span>Price on request — clients see “On request”, no price</span></label>
+            <label class="field"><span>Price label <em>optional — shown instead of the price</em></span><input name="price_label" maxlength="24" value="${esc(s.price_label || '')}" placeholder="$15 off"></label>
             <div class="field"><span>Available only on… <em>none picked = every day you work</em></span>
               <div class="chips-wrap" data-svc-days>${[1, 2, 3, 4, 5, 6, 0].map(d => `<button type="button" class="chip${(s.only_days || []).includes(d) ? ' is-active' : ''}" data-svc-day="${d}">${K.DAY_SHORT[d]}</button>`).join('')}</div></div>
             <label class="field"><span>Fill reminder</span><select class="cab-sel cab-sel--wide" name="fill_weeks">${[['', 'None'], [2, 'After 2 weeks'], [3, 'After 3 weeks'], [4, 'After 4 weeks'], [5, 'After 5 weeks'], [6, 'After 6 weeks'], [8, 'After 8 weeks']].map(([v, l]) => `<option value="${v}"${String(v) === String(s.fill_weeks || '') ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
@@ -2303,13 +2336,13 @@
       id: S2.edit.id || undefined, name: v('name'), category: custom || (chip ? chip.dataset.cat : 'Other'),
       description: v('description'), duration_min: +v('duration_min'), buffer_min: +v('buffer_min'),
       price: v('price') === '' ? null : +v('price'), deposit: +v('deposit') || 0, price_from: f.elements.price_from.checked,
-      price_on_request: f.elements.price_on_request.checked,
+      price_on_request: f.elements.price_on_request.checked, price_label: v('price_label'),
       only_days: K.$$('[data-svc-day].is-active', K.Sheet.el()).map(c => +c.dataset.svcDay),
       fill_weeks: v('fill_weeks') || '', photo: S2.edit.photo || '',
       active: K.$('[data-svc-active]', K.Sheet.el()).getAttribute('aria-checked') === 'true'
     };
     if (!svc.name) { K.toast('Add a name', 'x'); return; }
-    if (svc.price_on_request && svc.price == null) svc.price = 0; // no price needed: it isn't shown
+    if ((svc.price_on_request || svc.price_label) && svc.price == null) svc.price = 0; // no price needed: it isn't shown
     if (svc.price == null || !(svc.price >= 0)) { K.toast('Add a price', 'x'); return; }
     if (svc.deposit > svc.price && svc.price > 0) { K.toast('The deposit is bigger than the price', 'x'); return; }
     // a salon: who does it (all chips on = everyone, the default for a new one)
@@ -2694,6 +2727,8 @@
   function onStudioClick(t) {
     let el;
     if ((el = t.closest('[data-pf-save]'))) { saveProfileForm(el); return true; }
+    if ((el = t.closest('[data-sty-mark]'))) { grabStyleInputs(); S2.edit.mark = el.dataset.styMark; $('#sty-box').innerHTML = styleBoxHTML(); K.haptic(); return true; }
+    if ((el = t.closest('[data-sty], [data-sty-acc], [data-sty-pv]'))) grabStyleInputs();
     if ((el = t.closest('[data-sty]'))) { S2.edit.style = el.dataset.sty; S2.edit.accent = null; $('#sty-box').innerHTML = styleBoxHTML(); K.haptic(); return true; }
     if ((el = t.closest('[data-sty-acc]'))) { S2.edit.accent = el.dataset.styAcc; $('#sty-box').innerHTML = styleBoxHTML(); K.haptic(); return true; }
     if ((el = t.closest('[data-sty-pv]'))) { S2.edit.pv = el.dataset.styPv; $('#sty-box').innerHTML = styleBoxHTML(); K.haptic(); return true; }
@@ -2880,7 +2915,7 @@
 
   /* ---------- Read-only (the platform admin looking at a studio) ---------- */
   const RO_BLOCK = ['[data-crew-kind]', '[data-crew-new]', '[data-crew-save]', '[data-crew-off]', '[data-crew-on]', '[data-crew-move]', '[data-crew-cx]',
-    '[data-pf-save]', '[data-sty-save]', '[data-sty]', '[data-sty-acc]', '[data-svc-new]', '[data-svc-save]', '[data-svc-del]',
+    '[data-pf-save]', '[data-sty-save]', '[data-sty]', '[data-sty-acc]', '[data-sty-mark]', '[data-svc-new]', '[data-svc-save]', '[data-svc-del]',
     '[data-look-new]', '[data-look-save]', '[data-look-del]', '[data-tx-save]', '[data-faq-save]', '[data-faq-add]', '[data-pay-save]', '[data-dep-mode]',
     '[data-pr-save]', '[data-ly-save]', '[data-hrs-save]', '[data-hrs-toggle]', '[data-hrs-add]', '[data-hrs-del]', '[data-toff-add]',
     '[data-toff-del]', '[data-rule-auto]', '[data-ob-set]', '[data-ob-cancel]', '[data-ob-move]', '[data-dep-set]', '[data-req-yes]',
@@ -3515,7 +3550,7 @@
       <div class="card bk-sum">
         <div class="bk-row"><span>Service</span><b>${esc(b.service_name)}</b></div>
         ${teamView() && b.staff_name ? `<div class="bk-row"><span>Master</span><b>${crewDot(b.staff_color)}${esc(b.staff_name)}</b></div>` : ''}
-        ${b.price != null ? `<div class="bk-row"><span>Price</span><b class="num">${money(b.price)}</b></div>` : ''}
+        ${b.price != null ? `<div class="bk-row"><span>Price</span><b class="num">${esc(bkPrice(b))}</b></div>` : ''}
         <div class="bk-row"><span>Phone</span><b class="num">${esc(phoneText(b.client_phone))}</b></div>
         ${b.client_email ? `<div class="bk-row"><span>Email</span><b>${esc(b.client_email)}</b></div>` : ''}
         ${b.client_note ? `<div class="bk-row bk-row--addr"><span>Note</span><b>${esc(b.client_note)}</b></div>` : ''}
