@@ -40,6 +40,10 @@
   /* ---------- small helpers ---------- */
   // the demo studio (satinbook.com/demo?owner=1): its data lives in memory, nothing is sent
   const isDemo = () => !!(K && K.Backend && K.Backend.demo);
+  // a studio whose deposit is a booking fee (Payments & deposits): the same money, other words
+  const feeMode = () => ((S2.profile && S2.profile.settings) || (K && K.data) || {}).depositMode === 'fee';
+  const depWord = cap => (feeMode() ? (cap ? 'Booking fee' : 'booking fee') : (cap ? 'Deposit' : 'deposit'));
+  const dayList = days => (days || []).slice().sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map(d => K.DAY_SHORT[d]).join(', ');
   const $ = (s, el) => K.$(s, el || root);
   const $$ = (s, el) => K.$$(s, el || root);
   const esc = v => K.esc(v);
@@ -630,7 +634,7 @@
       request: `New request: ${b.client_name} · ${svc} · ${when}`,
       cancel: `Cancelled: ${b.client_name} · ${svc} · ${at}`,
       late: `Late cancel: ${b.client_name} · ${svc} · ${at} — less than ${win}h notice`,
-      expired: `Released: ${b.client_name} · ${at} — the deposit didn’t arrive`,
+      expired: `Released: ${b.client_name} · ${at} — the ${depWord()} didn’t arrive`,
       move: `Moved: ${b.client_name} · ${svc} → ${when}`
     }[kind];
     S.queue.push({ kind, text, id: b.id });
@@ -928,7 +932,7 @@
         <div class="cab-next__top"><span class="eyebrow">${started ? 'In the chair now' : 'Next client'}</span><span class="cab-next__in">${started ? 'until ' + K.fmtClock(spot(b.end_at).min) : K.countdown(b.start_at)}</span></div>
         <h2>${esc(b.client_name || 'Client')}${tagBadges(b.client_tags, b.client_no_shows)}</h2>
         <p class="num">${esc(b.service_name)} · ${timeRange(b)}${teamView() && b.staff_name ? ` · with ${esc(firstOf(b.staff_name))}` : ''}</p>
-        ${b.deposit_status === 'pending' ? `<span class="bstat bstat--deposit">Deposit ${money(b.deposit)} not received</span>` : ''}
+        ${b.deposit_status === 'pending' ? `<span class="bstat bstat--deposit">${depWord(1)} ${money(b.deposit)} not received</span>` : ''}
         ${b.last_formula ? `<p class="cab-last num">${icon(LASH)}<span>Last time: <b>${esc(formulaLine(b.last_formula))}</b></span></p>` : ''}
         ${b.client_note ? `<p class="cab-next__note">“${esc(b.client_note)}”</p>` : ''}
         ${b.status === 'pending' ? '<span class="bstat bstat--pending">Not confirmed yet</span>' : ''}
@@ -1022,7 +1026,7 @@
         ${offs.map(o => `<div class="tl__off" style="top:${y(Math.max(from, o.s))}px;height:${((Math.min(to, o.e) - Math.max(from, o.s)) * PX).toFixed(1)}px"><span>${esc(o.reason || 'Time off')}</span></div>`).join('')}
         ${items.map(({ b, s, e }) => `
           <button class="tl__b tl__b--${b.status}${e - s < 40 ? ' is-short' : ''}${arriving(b)}" data-cab-b="${esc(b.id)}" style="top:${y(s)}px;height:${Math.max(26, (e - s) * PX - 3).toFixed(1)}px">
-            <b>${esc(b.client_name || 'Client')}${b.deposit_status === 'pending' && isActive(b) ? ' <em class="tl__dep" title="Deposit not received">$</em>' : ''}</b><span>${esc(b.service_name)}</span><small class="num">${timeRange(b)}</small>
+            <b>${esc(b.client_name || 'Client')}${b.deposit_status === 'pending' && isActive(b) ? ` <em class="tl__dep" title="${depWord(1)} not received">$</em>` : ''}</b><span>${esc(b.service_name)}</span><small class="num">${timeRange(b)}</small>
           </button>`).join('')}
         ${cx.map(c => { const { b, s, e } = c; return `
           <button class="tl__b tl__b--cx${e - s < 40 ? ' is-short' : ''}${c.side || c.lanes > 1 ? ' is-narrow' : ''}" data-cab-b="${esc(b.id)}" style="${cxPos(c)}top:${y(s)}px;height:${Math.max(26, (e - s) * PX - 3).toFixed(1)}px">
@@ -2246,7 +2250,7 @@
           <img class="svc-row__img" src="${esc(K.photoSrc({ photo: s.photo, category: s.category, title: s.name }, 160))}" data-ph="${K.svcKind({ category: s.category, title: s.name })}" alt="">
           <button class="svc-row__main" data-svc-edit="${esc(s.id)}">
             <b>${esc(s.name)}</b>
-            <small class="num">${esc(s.category)} · ${durText(s.duration_min)}${s.buffer_min ? ' + ' + s.buffer_min + 'm' : ''} · ${s.price_from ? 'from ' : ''}${money(s.price)}${+s.deposit ? ' · deposit ' + money(s.deposit) : ''}${s.active ? '' : ' · hidden'}</small>
+            <small class="num">${esc(s.category)} · ${durText(s.duration_min)}${s.buffer_min ? ' + ' + s.buffer_min + 'm' : ''} · ${s.price_on_request ? 'price on request' : (s.price_from ? 'from ' : '') + money(s.price)}${+s.deposit ? ' · ' + depWord() + ' ' + money(s.deposit) : ''}${s.only_days && s.only_days.length ? ' · ' + esc(dayList(s.only_days)) + ' only' : ''}${s.active ? '' : ' · hidden'}</small>
           </button>
           <span class="row__chev">${K.I.chevR}</span>
         </div>`).join('')}</div>` : `<div class="cab-empty">${K.art('sparkles')}<b>No services yet</b><span>Add your first one — clients can book it right away.</span></div>`}`;
@@ -2273,9 +2277,12 @@
             </div>
             <div class="form-2">
               <label class="field"><span>Price, $</span><input name="price" type="number" inputmode="decimal" min="0" step="1" value="${esc(s.price === '' ? '' : +s.price)}" placeholder="120"></label>
-              <label class="field"><span>Deposit, $</span><input name="deposit" type="number" inputmode="decimal" min="0" step="1" value="${esc(+s.deposit || '')}" placeholder="0"></label>
+              <label class="field"><span>${depWord(1)}, $</span><input name="deposit" type="number" inputmode="decimal" min="0" step="1" value="${esc(+s.deposit || '')}" placeholder="0"></label>
             </div>
             <label class="tick"><input type="checkbox" name="price_from"${s.price_from ? ' checked' : ''}><i aria-hidden="true">${K.I.check}</i><span>Show as “from $” (the price can be higher)</span></label>
+            <label class="tick"><input type="checkbox" name="price_on_request"${s.price_on_request ? ' checked' : ''}><i aria-hidden="true">${K.I.check}</i><span>Price on request — clients see “On request”, no price</span></label>
+            <div class="field"><span>Available only on… <em>none picked = every day you work</em></span>
+              <div class="chips-wrap" data-svc-days>${[1, 2, 3, 4, 5, 6, 0].map(d => `<button type="button" class="chip${(s.only_days || []).includes(d) ? ' is-active' : ''}" data-svc-day="${d}">${K.DAY_SHORT[d]}</button>`).join('')}</div></div>
             <label class="field"><span>Fill reminder</span><select class="cab-sel cab-sel--wide" name="fill_weeks">${[['', 'None'], [2, 'After 2 weeks'], [3, 'After 3 weeks'], [4, 'After 4 weeks'], [5, 'After 5 weeks'], [6, 'After 6 weeks'], [8, 'After 8 weeks']].map(([v, l]) => `<option value="${v}"${String(v) === String(s.fill_weeks || '') ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
             <div class="row hrs-switch"><span class="row__label">Visible to clients<span class="row__sub">Off: hidden from the app, nothing is deleted</span></span><button type="button" class="switch" role="switch" aria-checked="${s.active !== false}" data-svc-active></button></div>
             ${teamView() && S.team && crew().length > 1 ? `
@@ -2296,10 +2303,13 @@
       id: S2.edit.id || undefined, name: v('name'), category: custom || (chip ? chip.dataset.cat : 'Other'),
       description: v('description'), duration_min: +v('duration_min'), buffer_min: +v('buffer_min'),
       price: v('price') === '' ? null : +v('price'), deposit: +v('deposit') || 0, price_from: f.elements.price_from.checked,
+      price_on_request: f.elements.price_on_request.checked,
+      only_days: K.$$('[data-svc-day].is-active', K.Sheet.el()).map(c => +c.dataset.svcDay),
       fill_weeks: v('fill_weeks') || '', photo: S2.edit.photo || '',
       active: K.$('[data-svc-active]', K.Sheet.el()).getAttribute('aria-checked') === 'true'
     };
     if (!svc.name) { K.toast('Add a name', 'x'); return; }
+    if (svc.price_on_request && svc.price == null) svc.price = 0; // no price needed: it isn't shown
     if (svc.price == null || !(svc.price >= 0)) { K.toast('Add a price', 'x'); return; }
     if (svc.deposit > svc.price && svc.price > 0) { K.toast('The deposit is bigger than the price', 'x'); return; }
     // a salon: who does it (all chips on = everyone, the default for a new one)
@@ -2774,6 +2784,7 @@
     if ((el = t.closest('[data-pr-save]'))) { savePromo(el); return true; }
     if ((el = t.closest('[data-ly-save]'))) { saveLoyalty(el); return true; }
     if ((el = t.closest('[data-pay-save]'))) { savePayments(el); return true; }
+    if ((el = t.closest('[data-dep-mode]'))) { saveDepositMode(el.dataset.depMode); return true; }
     if ((el = t.closest('[data-ins-per]'))) { S.insPer = el.dataset.insPer; S.insSel = null; K.haptic(); refreshView(); return true; }
     if ((el = t.closest('[data-crew-ins]'))) { S.insStaff = el.dataset.crewIns || null; S.insSel = null; K.haptic(); refreshView(); return true; }
     if ((el = t.closest('[data-pay-copy]'))) { copyText(payoutsText(), 'Payouts copied'); return true; }
@@ -2799,6 +2810,7 @@
     if ((el = t.closest('[data-crew-move]'))) { crewMove(el.dataset.crewMove, el); return true; }
     if ((el = t.closest('[data-crew-cx]'))) { crewCancel(el.dataset.crewCx, el); return true; }
     if ((el = t.closest('[data-svc-who]'))) { el.classList.toggle('is-active'); K.haptic(); return true; }
+    if ((el = t.closest('[data-svc-day]'))) { el.classList.toggle('is-active'); K.haptic(); return true; }
     if ((el = t.closest('[data-ins-bar]'))) {
       S.insSel = +el.dataset.insBar;
       $$('[data-ins-bar]').forEach(x => x.classList.toggle('is-sel', x === el));
@@ -2869,7 +2881,7 @@
   /* ---------- Read-only (the platform admin looking at a studio) ---------- */
   const RO_BLOCK = ['[data-crew-kind]', '[data-crew-new]', '[data-crew-save]', '[data-crew-off]', '[data-crew-on]', '[data-crew-move]', '[data-crew-cx]',
     '[data-pf-save]', '[data-sty-save]', '[data-sty]', '[data-sty-acc]', '[data-svc-new]', '[data-svc-save]', '[data-svc-del]',
-    '[data-look-new]', '[data-look-save]', '[data-look-del]', '[data-tx-save]', '[data-faq-save]', '[data-faq-add]', '[data-pay-save]',
+    '[data-look-new]', '[data-look-save]', '[data-look-del]', '[data-tx-save]', '[data-faq-save]', '[data-faq-add]', '[data-pay-save]', '[data-dep-mode]',
     '[data-pr-save]', '[data-ly-save]', '[data-hrs-save]', '[data-hrs-toggle]', '[data-hrs-add]', '[data-hrs-del]', '[data-toff-add]',
     '[data-toff-del]', '[data-rule-auto]', '[data-ob-set]', '[data-ob-cancel]', '[data-ob-move]', '[data-dep-set]', '[data-req-yes]',
     '[data-req-no]', '[data-cab-new]', '[data-cab-new-at]', '[data-cab-new-for]', '[data-fm-new]', '[data-fm-save]', '[data-fm-del]',
@@ -3004,7 +3016,7 @@
     const live = isActive(b);
     const sub = {
       // cancelled before it was sent: nothing is owed
-      pending: /^cancelled/.test(b.status) ? 'No deposit due — the booking was cancelled' : !live ? 'Not received' : b.deposit_due_at ? `Not received yet · auto-cancels ${whenAt(b.deposit_due_at)} if it doesn’t arrive` : 'Not received yet',
+      pending: /^cancelled/.test(b.status) ? `No ${depWord()} due — the booking was cancelled` : !live ? 'Not received' : b.deposit_due_at ? `Not received yet · auto-cancels ${whenAt(b.deposit_due_at)} if it doesn’t arrive` : 'Not received yet',
       paid: `Received${b.deposit_paid_at ? ' ' + ago(b.deposit_paid_at) : ''}`,
       waived: 'Not needed for this visit',
       expired: 'Never arrived — the booking was released'
@@ -3012,9 +3024,9 @@
     return `
       <div class="card ob-dep ob-dep--${b.deposit_status}">
         <div class="ob-dep__top"><span class="ob-dep__ic">${icon('<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10.5h18M7 15h4"/>')}</span>
-          <span><b>Deposit ${money(b.deposit)}</b><small>${esc(sub)}</small></span></div>
+          <span><b>${depWord(1)} ${money(b.deposit)}</b><small>${esc(sub)}</small></span></div>
         ${b.deposit_status === 'pending' && live && !isStaff() ? `
-        <button class="btn btn--primary btn--block" data-dep-set="paid">${K.I.check}Mark deposit received</button>
+        <button class="btn btn--primary btn--block" data-dep-set="paid">${K.I.check}Mark ${depWord()} received</button>
         <button class="cab-link" data-dep-set="waived">Not needed this time</button>` : ''}
         ${(b.deposit_status === 'paid' || b.deposit_status === 'waived') && live && !isStaff() ? '<button class="cab-link" data-dep-set="pending">Undo</button>' : ''}
       </div>`;
@@ -3026,7 +3038,7 @@
       const r = await K.Backend.owner.setDeposit(b.id, status);
       ob.b = Object.assign({}, b, r);
       patchKnown(b.id, r);
-      K.toast({ paid: 'Deposit received — her booking says Confirmed', waived: 'No deposit needed for this visit', pending: 'Back to waiting for the deposit' }[status], 'ok');
+      K.toast({ paid: `${depWord(1)} received — her booking says Confirmed`, waived: `No ${depWord()} needed for this visit`, pending: `Back to waiting for the ${depWord()}` }[status], 'ok');
       renderOb();
       refreshView();
     });
@@ -3038,7 +3050,7 @@
       .sort((a, z) => Date.parse(a.start_at) - Date.parse(z.start_at));
     if (!list.length) return '';
     return `
-      <div class="group-label">Awaiting deposit</div>
+      <div class="group-label">Awaiting ${depWord()}</div>
       <div class="list">${list.slice(0, 6).map(b => `
         <button class="row row--link" data-cab-b="${esc(b.id)}">
           <span class="row__label">${esc(b.client_name || 'Client')}<span class="row__sub num">${esc(b.service_name)} · ${esc(whenLine(b))}</span></span>
@@ -3069,6 +3081,15 @@
         ${PAY_FIELDS.map(([k, label, ph]) => `<label class="field"><span>${esc(label)}</span><input name="${k}" maxlength="${k === 'square' ? 300 : 80}" value="${esc(pay[k] || '')}" placeholder="${esc(ph)}" autocapitalize="off" spellcheck="false"${k === 'square' ? ' type="url" inputmode="url"' : k === 'zelle' ? ' inputmode="email"' : ''}></label>`).join('')}
       </form>
       <button class="btn btn--primary btn--block" data-pay-save>Save payment details</button>
+      <div class="group-label">What the deposit is</div>
+      <div class="list dep-mode" role="radiogroup">
+        ${[['deposit', 'The deposit goes toward the service', 'At the appointment the client pays the price minus the deposit'],
+          ['fee', 'It’s a booking fee — not applied to the total', 'Clients see “Booking fee”; at the appointment they pay the full price']].map(([v, t, sub]) => `
+        <button class="row row--link" role="radio" data-dep-mode="${v}" aria-checked="${((p.settings || {}).depositMode === 'fee') === (v === 'fee')}">
+          <span class="row__label">${t}<span class="row__sub">${sub}</span></span>
+          <span class="dep-mode__dot" aria-hidden="true">${K.I.check}</span>
+        </button>`).join('')}
+      </div>
       <div class="group-label">Deposit rules</div>
       <div class="list">
         <div class="row"><span class="row__label">Time to pay<span class="row__sub">Not received by then → the booking is cancelled, the time freed and you get a notification</span></span>
@@ -3077,6 +3098,19 @@
           ${sel('noshow_deposit', r.noshow_deposit, [10, 20, 25, 30, 40, 50, 75, 100], v => money(v))}</div>
       </div>
       <p class="cab-muted">The deposit for each service is set in Services.</p>`;
+  }
+  // Payments & deposits → "What the deposit is": goes toward the service, or a booking fee on top
+  async function saveDepositMode(mode) {
+    if (S.readonly) return;
+    const fee = mode === 'fee';
+    if (feeMode() === fee) return;
+    K.haptic();
+    $$('[data-dep-mode]').forEach(b => b.setAttribute('aria-checked', String((b.dataset.depMode === 'fee') === fee)));
+    try {
+      S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { settings: { depositMode: fee ? 'fee' : 'deposit' } });
+      K.toast(fee ? 'Saved — clients see “Booking fee” and pay the full price at the appointment' : 'Saved — the deposit goes toward the service', 'ok');
+      published();
+    } catch (e) { K.toast(err(e), 'x'); repaint(); }
   }
   async function savePayments(btn) {
     const f = $('#pay-form');
@@ -3218,7 +3252,7 @@
         <div class="row"><span class="row__label">Cancelled by you</span><span class="row__value num">${t.studio_cancels - t.deposit_expired}</span></div>
         <div class="row"><span class="row__label">Released — deposit not received</span><span class="row__value num">${t.deposit_expired}</span></div>
         <div class="row"><span class="row__label">No-shows<span class="row__sub">${nsRate}% of visits that were due</span></span><span class="row__value num">${t.no_shows}</span></div>
-        ${+t.deposits_paid ? `<div class="row"><span class="row__label">Deposits received</span><span class="row__value num">${money(t.deposits_paid)}</span></div>` : ''}
+        ${+t.deposits_paid ? `<div class="row"><span class="row__label">${depWord(1)}s received</span><span class="row__value num">${money(t.deposits_paid)}</span></div>` : ''}
       </div>
       <div class="group-label">Top services</div>
       <div class="list ins-top">${top.length ? top.map(s => `
@@ -3464,7 +3498,7 @@
     // completed by the clock (2 h after the end) — she can still correct it
     if (b.status === 'completed' && b.auto_completed) actions.push(`<button class="btn btn--soft ob__danger" data-ob-set="no_show">It was a no-show</button>`);
     box.innerHTML = `
-      <header class="ob__head"><span class="ob__stats"><span class="bstat bstat--${b.status}">${esc(statusLabel(b.status))}${b.status === 'completed' && b.auto_completed ? ' · auto' : ''}</span>${b.deposit_status === 'pending' && isActive(b) ? '<span class="bstat bstat--deposit">Deposit pending</span>' : ''}</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
+      <header class="ob__head"><span class="ob__stats"><span class="bstat bstat--${b.status}">${esc(statusLabel(b.status))}${b.status === 'completed' && b.auto_completed ? ' · auto' : ''}</span>${b.deposit_status === 'pending' && isActive(b) ? `<span class="bstat bstat--deposit">${depWord(1)} pending</span>` : ''}</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
       <h2>${esc(b.client_name || 'Client')}${tagBadges(b.client_tags, b.client_no_shows)}</h2>
       <p class="ob__sub num">${esc(K.dayLabel(spot(b.start_at).off, true))} · ${timeRange(b)}${future && isActive(b) ? ` · <em>${K.countdown(b.start_at)}</em>` : ''}</p>
       ${ob.mode === 'cancel' ? `

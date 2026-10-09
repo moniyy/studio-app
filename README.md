@@ -175,10 +175,15 @@ SDK грузятся параллельно с профилем). Кабинет
 - **Promo banner** (текст, бейдж, только для новых клиенток) и **Loyalty card** (сколько визитов, награда).
 - **Look & feel** — стиль (Soft / Maison / Noir) и акцент с живым превью.
 - **Services** — добавить, изменить, скрыть, удалить, перетащить ≡ для порядка; категории Lashes / Brows / Nails / Other
-  или своя; длительность, буфер после, цена (или «from $»), депозит, фото, напоминание о коррекции через N недель.
+  или своя; длительность, буфер после, цена (или «from $»), депозит, фото, напоминание о коррекции через N недель;
+  **Price on request** (клиентки видят «On request», без «$0»; ассистент: «… prices it for you»);
+  **Available only on…** — дни недели, когда услугу можно записать (ничего не выбрано = все рабочие дни; «Fridays only»
+  у услуги, проверяется на сервере — `services.only_days`, `private.staff_slots`).
 - **Looks** — работы для галереи: фото, «до», название, тег, услуга для записи, метка New.
 - **Payments & deposits** — Cash App, Zelle, Venmo, PayPal.me, ссылка Square; сколько часов на оплату депозита;
-  депозит для клиенток с 2+ неявками.
+  депозит для клиенток с 2+ неявками; **What the deposit is**: «goes toward the service» (по умолчанию) или
+  «It’s a booking fee — not applied to the total» (`settings.depositMode = 'fee'`): везде «Booking fee $10»
+  (Review, письма, экран после записи, кабинет, Insights), на Review — «At the appointment: полная цена».
 - **Hours, time off & rules**, **Policies & texts** (депозит, отмены, опоздания, неявки, «Before your visit», уход),
   **Assistant answers** (вопрос → ответ; ключевые слова для ассистента подбираются сами).
 - **Фото** с телефона сжимаются в браузере до ~1600 px WebP и хранятся в Supabase Storage (`studio-media/<id студии>/…`,

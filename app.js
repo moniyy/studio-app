@@ -1052,7 +1052,14 @@
   // deposits a client can actually be asked for
   const depositsOn = () => (isBuiltin() ? takesDeposits(data.payments) : !!data.deposit);
   const svcDeposit = s => (isBuiltin() ? (depositsOn() && s && +s.deposit > 0 ? +s.deposit : 0) : data.deposit || 0);
-  const askAbout = () => `prices, availability, ${depositsOn() ? 'deposits ' : ''}or aftercare`.replace(', or', ' or');
+  // a studio whose deposit is a booking fee: the same money, but it isn't part of the service price
+  const feeMode = () => isBuiltin() && data.depositMode === 'fee';
+  const depWord = cap => (feeMode() ? (cap ? 'Booking fee' : 'booking fee') : (cap ? 'Deposit' : 'deposit'));
+  const awaitingText = () => 'Awaiting ' + depWord();
+  // a service booked only on some weekdays ("Fridays only")
+  const onlyDaysText = s => (s && s.onlyDays ? s.onlyDays.map(d => DAY_NAMES[d] + 's').join(' & ') + ' only' : '');
+  const DAYS_ICON = '<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>';
+  const askAbout = () => `prices, availability, ${depositsOn() ? depWord() + 's ' : ''}or aftercare`.replace(', or', ' or');
 
   function homeRestHTML() {
     const p = promoNow();
@@ -1252,7 +1259,7 @@
           ${data.services.filter(s => s.category === c).map(s => `
             <div class="svc2 nrow" role="button" tabindex="0" data-svc="${esc(s.id)}" data-open-service="${esc(s.id)}">
               <img class="nrow__thumb" src="${esc(photoSrc(s, 160))}"${phAttr(s)} alt="" loading="lazy">
-              <span class="nrow__text"><b>${esc(s.title)}</b>${s.duration ? `<small>${esc(s.duration)}</small>` : ''}</span>
+              <span class="nrow__text"><b>${esc(s.title)}</b>${s.duration || s.onlyDays ? `<small>${esc([s.duration, onlyDaysText(s)].filter(Boolean).join(' · '))}</small>` : ''}</span>
               <span class="nrow__price num">${esc(price(s.price))}</span>
               <span class="row__chev">${I.chevR}</span>
             </div>`).join('')}
@@ -2392,6 +2399,7 @@
           <div class="sd-meta">
             <span class="sd-price">${esc(price(s.price))}</span>
             ${s.duration ? `<span class="sd-chip">${I.clock}${esc(s.duration)}</span>` : ''}
+            ${s.onlyDays ? `<span class="sd-chip">${svg(DAYS_ICON)}${esc(onlyDaysText(s))}</span>` : ''}
           </div>
           ${s.description ? `<p class="sd-desc">${esc(s.description)}</p>` : ''}
           ${s.includes.length ? `
@@ -2409,7 +2417,7 @@
       <footer class="sheet__foot">
         <div class="sheet__summary">
           <b class="num">${esc(price(s.price))}</b>
-          <span>${esc([s.duration, svcDeposit(s) ? price(svcDeposit(s)) + ' deposit' : ''].filter(Boolean).join(' · '))}</span>
+          <span>${esc([s.duration, svcDeposit(s) ? price(svcDeposit(s)) + ' ' + depWord() : ''].filter(Boolean).join(' · '))}</span>
         </div>
         <button class="btn btn--primary" data-book data-book-service="${esc(s.id)}">Book this service</button>
       </footer>`;
@@ -2668,7 +2676,7 @@
         ${list.map(s => `
           <button class="pick${s.id === bk.service ? ' is-selected' : ''}" data-bk-svc="${esc(s.id)}">
             <img src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="" loading="lazy">
-            <span class="pick__text"><b>${esc(s.title)}</b><small>${esc((st ? svcDuration(s, st.id) : s.duration) || '')}</small></span>
+            <span class="pick__text"><b>${esc(s.title)}</b><small>${esc([(st ? svcDuration(s, st.id) : s.duration) || '', onlyDaysText(s)].filter(Boolean).join(' · '))}</small></span>
             <span class="pick__price">${esc(price(st ? svcPrice(s, st.id) : s.price))}</span>
             <span class="pick__check">${I.check}</span>
           </button>`).join('')}
@@ -2739,7 +2747,7 @@
       ${s && !moving ? `
       <button class="bk-chosen" data-bk-step="0">
         <img src="${esc(photoSrc(s, 200))}"${phAttr(s)} alt="">
-        <span><b>${esc(s.title)}</b><small>${esc([isTeam() && bk.staff ? 'with ' + firstWord((staffById(bk.staff) || {}).name) : '', svcDuration(s, bk.staff), price(svcPrice(s, bk.staff))].filter(Boolean).join(' · '))}</small></span>
+        <span><b>${esc(s.title)}</b><small>${esc([isTeam() && bk.staff ? 'with ' + firstWord((staffById(bk.staff) || {}).name) : '', svcDuration(s, bk.staff), price(svcPrice(s, bk.staff)), onlyDaysText(s)].filter(Boolean).join(' · '))}</small></span>
         <em>Change</em>
       </button>` : ''}
       <div class="days${loading ? ' is-loading' : ''}" id="bk-days" role="listbox" aria-label="Day">
@@ -3188,7 +3196,7 @@
   /* A studio in the database shows only what its master set in her dashboard —
      never numbers, reviews or offers from a template. Empty field = no block. */
   const OWN_KEYS = ['tagline', 'city', 'address', 'parking', 'phone', 'instagram', 'reviewUrl', 'heroPhoto', 'heroVideo', 'avatar',
-    'policies', 'prep', 'aftercare', 'faq', 'payments', 'defaultAccent', 'splashStyle', 'splashEmoji', 'iconDir', 'firstName', 'masterName', 'icons'];
+    'policies', 'prep', 'aftercare', 'faq', 'payments', 'defaultAccent', 'splashStyle', 'splashEmoji', 'iconDir', 'firstName', 'masterName', 'icons', 'depositMode', 'monogram'];
   const takesDeposits = p => Object.values(p || {}).some(v => String(v || '').trim());
   function ownSettings(base, st) {
     st = st || {};
@@ -3212,10 +3220,12 @@
     out.loyalty = ly && ly.on && +ly.total >= 3 ? { total: +ly.total, filled: 0, reward: ly.reward || '', real: true } : null;
     // no way to pay a deposit → no word about deposits anywhere
     if (!takesDeposits(st.payments)) {
-      const noDep = t => (String(t || '').match(/[^.!?]+[.!?]*/g) || []).filter(x => !/deposit/i.test(x)).join(' ').replace(/\s+/g, ' ').trim();
-      out.policies = (out.policies || []).filter(p => p && !/deposit/i.test(p.title || ''))
+      // a studio whose deposit is a booking fee: no word about the fee either
+      const re = st.depositMode === 'fee' ? /deposit|booking fee/i : /deposit/i;
+      const noDep = t => (String(t || '').match(/[^.!?]+[.!?]*/g) || []).filter(x => !re.test(x)).join(' ').replace(/\s+/g, ' ').trim();
+      out.policies = (out.policies || []).filter(p => p && !re.test(p.title || ''))
         .map(p => Object.assign({}, p, { text: noDep(p.text) })).filter(p => p.text);
-      out.faq = (out.faq || []).filter(f => f && !/deposit/i.test(`${f.q || ''} ${f.a || ''}`));
+      out.faq = (out.faq || []).filter(f => f && !re.test(`${f.q || ''} ${f.a || ''}`));
     }
     return out;
   }
@@ -3240,7 +3250,9 @@
     if (m.booking_engine === 'builtin') {
       out.services = (prof.services || []).map(s => ({
         id: s.id, category: s.category, title: s.name, description: s.description,
-        includes: s.includes || [], price: s.price_from ? 'from ' + price(+s.price) : +s.price, deposit: +s.deposit || 0,
+        // priced individually: no number anywhere ("On request"); a "from $" price stays a text
+        includes: s.includes || [], price: s.price_on_request ? 'On request' : s.price_from ? 'from ' + price(+s.price) : +s.price, deposit: +s.deposit || 0,
+        priceAsk: !!s.price_on_request, onlyDays: Array.isArray(s.only_days) && s.only_days.length ? s.only_days.map(Number) : null,
         photo: s.photo || '', duration: fmtDuration(+s.duration_min), buffer: +s.buffer_min || 0,
         fillWeeks: +s.fill_weeks || 0
       }));
@@ -3456,10 +3468,11 @@
     const r = data.rules || {};
     const dep = svcDeposit(bkService());
     const items = [];
-    if (dep) items.push(`A <b>${price(dep)} deposit</b> holds your spot — you’ll see how to send it right after booking.`);
+    if (dep && feeMode()) items.push(`A <b>${price(dep)} booking fee</b> holds your spot — it isn’t part of the service price. You’ll see how to send it right after booking.`);
+    else if (dep) items.push(`A <b>${price(dep)} deposit</b> holds your spot — you’ll see how to send it right after booking.`);
     if (r.cancelWindow) items.push(`Free to cancel or move up to <b>${r.cancelWindow} h</b> before your visit.`);
     else items.push('Free to cancel or move any time before your visit.');
-    if (r.cancelWindow) items.push(dep ? 'Later changes and no-shows may lose the deposit.' : 'Later changes are marked as late — please give as much notice as you can.');
+    if (r.cancelWindow) items.push(dep ? `Later changes and no-shows may lose the ${depWord()}.` : 'Later changes are marked as late — please give as much notice as you can.');
     data.policies.filter(p => dep || !/deposit/i.test(p.title || '')).slice(0, 2).forEach(p => items.push(`<b>${esc(p.title)}.</b> ${esc(p.text)}`));
     return `<div class="card bk-rules"><b class="bk-rules__title">Booking policy</b><ul>${items.map(x => `<li>${x}</li>`).join('')}</ul></div>`;
   }
@@ -3483,7 +3496,8 @@
         ${isTeam() ? `<div class="bk-row"><span>With</span><b>${esc(bk.staff ? (staffById(bk.staff) || {}).name || '' : 'The first master free')}</b></div>` : ''}
         ${svcDuration(s, bk.staff) ? `<div class="bk-row"><span>Duration</span><b>${esc(svcDuration(s, bk.staff))}</b></div>` : ''}
         <div class="bk-row"><span>Price</span><b class="num">${esc(price(svcPrice(s, bk.staff)))}</b></div>
-        ${svcDeposit(s) ? `<div class="bk-row bk-row--accent"><span>Deposit</span><b class="num">${esc(price(svcDeposit(s)))} · after booking</b></div>` : ''}
+        ${svcDeposit(s) ? `<div class="bk-row bk-row--accent"><span>${depWord(1)}</span><b class="num">${esc(price(svcDeposit(s)))} · after booking</b></div>` : ''}
+        ${svcDeposit(s) && feeMode() ? `<div class="bk-row"><span>At the appointment</span><b class="num">${esc(price(svcPrice(s, bk.staff)))}</b></div>` : ''}
         <div class="bk-row"><span>Name</span><b>${esc(d.name)}</b></div>
         <div class="bk-row"><span>Phone</span><b class="num">${esc(maskPhone(d.phone))}</b></div>
       </div>
@@ -3517,7 +3531,7 @@
       action: `<button class="btn btn--primary" data-bk-next${detailsOk() ? '' : ' disabled'}>Review ${I.arrowR}</button>`
     };
     return {
-      summary: `<b class="num">${s ? esc(price(svcPrice(s, bk.staff))) : ''}</b><span>${svcDeposit(s) ? esc(price(svcDeposit(s))) + ' deposit after booking' : 'Pay at the studio'}</span>`,
+      summary: `<b class="num">${s ? esc(price(svcPrice(s, bk.staff))) : ''}</b><span>${svcDeposit(s) ? esc(price(svcDeposit(s))) + ' ' + depWord() + ' after booking' : 'Pay at the studio'}</span>`,
       action: `<button class="btn btn--primary${bkx.agree ? '' : ' is-off'}" data-bk-confirm${bkx.busy ? ' disabled aria-busy="true"' : ''}${bkx.agree ? '' : ' aria-disabled="true"'}>${bkx.busy ? spinner() : 'Confirm'}</button>`,
       legal: `<p class="bk-legal">By booking you agree to the studio’s policy and Satinbook’s <a href="${esc(APP_BASE + 'terms')}" ${ext}>Terms</a> &amp; <a href="${esc(APP_BASE + 'privacy')}" ${ext}>Privacy</a></p>`
     };
@@ -3621,7 +3635,7 @@
     const dep = depositDue(b);
     const title = moved ? (pending ? 'Change requested' : 'Moved ✓') : dep ? 'Almost there' : pending ? 'Request sent' : 'You’re booked';
     const sub = dep && !moved
-      ? `Your time is reserved — send the ${esc(price(+b.deposit))} deposit to hold it.`
+      ? `Your time is reserved — send the ${esc(price(+b.deposit))} ${depWord()} to hold it.`
       : pending
         ? `${esc(masterOf(b))} will confirm soon — you’ll see it in My bookings.`
         : `See you ${esc(whenText(b.start_at).replace(' · ', ' at '))}.`;
@@ -3673,11 +3687,11 @@
   ];
   const depositDue = b => !!(b && b.deposit_status === 'pending' && +b.deposit > 0 && ['pending', 'confirmed'].includes(b.status));
   // "Awaiting deposit" wins over pending / confirmed
-  const bookingStatus = b => (depositDue(b) ? 'Awaiting deposit' : statusText(b.status));
+  const bookingStatus = b => (depositDue(b) ? awaitingText() : statusText(b.status));
   function payOptions(b) {
     const p = (b.master && b.master.payments) || data.payments || {};
     const amt = Math.round(+b.deposit * 100) / 100;
-    const note = ['Deposit', b.service_name, b.client_name].filter(Boolean).join(' · ');
+    const note = [depWord(1), b.service_name, b.client_name].filter(Boolean).join(' · ');
     return PAY_METHODS.filter(m => p[m.id] && String(p[m.id]).trim()).map(m => {
       const v = String(p[m.id]).trim();
       const url = m.link(v, amt, note);
@@ -3692,7 +3706,7 @@
       : 'Your spot is held as soon as it arrives.';
     return `
       <div class="dep card">
-        <div class="dep__head"><span class="dep__ic">${I.shield}</span><span><b>Pay ${esc(price(+b.deposit))} deposit to hold your spot</b><small>${esc(due)}</small></span></div>
+        <div class="dep__head"><span class="dep__ic">${I.shield}</span><span><b>Pay ${esc(price(+b.deposit))} ${depWord()} to hold your spot</b><small>${esc(due)}${feeMode() ? ' The booking fee isn’t part of the service price.' : ''}</small></span></div>
         <div class="dep__list">${opts.map(o => `
           <div class="dep__row">
             <span class="dep__m"><b>${esc(o.name)}</b><small>${esc(o.handle)}</small></span>
@@ -3759,9 +3773,9 @@
       try {
         const b = await fetchBooking(old.token);
         if (!b) return;
-        if (ACTIVE.includes(old.status) && b.status === 'cancelled_master' && b.deposit_status === 'expired') news.push(`Your ${b.service_name} (${whenText(old.start_at)}) was released — the deposit didn’t arrive`);
+        if (ACTIVE.includes(old.status) && b.status === 'cancelled_master' && b.deposit_status === 'expired') news.push(`Your ${b.service_name} (${whenText(old.start_at)}) was released — the ${depWord()} didn’t arrive`);
         else if (ACTIVE.includes(old.status) && b.status === 'cancelled_master') news.push(`${masterOf(b)} cancelled your ${b.service_name} on ${whenText(old.start_at)}`);
-        else if (old.deposit_status === 'pending' && b.deposit_status === 'paid' && ACTIVE.includes(b.status)) news.push(`${masterOf(b)} got your deposit — you’re all set ✨`);
+        else if (old.deposit_status === 'pending' && b.deposit_status === 'paid' && ACTIVE.includes(b.status)) news.push(`${masterOf(b)} got your ${depWord()} — you’re all set ✨`);
         else if (ACTIVE.includes(b.status) && old.start_at !== b.start_at && Date.parse(old.start_at) !== Date.parse(b.start_at)) news.push(`${masterOf(b)} moved your ${b.service_name} to ${whenText(b.start_at)}`);
         else if (old.status === 'pending' && b.status === 'confirmed') news.push(`${masterOf(b)} confirmed your ${b.service_name} — ${whenText(b.start_at)}`);
         const all = mine().map(x => (x.token === old.token ? snapshot(b) : x));
@@ -3783,20 +3797,20 @@
       return `
         <div class="mybk card mybk--cancelled" data-manage="${esc(c.token)}" role="button" tabindex="0">
           <div class="mybk__top"><span class="eyebrow">Your appointment</span><span class="bstat bstat--cancelled_master">${expired ? 'Released' : 'Cancelled by the studio'}</span></div>
-          <div class="mybk__main"><b>${esc(c.service_name)}</b><span class="num">${esc(whenText(c.start_at))}</span>${expired ? '<small>The deposit didn’t arrive in time</small>' : ''}</div>
+          <div class="mybk__main"><b>${esc(c.service_name)}</b><span class="num">${esc(whenText(c.start_at))}</span>${expired ? `<small>The ${depWord()} didn’t arrive in time</small>` : ''}</div>
           <div class="mybk__actions"><button class="btn btn--primary btn--sm" data-book data-book-service="${esc(c.service_id || '')}">Book a new time</button></div>
         </div>`;
     }
     const dep = depositDue(b);
     return `
       <div class="mybk card${dep ? ' mybk--deposit' : ''}" data-manage="${esc(b.token)}" role="button" tabindex="0">
-        <div class="mybk__top"><span class="eyebrow">Your appointment</span><span class="bstat bstat--${dep ? 'deposit' : b.status}">${dep ? 'Awaiting deposit' : b.status === 'pending' ? 'Pending' : 'Confirmed'}</span></div>
+        <div class="mybk__top"><span class="eyebrow">Your appointment</span><span class="bstat bstat--${dep ? 'deposit' : b.status}">${dep ? awaitingText() : b.status === 'pending' ? 'Pending' : 'Confirmed'}</span></div>
         <div class="mybk__main">
           <img src="${esc(photoSrc(b, 200))}"${phAttr(b)} alt="">
           <span><b>${esc(b.service_name)}</b><span class="num">${esc(whenText(b.start_at))}${b.staff_name ? ` · with ${esc(firstWord(b.staff_name))}` : ''}</span><small class="mybk__count" data-countdown="${esc(b.start_at)}">${countdown(b.start_at)}</small></span>
         </div>
         <div class="mybk__actions">
-          ${dep ? `<button class="btn btn--primary btn--sm" data-manage="${esc(b.token)}">Pay ${esc(price(+b.deposit))} deposit</button>` : `<button class="btn btn--soft btn--sm" data-mybk-move="${esc(b.token)}">Reschedule</button>`}
+          ${dep ? `<button class="btn btn--primary btn--sm" data-manage="${esc(b.token)}">Pay ${esc(price(+b.deposit))} ${depWord()}</button>` : `<button class="btn btn--soft btn--sm" data-mybk-move="${esc(b.token)}">Reschedule</button>`}
           <button class="btn btn--soft btn--sm" data-mybk-cancel="${esc(b.token)}">Cancel</button>
         </div>
       </div>`;
@@ -3900,7 +3914,7 @@
           ${can ? `<small class="mg__count" data-countdown="${esc(b.start_at)}">${countdown(b.start_at)}</small>` : ''}
         </div>
       </div>
-      ${b.status === 'cancelled_master' && b.deposit_status === 'expired' ? `<div class="sheet__note mg__note--bad">${I.x}<span>The deposit didn’t arrive in time, so this time went back to the calendar. Book again whenever you like.</span></div>`
+      ${b.status === 'cancelled_master' && b.deposit_status === 'expired' ? `<div class="sheet__note mg__note--bad">${I.x}<span>The ${depWord()} didn’t arrive in time, so this time went back to the calendar. Book again whenever you like.</span></div>`
         : b.status === 'cancelled_master' ? `<div class="sheet__note mg__note--bad">${I.x}<span>${esc(masterOf(b))} cancelled this appointment${b.cancel_reason ? `: “${esc(b.cancel_reason)}”` : ''}. Sorry for the change — pick a new time whenever you like.</span></div>` : ''}
       ${depositHTML(b)}
       ${b.status === 'pending' && !depositDue(b) ? `<div class="sheet__note">${I.clock}<span>${esc(masterOf(b))} hasn’t confirmed yet — you’ll see it here as soon as it’s confirmed.</span></div>` : ''}
@@ -3911,8 +3925,8 @@
         ${b.price != null ? `<div class="bk-row"><span>Price</span><b class="num">${esc(price(+b.price))}</b></div>` : ''}
         ${+b.deposit > 0 && b.deposit_status !== 'none' ? (/^cancelled/.test(b.status) && b.deposit_status === 'pending'
           // cancelled before it was sent: nothing to pay any more
-          ? '<div class="bk-row"><span>Deposit</span><b>No deposit due</b></div>'
-          : `<div class="bk-row"><span>Deposit</span><b class="num">${esc(price(+b.deposit))} · ${esc({ pending: 'not paid yet', paid: 'received ✓', waived: 'not needed', expired: 'not received' }[b.deposit_status] || '')}</b></div>`) : ''}
+          ? `<div class="bk-row"><span>${depWord(1)}</span><b>No ${depWord()} due</b></div>`
+          : `<div class="bk-row"><span>${depWord(1)}</span><b class="num">${esc(price(+b.deposit))} · ${esc({ pending: 'not paid yet', paid: 'received ✓', waived: 'not needed', expired: 'not received' }[b.deposit_status] || '')}</b></div>`) : ''}
         ${data.address ? `<div class="bk-row bk-row--addr"><span>Address</span><b>${esc(data.address)}</b></div>` : ''}
         ${b.client_note ? `<div class="bk-row bk-row--addr"><span>Your note</span><b>${esc(b.client_note)}</b></div>` : ''}
       </div>
@@ -3993,7 +4007,7 @@
       <button class="row row--link mybk-row" data-manage="${esc(b.token)}">
         <img src="${esc(photoSrc(b, 120))}"${phAttr(b)} alt="">
         <span class="row__label">${esc(b.service_name)}<span class="row__sub num">${esc(whenText(b.start_at))}${b.staff_name ? ` · with ${esc(firstWord(b.staff_name))}` : ''}</span></span>
-        <span class="bstat bstat--${depositDue(b) ? 'deposit' : b.status}">${esc(depositDue(b) ? 'Awaiting deposit' : b.status === 'confirmed' ? 'Confirmed' : b.status === 'pending' ? 'Pending' : statusText(b.status))}</span>
+        <span class="bstat bstat--${depositDue(b) ? 'deposit' : b.status}">${esc(depositDue(b) ? awaitingText() : b.status === 'confirmed' ? 'Confirmed' : b.status === 'pending' ? 'Pending' : statusText(b.status))}</span>
         <span class="row__chev">${I.chevR}</span>
       </button>`;
     if (!list.length) {
@@ -4567,7 +4581,8 @@
       const list = matched.length ? matched : data.services.slice(0, 4);
       if (list.length === 1) {
         const s = list[0];
-        const text = durIntent && !priceIntent ? `${s.title} takes about ${s.duration} ⏱` : `${s.title} is ${price(s.price)} ✨`;
+        const text = durIntent && !priceIntent ? `${s.title} takes about ${s.duration} ⏱`
+          : s.priceAsk ? `${s.title}: ${firstName()} prices it for you — ask when you book ✨` : `${s.title} is ${price(s.price)} ✨`;
         return { text, card: { type: 'service', id: s.id }, suggest: SUGGEST.service };
       }
       const lead = matched.length && list.every(s => /full set/i.test(s.title)) ? 'Our full sets 💕'
@@ -4698,7 +4713,9 @@
         .map(k => ({ cashapp: 'Cash App', zelle: 'Zelle', venmo: 'Venmo', paypal: 'PayPal', square: 'card' }[k] || k));
       add(9, () => ({
         text: deps.length
-          ? `${deps.length === data.services.length ? 'Every service' : deps.slice(0, 3).map(s => s.title).join(', ')} needs a deposit — from ${price(Math.min(...deps.map(svcDeposit)))}. You send it right after booking${ways.length ? ` (${ways.join(', ')})` : ''} and it goes toward your service 💕`
+          ? feeMode()
+            ? `There’s a ${price(Math.min(...deps.map(svcDeposit)))} booking fee to hold your spot — you send it right after booking${ways.length ? ` (${ways.join(', ')})` : ''}. It isn’t part of the service price 💕`
+            : `${deps.length === data.services.length ? 'Every service' : deps.slice(0, 3).map(s => s.title).join(', ')} needs a deposit — from ${price(Math.min(...deps.map(svcDeposit)))}. You send it right after booking${ways.length ? ` (${ways.join(', ')})` : ''} and it goes toward your service 💕`
           : 'No deposit needed — you pay at the studio 💕',
         action: 'book',
         suggest: SUGGEST.policy
@@ -4837,10 +4854,10 @@
         <button class="cc-row" data-manage="${esc(b.token)}">
           <img class="cc-photo" src="${esc(photoSrc(b, 200))}"${phAttr(b)} alt="">
           <span class="cc-row__text"><b>${esc(b.service_name)}</b><small>${esc(whenText(b.start_at))}${b.staff_name ? ` · with ${esc(firstWord(b.staff_name))}` : ''}</small>
-            <span class="bstat bstat--${dep ? 'deposit' : b.status}">${dep ? 'Awaiting deposit' : b.status === 'pending' ? 'Pending' : 'Confirmed'}</span></span>
+            <span class="bstat bstat--${dep ? 'deposit' : b.status}">${dep ? awaitingText() : b.status === 'pending' ? 'Pending' : 'Confirmed'}</span></span>
         </button>
         <p class="cc-rule${late ? ' is-late' : ''}">${late
-          ? `${I.shield}<span>Less than ${r.cancelWindow} h to go — moving or cancelling now counts as late${+b.deposit > 0 && b.deposit_status === 'paid' ? ' and may lose the deposit' : ''}.</span>`
+          ? `${I.shield}<span>Less than ${r.cancelWindow} h to go — moving or cancelling now counts as late${+b.deposit > 0 && b.deposit_status === 'paid' ? ` and may lose the ${depWord()}` : ''}.</span>`
           : `${I.clock}<span>${r.cancelWindow ? `Free to cancel or move up to ${r.cancelWindow} h before.` : 'Free to cancel or move any time before your visit.'}</span>`}</p>
         <div class="cc-acts">
           <button class="btn btn--soft btn--sm" data-mybk-move="${esc(b.token)}">Reschedule</button>

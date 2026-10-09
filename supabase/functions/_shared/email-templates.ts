@@ -9,11 +9,14 @@ export type Studio = {
   id: string; slug: string; name: string; style: string; accent: string | null; tz: string; kind: string;
   address?: string; phone?: string; masterName?: string; cancelWindow?: number;
   payments?: Record<string, string>; reviewUrl?: string; reviewLabel?: string;
+  // 'fee': her deposit is a booking fee on top of the price (Payments & deposits)
+  depositMode?: string;
 };
 export type Booking = {
   id: string; service: string; serviceId?: string | null; start: string; end: string; price?: number | null;
   deposit?: number | null; depositStatus?: string; depositDue?: string | null; manageToken: string;
   status: string; cancelReason?: string | null; staffName?: string | null; clientName?: string; clientPhone?: string;
+  priceAsk?: boolean; // a service she prices individually: no price row
 };
 export type Built = { subject: string; html: string; text: string; ics?: string; icsName?: string; unsub?: string };
 
@@ -196,6 +199,9 @@ function payWays(s: Studio, amount: number) {
   return out;
 }
 
+// "Deposit", or "Booking fee" for a studio whose deposit isn't part of the price
+const depWord = (s: Studio, cap?: boolean) => (s.depositMode === 'fee' ? (cap ? 'Booking fee' : 'booking fee') : (cap ? 'Deposit' : 'deposit'));
+
 // ---------- the emails ----------
 const policyNote = (s: Studio) => (s.cancelWindow ? `Free to cancel or move up to ${s.cancelWindow} hours before. Later changes are marked as late.` : 'You can cancel or move it any time from the link above.');
 
@@ -206,7 +212,7 @@ function bookingRows(s: Studio, b: Booking, extra: Row[] = []): Row[] {
     ['Date', esc(dayLong(b.start, s.tz))],
     ['Time', esc(clock(b.start, s.tz))],
     ...(s.address ? [['Address', esc(s.address)] as Row] : []),
-    ...(b.price != null ? [['Price', esc(money(b.price))] as Row] : []),
+    ...(b.price != null && !b.priceAsk ? [['Price', esc(money(b.price))] as Row] : []),
     ...extra
   ];
 }
@@ -220,7 +226,7 @@ export function buildClientEmail(kind: string, s: Studio, b: Booking, data: Reco
   const calBtn = { label: 'Add to calendar', url: googleCal(s, b) };
   switch (kind) {
     case 'confirm': {
-      const paid = data.deposit_paid ? [['Deposit', `${esc(money(b.deposit))} received`] as Row] : [];
+      const paid = data.deposit_paid ? [[depWord(s, true), `${esc(money(b.deposit))} received`] as Row] : [];
       const L = layout(s, {
         preheader: `${b.service} · ${when}`, eyebrow: 'Confirmed', title: 'You’re booked ✨',
         intro: `${hi}See you ${esc(dayLong(b.start, s.tz))} at ${esc(clock(b.start, s.tz))}${s.kind === 'team' && b.staffName ? ` with ${esc(first(b.staffName))}` : ''}.`,
@@ -241,9 +247,11 @@ export function buildClientEmail(kind: string, s: Studio, b: Booking, data: Reco
       const ways = payWays(s, amount);
       const due = b.depositDue ? `${dayShort(b.depositDue, s.tz)} at ${clock(b.depositDue, s.tz)}` : '';
       const L = layout(s, {
-        preheader: `Send ${money(amount)} to hold your spot`, eyebrow: 'Almost there', title: `Send your ${money(amount)} deposit`,
-        intro: `${hi}Your time is held for you${due ? ` until <b>${esc(due)}</b>` : ''}. Send the deposit to lock it in — it goes toward your service.`,
-        rows: bookingRows(s, b, [['Deposit', esc(money(amount))]]),
+        preheader: `Send ${money(amount)} to hold your spot`, eyebrow: 'Almost there', title: `Send your ${money(amount)} ${depWord(s)}`,
+        intro: s.depositMode === 'fee'
+          ? `${hi}Your time is held for you${due ? ` until <b>${esc(due)}</b>` : ''}. Send the booking fee to lock it in — it isn’t part of the service price; the service is paid at your appointment.`
+          : `${hi}Your time is held for you${due ? ` until <b>${esc(due)}</b>` : ''}. Send the deposit to lock it in — it goes toward your service.`,
+        rows: bookingRows(s, b, [[depWord(s, true), esc(money(amount))]]),
         sections: [{
           title: 'How to pay',
           html: ways.length ? ways.map(w => (w.url ? `<a href="${esc(w.url)}" style="font-weight:700;">${esc(w.label)}</a>` : `<b>${esc(w.label)}</b>`)).join('<br>') + '<br><span class="mt">Add your name to the payment note.</span>' : `Ask ${esc(who)} how to send it.`,
@@ -251,7 +259,7 @@ export function buildClientEmail(kind: string, s: Studio, b: Booking, data: Reco
         }],
         button: manageBtn, note: due ? `Not received by ${esc(due)} → the time is released for someone else.` : ''
       });
-      return { subject: `Almost there — send your ${money(amount)} deposit`, ...L };
+      return { subject: `Almost there — send your ${money(amount)} ${depWord(s)}`, ...L };
     }
     case 'moved': {
       const old = data.old_start_at ? `${dayShort(String(data.old_start_at), s.tz)} at ${clock(String(data.old_start_at), s.tz)}` : '';
@@ -265,7 +273,7 @@ export function buildClientEmail(kind: string, s: Studio, b: Booking, data: Reco
     }
     case 'cancelled': {
       const byStudio = data.by === 'studio';
-      const why = data.deposit_expired ? 'The deposit didn’t arrive in time, so the time was released.'
+      const why = data.deposit_expired ? `The ${depWord(s)} didn’t arrive in time, so the time was released.`
         : byStudio ? `${esc(who)} had to cancel${data.reason ? `: “${esc(data.reason)}”` : ''}. Sorry for the change.`
         : 'Your appointment is cancelled.';
       const L = layout(s, {

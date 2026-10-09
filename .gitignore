@@ -16,3 +16,6 @@ npm-debug.log*
 
 # Supabase keys for this browser app (see config.example.js) — never commit
 config.js
+
+# client data and photos (private — they live only in Supabase)
+clients/

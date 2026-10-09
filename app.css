@@ -6487,3 +6487,9 @@ html.is-admin .app::after, html.is-admin .statusbar, html.is-admin .desk, html.i
 .ins-app__grid b { font-size: var(--fs-20, 20px); letter-spacing: -.02em; }
 .ins-app__grid small { font-size: 11px; font-weight: 600; line-height: 1.25; color: var(--text-2); }
 .ins-app .cab-muted { margin: 0; }
+
+/* Payments & deposits → what the deposit is */
+.dep-mode .row { text-align: left; }
+.dep-mode__dot { display: grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--line); color: transparent; }
+.dep-mode__dot svg { width: 14px; height: 14px; }
+.dep-mode .row[aria-checked="true"] .dep-mode__dot { background: var(--accent); box-shadow: none; color: var(--on-accent, #fff); }

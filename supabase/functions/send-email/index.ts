@@ -38,7 +38,7 @@ function toStudio(m: any): Studio {
   return {
     id: m.id, slug: m.slug, name: m.name, style: m.style || 'soft', accent: m.accent, tz: m.timezone || 'America/New_York',
     kind: m.kind || 'solo', address: st.address || '', phone: st.phone || '', masterName: st.masterName || '',
-    cancelWindow: m.cancel_window_hours ?? 24, payments: st.payments || {}, reviewUrl: review,
+    cancelWindow: m.cancel_window_hours ?? 24, payments: st.payments || {}, reviewUrl: review, depositMode: st.depositMode === 'fee' ? 'fee' : 'deposit',
     reviewLabel: /instagram/i.test(review) ? 'Leave a review on Instagram' : /google|g\.page/i.test(review) ? 'Leave a review on Google' : 'Leave a review'
   };
 }
@@ -48,11 +48,12 @@ function toBooking(b: any): Booking {
     id: b.id, service: b.service_name, serviceId: b.service_id, start: b.start_at, end: b.end_at, price: b.price,
     deposit: b.deposit, depositStatus: b.deposit_status, depositDue: b.deposit_due_at, manageToken: b.manage_token,
     status: b.status, cancelReason: b.cancel_reason, staffName: b.staff ? b.staff.name : null,
-    clientName: b.clients ? b.clients.name : '', clientPhone: b.clients ? b.clients.phone : ''
+    clientName: b.clients ? b.clients.name : '', clientPhone: b.clients ? b.clients.phone : '',
+    priceAsk: !!(b.services && b.services.price_on_request)
   };
 }
 const STUDIO_COLS = 'id, slug, name, style, accent, timezone, kind, settings, cancel_window_hours, owner_id';
-const BOOKING_COLS = 'id, master_id, service_id, service_name, start_at, end_at, price, deposit, deposit_status, deposit_due_at, manage_token, status, cancel_reason, staff_id, client_id, clients(name, phone, email, unsub_token, marketing_opt_out), staff(name, user_id)';
+const BOOKING_COLS = 'id, master_id, service_id, service_name, start_at, end_at, price, deposit, deposit_status, deposit_due_at, manage_token, status, cancel_reason, staff_id, client_id, clients(name, phone, email, unsub_token, marketing_opt_out), staff(name, user_id), services(price_on_request)';
 
 const emails = new Map<string, string>();
 async function emailOf(uid?: string | null) {
