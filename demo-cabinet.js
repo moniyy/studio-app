@@ -492,6 +492,18 @@
         });
       },
       setNotes(id, notes) { const c = clientOf(id); if (c) c.notes = notes; return reply(null); },
+      // Delete client: coming bookings cancelled (the time is free), then she and her history go (in memory)
+      deleteClient(id) {
+        if (!clientOf(id)) return fail('not_found');
+        const now = Date.now();
+        const cancelled = DB.bookings.filter(b => b.client_id === id && ACTIVE.includes(b.status) && Date.parse(b.start_at) > now).length;
+        const drop = (arr, f) => { for (let i = arr.length - 1; i >= 0; i--) if (f(arr[i])) arr.splice(i, 1); };
+        const bookings = DB.bookings.filter(b => b.client_id === id).length;
+        drop(DB.bookings, b => b.client_id === id);
+        drop(DB.formulas, f => f.client_id === id);
+        drop(DB.clients, c => c.id === id);
+        return reply({ cancelled, bookings });
+      },
       saveClient(id, p) {
         const c = clientOf(id);
         if (!c) return fail('not_found');

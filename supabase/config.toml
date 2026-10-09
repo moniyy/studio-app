@@ -449,3 +449,7 @@ verify_jwt = false
 # the unsubscribe link in review / fill emails (opened from a mail app, no sign-in)
 [functions.email-unsubscribe]
 verify_jwt = false
+
+# the link in "<studio> is ready for you" (Admin → Transfer to email): public, the token is the key
+[functions.studio-transfer]
+verify_jwt = false

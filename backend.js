@@ -334,6 +334,8 @@
     saveLook: (mid, look) => rpc('owner_save_look', { p_master_id: mid, p: look }),
     deleteLook: id => rpc('owner_delete_look', { p_id: id }),
     saveClient: (id, p) => rpc('owner_save_client', { p_client_id: id, p }),
+    // Clients → Delete client: coming bookings cancelled, then she and her history are removed
+    deleteClient: id => rpc('owner_delete_client', { p_client_id: id }),
     saveFormula: (mid, f) => rpc('owner_save_formula', { p_master_id: mid, p: f }),
     deleteFormula: id => rpc('owner_delete_formula', { p_id: id }),
     // her account: a studio made in the admin starts with a temporary password
@@ -437,8 +439,15 @@
     landing: days => rpc('admin_landing_stats', { p_days: days || 7 }),
     create: body => invoke('admin-create-master', body, 60000),
     resetPassword: id => invoke('admin-master-action', { action: 'reset_password', master_id: id }),
-    remove: (id, slug) => invoke('admin-master-action', { action: 'delete', master_id: id, confirm: slug })
+    remove: (id, slug) => invoke('admin-master-action', { action: 'delete', master_id: id, confirm: slug }),
+    // Transfer to email: an account with it → the owner now; none → an invitation she accepts
+    transfer: (id, email) => invoke('admin-master-action', { action: 'transfer', master_id: id, email }, 45000)
+  };
+  // the link in "<studio> is ready for you": what it is, and taking the studio (no sign-in needed)
+  const transfer = {
+    info: token => invoke('studio-transfer', { op: 'info', token }),
+    accept: (token, password) => invoke('studio-transfer', { op: 'accept', token, password: password || '' }, 45000)
   };
 
-  window.StudioBackend = Object.assign({ configured, client, BackendError, errors, auth, owner, admin, vapidPublicKey: cfg.vapidPublicKey || '' }, publicApi);
+  window.StudioBackend = Object.assign({ configured, client, BackendError, errors, auth, owner, admin, transfer, vapidPublicKey: cfg.vapidPublicKey || '' }, publicApi);
 })();

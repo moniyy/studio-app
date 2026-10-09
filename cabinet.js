@@ -139,6 +139,7 @@
     root.addEventListener('submit', e => {
       if (e.target.id === 'cab-signin') { e.preventDefault(); signIn(); }
       if (e.target.id === 'cab-forgot') { e.preventDefault(); if (S.forgot === 'email') sendResetCode(); else saveResetPassword(); }
+      if (e.target.id === 'cab-transfer') { e.preventDefault(); acceptTransfer(); }
     });
     ['pointerdown', 'touchend', 'keydown'].forEach(t => document.addEventListener(t, unlockAudio, true));
     K.pushOverlay(() => close(true));
@@ -159,6 +160,8 @@
         if (uidOf(session) !== S.uid) accountChanged(session);
       }).then(un => { if (root && !S.authUnsub) S.authUnsub = un; else un(); }).catch(() => null);
       // she opened the link from "Reset your password": a new password first
+      // the link in "<studio> is ready for you" (Admin → Transfer to email): taking the studio first
+      if (K.transfer && !S.transferDone) { renderTransfer(); return; }
       if (S.session && K.recovery && !S.recoveryDone) { S.recovery = true; renderForcePassword(); return; }
       if (S.session) {
         restoreLocal(); // the dashboard from the last visit, at once
@@ -266,6 +269,78 @@
       </form>`;
     const f = $(S.email ? '#cab-pass' : '#cab-email');
     if (f && !K.IS_IOS) setTimeout(() => f.focus(), 350);
+  }
+
+  /* Transfer to email: the studio is handed to her. No account yet → she chooses a password here
+     and goes straight in; an account already → she accepts, then signs in with her own password */
+  async function renderTransfer(msg) {
+    $('#cab-tabs').hidden = true;
+    $('[data-cab-new]').hidden = true;
+    $('[data-cab-menu]').hidden = true;
+    const typed = ($('#tf-pass') || {}).value;
+    if (typed != null) S.tfPass = typed;
+    if (!S.tf) {
+      $('#cab-main').innerHTML = '<div class="cab-load"><i class="spin"></i></div>';
+      try { S.tf = await K.Backend.transfer.info(K.transfer); } catch (e) { S.tf = { state: e.code === 'not_found' ? 'not_found' : 'error', why: err(e) }; }
+    }
+    const t = S.tf;
+    const head = `<span class="cab-auth__mono">${esc(K.initials())}</span>`;
+    const toSignIn = '<button type="button" class="btn btn--soft btn--block" data-tf-signin>Sign in</button>';
+    const done = {
+      accepted: ['It’s already yours', `${esc(t.studio || K.data.name)} belongs to <b>${esc(t.email || '')}</b> — sign in to open the dashboard.`],
+      expired: ['This invitation has expired', 'Ask for a new one — the link in the email works for 14 days.'],
+      cancelled: ['This invitation was replaced', 'A newer one was sent — use the link in the latest email.'],
+      not_found: ['This link doesn’t work', 'Check that the whole link was opened, or ask for a new invitation.'],
+      error: ['Something went wrong', esc(t.why || 'Check your connection and try again.')]
+    }[t.state];
+    $('#cab-main').innerHTML = done ? `
+      <div class="cab-auth">${head}<h1>${done[0]}</h1><p>${done[1]}</p>${toSignIn}</div>` : t.account ? `
+      <form class="cab-auth" id="cab-transfer" onsubmit="return false">
+        ${head}
+        <h1>${esc(t.studio)} is yours</h1>
+        <p>You already have a Satinbook account (<b>${esc(t.email)}</b>). Accept, then sign in with your password.</p>
+        <button type="submit" class="btn btn--primary btn--block"${S.busy ? ' disabled' : ''}>${S.busy ? K.spinner() : 'Accept the studio'}</button>
+        ${msg ? `<p class="cab-auth__err" role="alert">${esc(msg)}</p>` : ''}
+      </form>` : `
+      <form class="cab-auth" id="cab-transfer" autocomplete="on" novalidate onsubmit="return false">
+        ${head}
+        <h1>${esc(t.studio)} is yours</h1>
+        <p>Choose a password for <b>${esc(t.email)}</b> — you’ll sign in with it from now on.</p>
+        <input type="email" autocomplete="username" value="${esc(t.email)}" hidden>
+        <label class="field"><span>Password</span>
+          <span class="pw"><input id="tf-pass" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" value="${esc(S.tfPass || '')}">
+          <button type="button" class="pw__eye" data-pw-eye aria-label="Show password">${icon('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>')}</button></span></label>
+        <button type="submit" class="btn btn--primary btn--block"${S.busy ? ' disabled' : ''}>${S.busy ? K.spinner() : 'Save and open my dashboard'}</button>
+        ${msg ? `<p class="cab-auth__err" role="alert">${esc(msg)}</p>` : ''}
+      </form>`;
+  }
+  async function acceptTransfer() {
+    const t = S.tf;
+    if (!t || t.state !== 'pending' || S.busy) return;
+    const pass = t.account ? '' : String(($('#tf-pass') || {}).value || '');
+    if (!t.account && pass.length < 8) { renderTransfer('Use at least 8 characters'); return; }
+    S.busy = true;
+    S.authBusy = true;
+    renderTransfer();
+    try {
+      await K.Backend.transfer.accept(K.transfer, pass);
+      S.transferDone = true;
+      S.email = t.email;
+      S.tfPass = '';
+      if (t.account) { S.busy = false; S.authBusy = false; renderAuth(`Done — ${t.studio} is yours. Sign in with your password.`); return; }
+      S.session = await K.Backend.auth.signIn(t.email, pass);
+      if (uidOf(S.session) !== S.uid) forgetAccount();
+      S.uid = uidOf(S.session);
+      S.busy = false;
+      S.authBusy = false;
+      K.haptic([10, 30, 10]);
+      await enter();
+    } catch (e) {
+      S.busy = false;
+      S.authBusy = false;
+      if (['accepted', 'expired', 'cancelled'].includes(e.code)) { S.tf = Object.assign({}, t, { state: e.code }); renderTransfer(); return; }
+      renderTransfer(e.code === 'weak_password' ? 'Use at least 8 characters' : err(e));
+    }
   }
 
   /* "Forgot password?": an email with a 6-digit code (and a link) → the code + a new password
@@ -1348,9 +1423,46 @@
           <button class="row row--link" data-cab-b="${esc(b.id)}">
             <span class="row__label">${esc(b.service_name)}<span class="row__sub num">${esc(whenLine(b))}${b.price != null ? ' · ' + esc(bkPrice(b)) : ''}</span></span>
             <span class="cl-tags">${b.late_cancel ? '<em class="tl__tag tl__tag--late">Late</em>' : ''}<span class="bstat bstat--${b.status}">${esc(statusLabel(b.status))}</span></span>
-          </button>`).join('') : '<div class="row"><span class="row__label">No visits yet</span></div>'}</div>`;
+          </button>`).join('') : '<div class="row"><span class="row__label">No visits yet</span></div>'}</div>
+        ${isStaff() ? '' : `<button class="btn btn--soft btn--block ob__danger" data-cl-del="${esc(c.id)}">Delete client</button>
+        <div id="cl-del-box"></div>`}`;
+      S2.clientComing = h.filter(b => ['pending', 'confirmed'].includes(b.status) && Date.parse(b.start_at) > Date.now()).length;
       K.springIn(K.$$('.ob > *', K.Sheet.el()), { stagger: 0.03, y: 10, duration: 0.45 });
     } catch (e) { K.toast(err(e), 'x'); }
+  }
+
+  // Delete client: a confirmation first, under the button
+  function askDeleteClient(id) {
+    const box = K.$('#cl-del-box', K.Sheet.el());
+    const c = S2.client;
+    if (!box || !c) return;
+    const n = S2.clientComing || 0;
+    box.innerHTML = `
+      <div class="card mg__confirm">
+        <b>Delete ${esc(c.name)}?</b>
+        <p>This removes the client and their booking history. This can't be undone.${n ? ` Their ${n === 1 ? 'coming booking is' : n + ' coming bookings are'} cancelled first — the time is free again.` : ''}</p>
+        <div class="mg__row">
+          <button class="btn btn--soft" data-cl-del-no>Keep</button>
+          <button class="btn btn--danger" data-cl-del-yes="${esc(id)}">Delete</button>
+        </div>
+      </div>`;
+    K.haptic();
+    box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+  async function deleteClient(id, btn) {
+    await busyBtn(btn, async () => {
+      const r = await K.Backend.owner.deleteClient(id);
+      // nothing of her stays on screen: her bookings, the lists, the numbers
+      if (S.known) [...S.known.values()].filter(b => b.client_id === id).forEach(b => S.known.delete(b.id));
+      if (S.known) S.pending = [...S.known.values()].filter(b => b.status === 'pending' && Date.parse(b.start_at) > Date.now());
+      Object.keys(MEM).forEach(k => delete MEM[k]);
+      S.clients = (S.clients || []).filter(c => c.id !== id);
+      saveLocal();
+      K.Sheet.close();
+      K.toast(r && r.cancelled ? `Client deleted — ${r.cancelled} coming booking${r.cancelled > 1 ? 's' : ''} cancelled` : 'Client deleted', 'ok');
+      K.onDataChanged && K.onDataChanged();
+      refreshView();
+    });
   }
 
   async function saveNotes(id) {
@@ -2945,7 +3057,7 @@
   }
 
   /* ---------- Read-only (the platform admin looking at a studio) ---------- */
-  const RO_BLOCK = ['[data-crew-kind]', '[data-crew-new]', '[data-crew-save]', '[data-crew-off]', '[data-crew-on]', '[data-crew-move]', '[data-crew-cx]',
+  const RO_BLOCK = ['[data-cl-del]', '[data-cl-del-yes]', '[data-crew-kind]', '[data-crew-new]', '[data-crew-save]', '[data-crew-off]', '[data-crew-on]', '[data-crew-move]', '[data-crew-cx]',
     '[data-pf-save]', '[data-sty-save]', '[data-sty]', '[data-sty-acc]', '[data-sty-mark]', '[data-svc-new]', '[data-svc-save]', '[data-svc-del]',
     '[data-look-new]', '[data-look-save]', '[data-look-del]', '[data-tx-save]', '[data-faq-save]', '[data-faq-add]', '[data-pay-save]', '[data-dep-mode]',
     '[data-pr-save]', '[data-ly-save]', '[data-hrs-save]', '[data-hrs-toggle]', '[data-hrs-add]', '[data-hrs-del]', '[data-toff-add]',
@@ -3884,6 +3996,10 @@
       return;
     }
     if ((el = t.closest('[data-cl-save]'))) { saveNotes(el.dataset.clSave); return; }
+    if ((el = t.closest('[data-cl-del]'))) { askDeleteClient(el.dataset.clDel); return; }
+    if ((el = t.closest('[data-cl-del-no]'))) { const box = K.$('#cl-del-box', K.Sheet.el()); if (box) box.innerHTML = ''; return; }
+    if ((el = t.closest('[data-cl-del-yes]'))) { deleteClient(el.dataset.clDelYes, el); return; }
+    if ((el = t.closest('[data-tf-signin]'))) { S.transferDone = true; if (S.tf && S.tf.email) S.email = S.tf.email; renderAuth(); return; }
     if (onStudioClick(t)) return;
     // calendar
     if ((el = t.closest('[data-push-on]'))) { if (!el.disabled) pushOn(el); return; }

@@ -23,6 +23,9 @@
     || (SLUG_RE.test(tail) && tail !== 'index.html' && tail !== 'app.html' ? tail : '')
     || (() => { try { return localStorage.getItem('studio-app:last') || ''; } catch (e) { return ''; } })();
   const SLUG = SLUG_RE.test(rawSlug) ? rawSlug : 'demo';
+  // the link in "<studio> is ready for you" (Admin → Transfer to email): read once, then out of the address
+  const TRANSFER = /^[0-9a-f-]{36}$/i.test(params.get('transfer') || '') ? params.get('transfer') : '';
+  params.delete('transfer');
   // the address always shows the studio as a path: /studio-app/bella-brows?owner=1
   // (the admin page belongs to no studio: its address stays ?admin=1)
   if (params.get('admin') !== '1' && /^https?:$/.test(location.protocol)) {
@@ -4210,7 +4213,8 @@
       photoSrc, svcKind,
       // a link to this studio: link() → …/bella-brows, link('owner=1') → …/bella-brows?owner=1
       link: (query, slug) => studioUrl(query, slug), appBase: APP_BASE,
-      recovery: RECOVERY
+      recovery: RECOVERY,
+      transfer: TRANSFER
     };
   }
 

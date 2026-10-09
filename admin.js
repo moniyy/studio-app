@@ -342,7 +342,7 @@
       <article class="adm-card${t && t.warn ? ' is-warn' : ''}${s.status === 'paused' ? ' is-paused' : ''}" data-id="${esc(s.id)}">
         <div class="adm-card__top">
           ${s.icon ? `<img class="adm-card__icon" src="${esc(s.icon)}" alt="">` : `<span class="adm-card__icon adm-card__icon--mono">${esc(mono(s.name))}</span>`}
-          <div class="adm-card__who"><b>${esc(s.name)}</b><small>${esc([s.master_name, s.owner_email].filter(Boolean).join(' · ') || 'no owner')}</small><small class="adm-link">/${esc(s.slug)} · <span class="adm-kind-tag">${s.kind === 'team' ? `Team · ${+s.staff_count || 1} master${+s.staff_count === 1 ? '' : 's'}` : 'Solo'}</span></small></div>
+          <div class="adm-card__who"><b>${esc(s.name)}</b><small>${esc([s.master_name, s.owner_email].filter(Boolean).join(' · ') || 'no owner')}</small>${s.transfer_to ? `<small class="adm-transfer">Invited: ${esc(s.transfer_to)} · not accepted yet</small>` : ''}<small class="adm-link">/${esc(s.slug)} · <span class="adm-kind-tag">${s.kind === 'team' ? `Team · ${+s.staff_count || 1} master${+s.staff_count === 1 ? '' : 's'}` : 'Solo'}</span></small></div>
           ${pill(s)}
         </div>
         <div class="adm-stats">
@@ -374,6 +374,7 @@
           <a class="btn btn--soft btn--sm" href="${esc(ownerLink(s.slug))}" target="_blank" rel="noopener" title="Read only">Dashboard</a>
           <button class="btn btn--soft btn--sm" data-a-kit="${esc(s.id)}">Welcome kit</button>
           <button class="btn btn--soft btn--sm" data-a-reset="${esc(s.id)}">Reset password</button>
+          <button class="btn btn--soft btn--sm" data-a-transfer="${esc(s.id)}">Transfer to email</button>
           <button class="btn btn--soft btn--sm" data-a-pause="${esc(s.id)}">${s.status === 'paused' ? 'Resume' : 'Pause'}</button>
           <button class="btn btn--soft btn--sm adm-danger" data-a-del="${esc(s.id)}">Delete</button>
         </div>
@@ -427,6 +428,31 @@
       A.kit = { id: s.id, slug: s.slug, name: s.name, masterName: s.master_name, email: r.email || s.owner_email, password: r.password, trial_ends_at: s.status === 'trial' ? s.trial_ends_at : null, created_at: s.created_at, kind: s.kind };
       go('kit');
       if (r.emailed) K.toast('New password — emailed to her too', 'ok');
+    });
+  }
+  /* Transfer to email: an account with it becomes the owner now; a new email gets an invitation
+     (she becomes the owner when she sets her password). The admin keeps the admin page. */
+  async function transferStudio(id, btn) {
+    const s = byId(id);
+    if (!s) return;
+    const email = await confirmBox(`Transfer ${s.name}`,
+      'The master’s email. If she already has a Satinbook account, she becomes the owner right away; if not, she gets an invitation and becomes the owner when she sets her password.',
+      'Next', { input: 'her@email.com' });
+    if (!email) return;
+    const me = String((A.session && A.session.user && A.session.user.email) || '').toLowerCase();
+    const loser = !s.owner_email || s.owner_email.toLowerCase() === me ? 'You will lose access as owner.' : `${esc(s.owner_email)} will lose access as owner.`;
+    if (!(await confirmBox(`Transfer ${s.name}?`, `Studio <b>${esc(s.name)}</b> will be transferred to <b>${esc(email)}</b>. ${loser}`, 'Transfer', { danger: true }))) return;
+    await busy(btn, async () => {
+      try {
+        const r = await K.Backend.admin.transfer(id, email);
+        if (r.done === 'transferred') K.toast(`${s.name} now belongs to ${email}`, 'ok');
+        else if (r.emailed) K.toast(`Invitation sent to ${email} — she becomes the owner when she sets her password`, 'ok');
+        else K.toast(`Invitation saved, but the email didn’t go out${r.reason ? ' (' + r.reason + ')' : ''}`, 'x');
+        A.list = await K.Backend.admin.studios();
+        paintList();
+      } catch (e) {
+        K.toast(e.code === 'already_owner' ? `${email} already owns ${s.name}` : e.code === 'invalid_email' ? 'Check the email address' : errText(e), 'x');
+      }
     });
   }
   async function deleteStudio(id) {
@@ -878,21 +904,28 @@
           <h2>${esc(title)}</h2>
           <p>${html}</p>
           ${opts.type ? `<input class="adm-modal__in" placeholder="${esc(opts.type)}" autocapitalize="off" spellcheck="false">` : ''}
+          ${opts.input ? `<input class="adm-modal__in" type="email" inputmode="email" placeholder="${esc(opts.input)}" autocapitalize="off" autocomplete="off" spellcheck="false">` : ''}
           <div class="adm-modal__row">
             <button class="btn btn--soft" data-m="no">Cancel</button>
-            <button class="btn ${opts.danger ? 'btn--danger' : 'btn--primary'}" data-m="yes"${opts.type ? ' disabled' : ''}>${esc(okLabel)}</button>
+            <button class="btn ${opts.danger ? 'btn--danger' : 'btn--primary'}" data-m="yes"${opts.type || opts.input ? ' disabled' : ''}>${esc(okLabel)}</button>
           </div>
         </div>`;
       root.appendChild(box);
       const inp = box.querySelector('.adm-modal__in');
       const yes = box.querySelector('[data-m="yes"]');
-      if (inp) { inp.addEventListener('input', () => { yes.disabled = inp.value.trim() !== opts.type; }); setTimeout(() => inp.focus(), 50); }
+      // type-to-confirm (the slug), or an email to enter
+      const valid = () => (opts.input ? /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(inp.value.trim()) : inp.value.trim() === opts.type);
+      if (inp) {
+        inp.addEventListener('input', () => { yes.disabled = !valid(); });
+        inp.addEventListener('keydown', e => { if (e.key === 'Enter' && valid()) yes.click(); });
+        setTimeout(() => inp.focus(), 50);
+      }
       box.addEventListener('click', e => {
         const b = e.target.closest('[data-m]');
         if (!b && e.target !== box) return;
         const ok = b && b.dataset.m === 'yes' && !b.disabled;
         box.remove();
-        resolve(ok ? (opts.type ? inp.value.trim() : true) : false);
+        resolve(ok ? (opts.type ? inp.value.trim() : opts.input ? inp.value.trim().toLowerCase() : true) : false);
       });
     });
   }
@@ -921,6 +954,7 @@
     if ((el = t.closest('[data-a-paid]'))) { markPaid(el.dataset.aPaid, el); return; }
     if ((el = t.closest('[data-a-pause]'))) { togglePause(el.dataset.aPause, el); return; }
     if ((el = t.closest('[data-a-reset]'))) { resetPassword(el.dataset.aReset, el); return; }
+    if ((el = t.closest('[data-a-transfer]'))) { transferStudio(el.dataset.aTransfer, el); return; }
     if ((el = t.closest('[data-a-del]'))) { deleteStudio(el.dataset.aDel); return; }
     if ((el = t.closest('[data-a-kit]'))) {
       const s = byId(el.dataset.aKit);

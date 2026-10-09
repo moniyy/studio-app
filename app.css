@@ -6540,5 +6540,7 @@ html.is-admin .app::after, html.is-admin .statusbar, html.is-admin .desk, html.i
 
 /* while the studio loads: a neutral background — no default accent glow, no brand of ours */
 .splash:not(.splash--clean):not(.splash--photo) { background: var(--splash-bg); }
-/* a sheet's buttons keep their height when the form above is long (they scroll with it) */
-.ob > .btn { flex-shrink: 0; }
+/* a sheet scrolls: nothing in it is squeezed when it's long (buttons, the History list…) */
+.ob > * { flex-shrink: 0; }
+/* Admin → a studio whose invitation (Transfer to email) isn't accepted yet */
+.adm-card__who small.adm-transfer { color: #FF9500; }

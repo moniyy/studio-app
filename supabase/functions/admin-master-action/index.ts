@@ -4,10 +4,15 @@
 //   { action: 'reset_password', master_id }       → { email, password } (shown once)
 //   { action: 'delete', master_id, confirm: slug } → removes the studio, its photos
 //                                                    and the accounts of its master (and her team)
+//   { action: 'transfer', master_id, email }       → an account with that email: the owner now
+//                                                    ({ done: 'transferred' }); none: an invitation
+//                                                    by email, she becomes the owner when she sets
+//                                                    her password ({ done: 'invited', emailed })
 // Status, billing and notes are saved with the admin_save_studio RPC instead.
 import { cors, json, requireAdmin, serviceClient, tempPassword } from '../_shared/admin.ts';
 import { mailConfigured, sendMail } from '../_shared/mail.ts';
-import { buildReset, type Studio } from '../_shared/email-templates.ts';
+import { buildReset, buildTransfer, type Studio } from '../_shared/email-templates.ts';
+import { emailOk, transferTo } from '../_shared/transfer.ts';
 
 const FOLDERS = ['app', 'services', 'cover', 'avatar', 'looks', 'formulas', 'team', 'misc'];
 
@@ -45,6 +50,37 @@ Deno.serve(async req => {
         status: emailed ? 'sent' : 'failed', error: why || null, sent_at: emailed ? new Date().toISOString() : null, data: pid ? { provider_id: pid } : {} });
     }
     return json({ email: to, password, emailed });
+  }
+
+  if (b.action === 'transfer') {
+    const email = String(b.email || '').trim().toLowerCase();
+    if (!emailOk(email)) return json({ error: 'invalid_email' }, 400);
+    const now = new Date().toISOString();
+    const { data: uid, error: le } = await admin.rpc('admin_user_id_by_email', { p_email: email });
+    if (le) return json({ error: 'lookup_failed', message: le.message }, 500);
+    if (uid && uid === m.owner_id) return json({ error: 'already_owner' }, 409);
+    // an invitation still waiting for this studio is replaced by this one
+    await admin.from('studio_transfers').update({ cancelled_at: now }).eq('master_id', m.id).is('accepted_at', null).is('cancelled_at', null);
+    if (uid) {
+      const why = await transferTo(admin, m, uid);
+      if (why) return json({ error: 'transfer_failed', message: why }, 500);
+      await admin.from('studio_transfers').insert({ master_id: m.id, email, created_by: me.id, user_id: uid, accepted_at: now });
+      return json({ done: 'transferred', email });
+    }
+    const { data: t, error: te } = await admin.from('studio_transfers').insert({ master_id: m.id, email, created_by: me.id }).select('token').single();
+    if (te || !t) return json({ error: 'transfer_failed', message: te?.message }, 500);
+    let emailed = false, why = '';
+    if (mailConfigured()) {
+      const st = (m.settings || {}) as Record<string, string>;
+      const studio: Studio = { id: m.id, slug: m.slug, name: m.name, style: m.style, accent: m.accent, tz: m.timezone, kind: m.kind, address: st.address, phone: st.phone };
+      const mail = buildTransfer(studio, email, t.token);
+      let pid = '';
+      try { pid = await sendMail({ fromName: m.name, sender: 'system', to: email, replyTo: me.email || undefined, subject: mail.subject, html: mail.html, text: mail.text }); emailed = true; }
+      catch (e) { why = String((e as Error).message || e).slice(0, 300); }
+      await admin.from('email_log').insert({ master_id: m.id, kind: 'transfer', to_email: email, subject: mail.subject,
+        status: emailed ? 'sent' : 'failed', error: why || null, sent_at: emailed ? now : null, data: pid ? { provider_id: pid } : {} });
+    }
+    return json({ done: 'invited', email, emailed, reason: why || undefined });
   }
 
   if (b.action === 'delete') {

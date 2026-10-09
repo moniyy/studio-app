@@ -363,6 +363,19 @@ export function buildInvite(s: Studio, name: string, email: string, password: st
   return { subject: `You’re on the team at ${s.name}`, ...L };
 }
 
+// Admin → Transfer to email, for an email with no account yet: she sets her password from the link
+export function buildTransfer(s: Studio, email: string, token: string): Built {
+  const L = layout(s, {
+    preheader: `${s.name} is ready for you`, eyebrow: 'Your studio app', title: `${s.name} is yours`,
+    intro: 'Your booking app is set up — services, prices, photos and your page. Set a password to open your dashboard.',
+    rows: [['Email', esc(email)]],
+    sections: [{ title: 'Set it up', html: '1. Tap the button below and choose your password.<br>2. On your iPhone, open it in Safari, tap Share → Add to Home Screen.<br>3. On Today, turn on notifications so new bookings reach you.', text: '1. Open the link below and choose your password.\n2. On your iPhone, open it in Safari, tap Share → Add to Home Screen.\n3. On Today, turn on notifications so new bookings reach you.' }],
+    button: { label: 'Set your password', url: studioLink(s.slug, 'owner=1&transfer=' + encodeURIComponent(token)) },
+    note: 'The link works for 14 days. Didn’t expect this? Just ignore it.'
+  });
+  return { subject: `${s.name} is ready for you`, ...L };
+}
+
 export function buildReset(s: Studio, email: string, password: string): Built {
   const L = layout(s, {
     preheader: 'A new temporary password', eyebrow: 'Studio dashboard', title: 'Your new temporary password',
