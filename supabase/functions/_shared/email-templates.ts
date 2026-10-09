@@ -11,6 +11,7 @@ export type Studio = {
   payments?: Record<string, string>; reviewUrl?: string; reviewLabel?: string;
   // 'fee': her deposit is a booking fee on top of the price (Payments & deposits)
   depositMode?: string;
+  cancelUnset?: boolean; // Hours & rules → Free cancellation "Not set": no word about cancelling
 };
 export type Booking = {
   id: string; service: string; serviceId?: string | null; start: string; end: string; price?: number | null;
@@ -204,7 +205,7 @@ function payWays(s: Studio, amount: number) {
 const depWord = (s: Studio, cap?: boolean) => (s.depositMode === 'fee' ? (cap ? 'Booking fee' : 'booking fee') : (cap ? 'Deposit' : 'deposit'));
 
 // ---------- the emails ----------
-const policyNote = (s: Studio) => (s.cancelWindow ? `Free to cancel or move up to ${s.cancelWindow} hours before. Later changes are marked as late.` : 'You can cancel or move it any time from the link above.');
+const policyNote = (s: Studio) => (s.cancelUnset ? '' : s.cancelWindow ? `Free to cancel or move up to ${s.cancelWindow} hours before. Later changes are marked as late.` : 'You can cancel or move it any time from the link above.');
 
 function bookingRows(s: Studio, b: Booking, extra: Row[] = []): Row[] {
   return [
@@ -213,7 +214,10 @@ function bookingRows(s: Studio, b: Booking, extra: Row[] = []): Row[] {
     ['Date', esc(dayLong(b.start, s.tz))],
     ['Time', esc(clock(b.start, s.tz))],
     ...(s.address ? [['Address', esc(s.address)] as Row] : []),
-    ...(b.priceLabel ? [['Price', esc(b.priceLabel)] as Row] : b.price != null && !b.priceAsk ? [['Price', esc(money(b.price))] as Row] : []),
+    // her label is a deal, not an amount: "Deal: $15 off" + "Price: Paid at the studio"
+    ...(b.priceLabel
+      ? [['Deal', esc(b.priceLabel)] as Row, ...(b.priceAsk ? [['Price', 'Paid at the studio'] as Row] : b.price != null ? [['Price', esc(money(b.price))] as Row] : [])]
+      : b.price != null && !b.priceAsk ? [['Price', esc(money(b.price))] as Row] : []),
     ...extra
   ];
 }
@@ -231,7 +235,7 @@ export function buildClientEmail(kind: string, s: Studio, b: Booking, data: Reco
       const L = layout(s, {
         preheader: `${b.service} · ${when}`, eyebrow: 'Confirmed', title: 'You’re booked ✨',
         intro: `${hi}See you ${esc(dayLong(b.start, s.tz))} at ${esc(clock(b.start, s.tz))}${s.kind === 'team' && b.staffName ? ` with ${esc(first(b.staffName))}` : ''}.`,
-        rows: bookingRows(s, b, paid), button: calBtn, button2: manageBtn, note: esc(policyNote(s)) + '<br>The calendar file is attached too.'
+        rows: bookingRows(s, b, paid), button: calBtn, button2: manageBtn, note: (policyNote(s) ? esc(policyNote(s)) + '<br>' : '') + 'The calendar file is attached too.'
       });
       return { subject: `You’re booked: ${b.service} · ${when}`, ...L, ics: ics(s, b), icsName: 'appointment.ics' };
     }

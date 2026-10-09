@@ -44,6 +44,10 @@
   const feeMode = () => ((S2.profile && S2.profile.settings) || (K && K.data) || {}).depositMode === 'fee';
   const depWord = cap => (feeMode() ? (cap ? 'Booking fee' : 'booking fee') : (cap ? 'Deposit' : 'deposit'));
   const dayList = days => (days || []).slice().sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map(d => K.DAY_SHORT[d]).join(', ');
+  // lash maps are for lash studios: a nail studio never sees the word
+  const lashStudio = () => ((K && K.data && K.data.services) || []).some(s => /lash/i.test(`${s.category} ${s.title}`));
+  // Hours & rules → Free cancellation "Not set": clients aren't told anything, nothing is marked late
+  const cancelUnset = () => !!((S2.profile && S2.profile.settings) ? S2.profile.settings.cancelUnset : (K && K.data && K.data.rules || {}).cancelUnset);
   // a service priced individually or with her label ("$15 off"): its bookings never read "$0"
   const bkPrice = b => {
     const s = ((K && K.data && K.data.services) || []).find(x => x.id === b.service_id);
@@ -1423,7 +1427,8 @@
         <div class="row"><span class="row__label">Book ahead<span class="row__sub">How far into the future</span></span>
           ${sel('max_days_ahead', r.max_days_ahead, [7, 14, 30, 60, 90, 180, 365], d => d + ' days')}</div>
         <div class="row"><span class="row__label">Free cancellation<span class="row__sub">Later = marked as a late cancellation</span></span>
-          ${sel('cancel_window_hours', r.cancel_window_hours, [0, 12, 24, 48, 72], h => (h ? 'up to ' + h + ' h' : 'any time'))}</div>
+          <select class="cab-sel" data-cancel-rule>${[['unset', 'Not set']].concat([0, 12, 24, 48, 72].map(h => [h, h ? 'up to ' + h + ' h' : 'any time']))
+            .map(([v, l]) => `<option value="${v}"${(cancelUnset() ? v === 'unset' : v !== 'unset' && +v === +r.cancel_window_hours) ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="row"><span class="row__label">Start times every</span>
           ${sel('slot_step_min', r.slot_step_min, [15, 20, 30, 45, 60], m => m + ' min')}</div>
       </div>
@@ -1512,6 +1517,16 @@
     } catch (e) { K.toast(err(e), 'x'); }
   }
 
+  async function saveCancelRule(v) {
+    const unset = v === 'unset';
+    try {
+      S.sched = await K.Backend.owner.saveRules(S.studio.id, { cancel_window_hours: unset ? 0 : +v });
+      S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { settings: { cancelUnset: unset ? true : null } });
+      K.haptic();
+      K.toast(unset ? 'Saved — clients see nothing about cancelling for now' : 'Saved', 'ok');
+      published();
+    } catch (e) { K.toast(err(e), 'x'); refreshView(); }
+  }
   async function saveRule(name, value) {
     try {
       S.sched = await K.Backend.owner.saveRules(S.studio.id, { [name]: value });
@@ -1697,7 +1712,8 @@
     const steps = [
       { before: onTab('today', '.cab-stats'), el: () => $('.cab-stats') || tab('today')(), title: 'Here are today’s bookings', text: 'Who’s coming, what you’ll earn and your free windows — the moment you open the app.' },
       { el: tab('calendar'), title: 'Your calendar', text: 'Every booking by day or week. Tap a free spot to add a client yourself.' },
-      { el: tab('clients'), title: 'Every client and her lash map', text: 'Visits, notes, allergies and the lash map from her last set.' }
+      lashStudio() ? { el: tab('clients'), title: 'Every client and her lash map', text: 'Visits, notes, allergies and the lash map from her last set.' }
+        : { el: tab('clients'), title: 'Every client in one place', text: 'Visits, notes and allergies — her whole history with you.' }
     ].concat(isStaff() ? [
       { el: tab('hours'), title: 'Your hours', text: 'When you work — clients only see the times you’re free.' }
     ] : [
@@ -2095,14 +2111,14 @@
 
   /* ---------- Profile & photos ---------- */
   const PROFILE_FIELDS = [
-    ['masterName', 'Your first name', 'Aria'],
-    ['tagline', 'Subtitle', 'Lashes & brows that wake up ready'],
-    ['eyebrow', 'Line above the name (optional)', 'Lash artistry · Atlanta'],
-    ['shortName', 'Name under the app icon (optional)', 'Aria Lash'],
-    ['city', 'City', 'Atlanta, GA'],
-    ['address', 'Address', '1080 Peachtree St NE, Suite 4B'],
-    ['parking', 'Parking', 'Free 2-hour parking in the garage'],
-    ['phone', 'Phone', '(404) 555-0142'],
+    ['masterName', 'Your first name', 'First name'],
+    ['tagline', 'Subtitle', 'What you do, in a few words'],
+    ['eyebrow', 'Line above the name (optional)', 'Your craft · your city'],
+    ['shortName', 'Name under the app icon (optional)', 'Short name'],
+    ['city', 'City', 'City, ST'],
+    ['address', 'Address', 'Street, suite'],
+    ['parking', 'Parking', 'Where clients can park'],
+    ['phone', 'Phone', '(555) 555-0123'],
     ['instagram', 'Instagram', '@yourstudio'],
     ['reviewUrl', 'Review link (Google / Instagram)', 'https://g.page/r/…']
   ];
@@ -2288,9 +2304,11 @@
         </div>`).join('')}</div>` : `<div class="cab-empty">${K.art('sparkles')}<b>No services yet</b><span>Add your first one — clients can book it right away.</span></div>`}`;
   }
   function openServiceEditor(svc) {
-    const s = svc || { name: '', category: 'Lashes', description: '', duration_min: 60, buffer_min: 15, price: '', price_from: false, deposit: 0, photo: '', active: true, fill_weeks: null };
+    // her own categories (+ "Other name…"); a studio with no services yet starts from the defaults
+    const own = [...new Set((S2.services || []).map(x => x.category).filter(Boolean))];
+    const s = svc || { name: '', category: own[0] || 'Lashes', description: '', duration_min: 60, buffer_min: 15, price: '', price_from: false, deposit: 0, photo: '', active: true, fill_weeks: null };
     S2.edit = { kind: 'service', id: s.id || null, photo: s.photo || '', __orig: { photo: s.photo || '' } };
-    const cats = [...new Set(CATS.concat((S2.services || []).map(x => x.category)))];
+    const cats = own.length ? own : CATS.slice();
     K.haptic();
     K.Sheet.open(el => {
       el.innerHTML = `
@@ -2298,7 +2316,7 @@
           <header class="ob__head"><span class="eyebrow">${s.id ? 'Edit service' : 'New service'}</span><button class="sheet__x" data-sheet-close aria-label="Close">${K.I.x}</button></header>
           <form class="bk-form" id="svc-form" onsubmit="return false">
             ${photoSlot('photo', s.photo, 'Photo', 'services')}
-            <label class="field"><span>Name</span><input name="name" maxlength="80" value="${esc(s.name)}" placeholder="Classic Full Set"></label>
+            <label class="field"><span>Name</span><input name="name" maxlength="80" value="${esc(s.name)}" placeholder="Service name"></label>
             <div class="field"><span>Category</span>
               <div class="chips-wrap" data-cat-chips>${cats.map(c => `<button type="button" class="chip${c === s.category ? ' is-active' : ''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
               <input name="category_custom" class="chip-input" maxlength="30" placeholder="Other name…" value="${cats.includes(s.category) ? '' : esc(s.category)}"></div></div>
@@ -2510,11 +2528,13 @@
 
   /* ---------- Policies & texts ---------- */
   const POLICY = [
-    ['Deposit', /deposit/i, 'A $30 deposit secures your spot and goes toward your service.'],
+    ['Deposit', /deposit/i, 'A $20 deposit holds your spot and goes toward your service.'],
     ['Cancellations', /cancel/i, 'Free to cancel or move up to 24 hours before.'],
     ['Late arrivals', /late/i, 'After 15 minutes we may need to shorten your service.'],
     ['No-shows', /no.?show/i, 'A missed visit without notice is charged the full deposit.']
   ];
+  // her rules beyond the four standard ones (Repairs, Nail Insurance…): shown to clients in "Good to know"
+  const otherPolicies = pol => (pol || []).filter(p => p && !POLICY.some(([, re]) => re.test(p.title || '')));
   async function textsHTML() {
     const st = need(S2.profile).settings || {};
     const pol = st.policies || [];
@@ -2525,9 +2545,11 @@
       <header class="cab-h"><h1>Policies & texts</h1></header>
       <form class="bk-form" id="tx-form" onsubmit="return false">
         <div class="group-label">Policies</div>
-        ${POLICY.map(([t, re, ph]) => `<label class="field"><span>${t}</span><textarea name="pol_${t}" rows="2" maxlength="500" placeholder="${esc(ph)}">${esc(find(re))}</textarea></label>`).join('')}
+        ${POLICY.map(([t, re, ph]) => `<label class="field"><span>${t === 'Deposit' ? depWord(1) : t}</span><textarea name="pol_${t}" rows="${Math.min(6, Math.max(2, Math.ceil(find(re).length / 36)))}" maxlength="500" placeholder="${esc(t === 'Deposit' && feeMode() ? 'A $10 booking fee holds your spot. It isn’t part of the service price.' : ph)}">${esc(find(re))}</textarea></label>`).join('')}
+        <div class="group-label">Good to know</div>
+        <label class="field"><span>Your other rules, one per line <em>“Title: text”</em></span><textarea name="pol_more" rows="${Math.min(12, Math.max(4, otherPolicies(pol).reduce((n, p) => n + Math.ceil(((p.title || '') + p.text).length / 36), 0)))}" maxlength="3000" placeholder="Repairs: Free within 48 hours.">${esc(otherPolicies(pol).map(p => (p.title ? p.title + ': ' : '') + p.text).join('\n'))}</textarea></label>
         <div class="group-label">Before your visit</div>
-        <label class="field"><span>One tip per line</span><textarea name="prep" rows="4" maxlength="1200" placeholder="Come with clean lashes — no mascara">${esc((st.prep || []).join('\n'))}</textarea></label>
+        <label class="field"><span>One tip per line</span><textarea name="prep" rows="4" maxlength="1200" placeholder="Arrive a few minutes early">${esc((st.prep || []).join('\n'))}</textarea></label>
         <div class="group-label">Aftercare</div>
         <div id="ac-list">${aftercareHTML()}</div>
         <button type="button" class="hrs__add" data-ac-add>${icon('<path d="M12 5v14M5 12h14"/>')}Add a step</button>
@@ -2538,16 +2560,19 @@
     return S2.edit.aftercare.map((a, i) => `
       <div class="ac-step card">
         <div class="ac-step__top"><b class="num">${i + 1}</b><button type="button" class="hrs__del" data-ac-del="${i}" aria-label="Remove step">${K.I.x}</button></div>
-        <input class="ac-in" data-ac="${i}:step" maxlength="80" value="${esc(a.step)}" placeholder="Keep them dry for 24 hours">
+        <input class="ac-in" data-ac="${i}:step" maxlength="80" value="${esc(a.step)}" placeholder="What to do">
         <textarea class="ac-in" data-ac="${i}:text" rows="2" maxlength="400" placeholder="Why and how">${esc(a.text)}</textarea>
       </div>`).join('') || '<p class="cab-muted">No aftercare steps yet.</p>';
   }
   async function saveTexts(btn) {
     const f = $('#tx-form');
     const st = (S2.profile && S2.profile.settings) || {};
-    const known = POLICY.map(p => p[1]);
-    const kept = (st.policies || []).filter(p => !known.some(re => re.test(p.title)));
-    const policies = POLICY.map(([t]) => ({ title: t, text: f.elements['pol_' + t].value.trim() })).filter(p => p.text).concat(kept);
+    // "Title: text" per line (a line without a title is kept as plain text)
+    const more = f.elements.pol_more.value.split('\n').map(x => x.trim()).filter(Boolean).slice(0, 12).map(line => {
+      const m = line.match(/^([^:]{1,40}):\s*(.+)$/);
+      return m ? { title: m[1].trim(), text: m[2].trim() } : { title: '', text: line };
+    });
+    const policies = POLICY.map(([t]) => ({ title: t, text: f.elements['pol_' + t].value.trim() })).filter(p => p.text).concat(more);
     const prep = f.elements.prep.value.split('\n').map(x => x.trim()).filter(Boolean).slice(0, 12);
     const aftercare = S2.edit.aftercare.map(a => ({ step: a.step.trim(), text: a.text.trim() })).filter(a => a.step);
     await busyBtn(btn, async () => {
@@ -2559,24 +2584,28 @@
 
   /* ---------- Assistant answers (FAQ) ---------- */
   const STOP = new Set('what when where which with your have does about there their this that from will would could should much many how can the and for are you our'.split(' '));
-  const autoKeywords = q => [...new Set(String(q).toLowerCase().replace(/[^a-z0-9\s'-]/g, ' ').split(/\s+/).filter(w => w.length > 3 && !STOP.has(w)))].slice(0, 8);
+  // words too common to point at one answer ("take", "nails", "last") aren't made keywords
+  const WEAK = new Set('take need want like make come know good last long next book booking appointment open today tomorrow week price cost service visit free full nail nails tips after care time'.split(' '));
+  const autoKeywords = q => [...new Set(String(q).toLowerCase().replace(/[^a-z0-9\s'-]/g, ' ').split(/\s+/).filter(w => w.length > 3 && !STOP.has(w) && !WEAK.has(w)))].slice(0, 8);
   async function faqHTML() {
     const st = need(S2.profile).settings || {};
-    S2.edit = { kind: 'faq', faq: (st.faq || []).map(f => ({ q: f.q || '', a: f.a || '', extra: (f.keywords || []).filter(k => !autoKeywords(f.q).includes(k)).join(', ') })) };
+    S2.edit = { kind: 'faq', faq: (st.faq || []).map(f => ({ q: f.q || '', a: f.a || '', extra: (f.keywords || []).filter(k => !autoKeywords(f.q).includes(k)).join(', ') })), chips: (st.askChips || []).join('\n') };
     return `
       ${backHTML('faq')}
       <header class="cab-h cab-h--row"><h1>Assistant</h1><button class="btn btn--primary btn--sm" data-faq-add>${icon('<path d="M12 5v14M5 12h14"/>')}Add</button></header>
       <p class="cab-muted">The assistant in the Ask tab answers with these. Prices, hours and openings it knows by itself.</p>
       <div id="faq-list">${faqListHTML()}</div>
+      <div class="group-label">Suggested questions</div>
+      <label class="field"><span>The chips under the chat, one per line <em>empty = the standard ones</em></span><textarea id="faq-chips" rows="5" maxlength="500" placeholder="How much is a full set?&#10;When are you free?">${esc(S2.edit.chips)}</textarea></label>
       <button class="btn btn--primary btn--block" data-faq-save>Save answers</button>`;
   }
   function faqListHTML() {
     return S2.edit.faq.map((f, i) => `
       <div class="ac-step card">
         <div class="ac-step__top"><b>Q${i + 1}</b><button type="button" class="hrs__del" data-faq-del="${i}" aria-label="Remove">${K.I.x}</button></div>
-        <input class="ac-in" data-faq="${i}:q" maxlength="140" value="${esc(f.q)}" placeholder="Do you do bottom lashes?">
+        <input class="ac-in" data-faq="${i}:q" maxlength="140" value="${esc(f.q)}" placeholder="Do you take walk-ins?">
         <textarea class="ac-in" data-faq="${i}:a" rows="3" maxlength="600" placeholder="The answer clients see">${esc(f.a)}</textarea>
-        <input class="ac-in ac-in--sm" data-faq="${i}:extra" maxlength="200" value="${esc(f.extra)}" placeholder="Also answers to (optional): bottom, lower lashes">
+        <input class="ac-in ac-in--sm" data-faq="${i}:extra" maxlength="200" value="${esc(f.extra)}" placeholder="Also answers to (optional): walk in, same day">
       </div>`).join('') || '<div class="cab-empty"><b>No answers yet</b><span>Add the questions clients ask you most.</span></div>';
   }
   async function saveFaq(btn) {
@@ -2584,8 +2613,10 @@
       q: f.q.trim(), a: f.a.trim(),
       keywords: [...new Set(autoKeywords(f.q).concat(f.extra.split(',').map(x => x.trim().toLowerCase()).filter(Boolean)))]
     }));
+    const chipBox = $('#faq-chips');
+    const askChips = (chipBox ? chipBox.value : S2.edit.chips || '').split('\n').map(x => x.trim()).filter(Boolean).slice(0, 6);
     await busyBtn(btn, async () => {
-      S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { settings: { faq } });
+      S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { settings: { faq, askChips: askChips.length ? askChips : null } });
       K.toast('Answers saved', 'ok');
       published();
     });
@@ -2618,8 +2649,8 @@
       <div class="group-label">Tags</div>
       <div class="chips-wrap">${TAGS.map(t => `<button class="chip${tags.includes(t) ? ' is-active' : ''}${t === 'Allergy' ? ' chip--warn' : ''}" data-ctag="${esc(t)}">${esc(t)}</button>`).join('')}</div>
       ${tags.includes('Patch test done') ? `<label class="field"><span>Patch test date</span><input type="date" data-patch-date value="${esc(c.patch_test_at || '')}"></label>` : ''}
-      <div class="group-label cab-tlhead"><span>Lash map</span><button class="cab-link" data-fm-new="${esc(c.id)}">${icon('<path d="M12 5v14M5 12h14"/>')}Add</button></div>
-      ${formulas.length ? `<div class="list">${formulas.map(f => `
+      <div class="group-label cab-tlhead"${lashStudio() ? '' : ' hidden'}><span>Lash map</span><button class="cab-link" data-fm-new="${esc(c.id)}">${icon('<path d="M12 5v14M5 12h14"/>')}Add</button></div>
+      ${!lashStudio() ? '' : formulas.length ? `<div class="list">${formulas.map(f => `
         <button class="row row--link fm-row" data-fm-edit="${esc(f.id)}">
           ${f.photo ? `<img src="${esc(f.photo)}" alt="">` : `<span class="fm-ic">${icon('<path d="M3 10c2.5 3 5.5 4.5 9 4.5s6.5-1.5 9-4.5"/><path d="M5.5 12.6 4 15M9 14.2l-.8 2.8M12 14.5V17.5M15 14.2l.8 2.8M18.5 12.6 20 15"/>')}</span>`}
           <span class="row__label">${esc(formulaLine(f) || 'Formula')}<span class="row__sub">${esc(K.dayLabel(spot(f.created_at).off, false))}${f.glue ? ' · ' + esc(f.glue) : ''}${f.note ? ' · ' + esc(f.note.slice(0, 40)) : ''}</span></span>
@@ -3039,7 +3070,9 @@
     if (!n) return '';
     return `
       <div class="card dep-warn">
-        <span><b>Deposits are set on ${n} service${n > 1 ? 's' : ''}, but payments are off</b><small>Clients aren’t asked for them until you add a way to get paid.</small></span>
+        ${feeMode()
+          ? `<span><b>Booking fee is set on ${n} service${n > 1 ? 's' : ''}, but payments are off — add your Square link so clients can pay it</b><small>Until then clients book without paying it in the app.</small></span>`
+          : `<span><b>Deposits are set on ${n} service${n > 1 ? 's' : ''}, but payments are off</b><small>Clients aren’t asked for them until you add a way to get paid.</small></span>`}
         <button class="btn btn--primary btn--sm" data-cab-tab="payments">Turn on</button>
       </div>`;
   }
@@ -3559,7 +3592,7 @@
         ${b.cancel_reason ? `<div class="bk-row bk-row--addr"><span>Reason</span><b>${esc(b.cancel_reason)}</b></div>` : ''}
         ${b.last_formula ? `<div class="bk-row"><span>Last time</span><b class="num">${esc(formulaLine(b.last_formula))}</b></div>` : ''}
       </div>
-      ${b.client_id && (started || b.status === 'completed') && !b.status.startsWith('cancelled') ? `<button class="btn btn--soft btn--block" data-fm-new="${esc(b.client_id)}" data-booking="${esc(b.id)}">${icon(LASH)}Write today’s lash map</button>` : ''}
+      ${lashStudio() && b.client_id && (started || b.status === 'completed') && !b.status.startsWith('cancelled') ? `<button class="btn btn--soft btn--block" data-fm-new="${esc(b.client_id)}" data-booking="${esc(b.id)}">${icon(LASH)}Write today’s lash map</button>` : ''}
       ${b.client_phone ? `
       <div class="ob__actions">
         <a class="btn btn--soft" href="${esc(telHref(b.client_phone))}">${K.I.phone}Call</a>
@@ -4022,7 +4055,8 @@
   function onChange(e) {
     if (!root) return;
     const t = e.target;
-    if (S.readonly && t.closest && t.closest('.cab, .sheet') && (t.dataset.rule || t.matches('[data-patch-date]'))) { readOnly(); repaint(); return; }
+    if (S.readonly && t.closest && t.closest('.cab, .sheet') && (t.dataset.rule || t.matches('[data-patch-date], [data-cancel-rule]'))) { readOnly(); repaint(); return; }
+    if (t.matches && t.matches('[data-cancel-rule]')) { saveCancelRule(t.value); return; }
     if (t.dataset && t.dataset.rule) { saveRule(t.dataset.rule, +t.value); return; }
     onStudioChange(t);
     if (t.matches && t.matches('[data-nb-svc]')) {

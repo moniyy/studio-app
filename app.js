@@ -985,7 +985,7 @@
           <div class="hero__content hero__content--maison">
             <span class="hero__eyebrow">${esc(eyebrow)}</span>
             <h1 class="hero__name">${esc(data.name)}</h1>
-            <div class="hero__meta">${rating ? `<span><b class="star">★</b>&nbsp;<b class="num">${rating}</b>${reviewsCount() ? `&nbsp;·&nbsp;<span class="num">${esc(reviewsCount())}</span>&nbsp;reviews` : ''}</span>` : ''}${data.city ? `<span>${esc(data.city)}</span>` : ''}</div>
+            <div class="hero__meta">${rating ? `<span><b class="star">★</b>&nbsp;<b class="num">${rating}</b>${reviewsCount() ? `&nbsp;·&nbsp;<span class="num">${esc(reviewsCount())}</span>&nbsp;reviews` : ''}</span>` : ''}${heroPlace() ? `<span>${esc(heroPlace())}</span>` : ''}</div>
             ${firstSlot ? `<button class="hero__next" data-book data-slot="${esc(firstSlot)}">Next: ${esc(firstSlot)} ${I.arrowR}</button>` : ''}
           </div>` : `
           <div class="hero__content">
@@ -1067,6 +1067,11 @@
   // a service booked only on some weekdays ("Fridays only")
   const onlyDaysText = s => (s && s.onlyDays ? s.onlyDays.map(d => DAY_NAMES[d] + 's').join(' & ') + ' only' : '');
   const DAYS_ICON = '<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>';
+  // under the name: the city — or, when her line above the name already says the city, her subtitle
+  const heroPlace = () => {
+    const city = String(data.city || '').split(',')[0].trim().toLowerCase();
+    return data.eyebrow && city && String(data.eyebrow).toLowerCase().includes(city) ? (data.tagline || '') : (data.city || '');
+  };
   const askAbout = () => `prices, availability, ${depositsOn() ? depWord() + 's ' : ''}or aftercare`.replace(', or', ' or');
 
   function homeRestHTML() {
@@ -1362,7 +1367,7 @@
         <div class="chat__day" data-stagger>Today</div>
       </div>
       <div class="chips suggest v-content" id="suggest">
-        ${SUGGEST.start.map(t => `<button class="chip" data-ask="${esc(t)}">${esc(t)}</button>`).join('')}
+        ${SUG('start').map(t => `<button class="chip" data-ask="${esc(t)}">${esc(t)}</button>`).join('')}
       </div>
       <form class="composer v-content" id="composer" autocomplete="off">
         <div class="composer__field">
@@ -1804,7 +1809,7 @@
         ${data.policies.map((p, i) => `
           <article class="card policy" data-stagger>
             <span class="policy__num">${String(i + 1).padStart(2, '0')}</span>
-            <div><h3>${esc(p.title)}</h3><p>${esc(p.text)}</p></div>
+            <div>${p.title ? `<h3>${esc(p.title)}</h3>` : ''}<p>${esc(p.text)}</p></div>
           </article>`).join('')}
         <button class="btn btn--primary btn--block" data-stagger data-book>Book now</button>`;
     } else if (name === 'aftercare') {
@@ -2418,7 +2423,7 @@
           ${notes.length ? `
           <h3 class="sd-h">Good to know</h3>
           <div class="card sd-notes">
-            ${notes.map(n => `<div class="sd-note"><span class="row__icon">${I.shield}</span><span><b>${esc(n.title)}</b>${esc(n.text)}</span></div>`).join('')}
+            ${notes.map(n => `<div class="sd-note"><span class="row__icon">${I.shield}</span><span>${n.title ? `<b>${esc(n.title)}</b>` : ''}${esc(n.text)}</span></div>`).join('')}
           </div>` : ''}
         </div>
       </div>
@@ -3005,12 +3010,12 @@
         </div>
         <div class="card bk-sum">
           <div class="bk-sum__svc">
-            <img src="${esc(sized(safeUrl((l && l.photo) || (s && s.photo)), 200))}" alt="">
+            ${!(l && l.photo) && noThumb(s) ? '' : `<img src="${esc(sized(safeUrl((l && l.photo) || (s && s.photo)), 200))}" alt="">`}
             <span><b>${esc(s ? s.title : '')}</b><small>${esc(l ? l.title : (s ? s.category : ''))}</small></span>
           </div>
           <div class="bk-row"><span>Date</span><b>${esc(dayLabel(bk.off, true))}</b></div>
           <div class="bk-row"><span>Time</span><b class="num">${fmtClock(bk.min)}</b></div>
-          ${s ? `<div class="bk-row"><span>Price</span><b class="num">${esc(price(s.price))}</b></div>` : ''}
+          ${s ? (s.priceLabel ? priceRowsHTML(s) : `<div class="bk-row"><span>Price</span><b class="num">${esc(price(s.price))}</b></div>`) : ''}
           ${data.address ? `<div class="bk-row bk-row--addr"><span>Address</span><b>${esc(data.address)}</b></div>` : ''}
         </div>
         <div class="bk-done__actions">
@@ -3209,7 +3214,7 @@
      never numbers, reviews or offers from a template. Empty field = no block. */
   const OWN_KEYS = ['tagline', 'city', 'address', 'parking', 'phone', 'instagram', 'reviewUrl', 'heroPhoto', 'heroVideo', 'avatar',
     'policies', 'prep', 'aftercare', 'faq', 'payments', 'defaultAccent', 'splashStyle', 'splashEmoji', 'iconDir', 'firstName', 'masterName', 'icons', 'depositMode', 'monogram',
-    'splashMark', 'shortName', 'eyebrow', 'plainRows'];
+    'splashMark', 'shortName', 'eyebrow', 'plainRows', 'askChips'];
   const takesDeposits = p => Object.values(p || {}).some(v => String(v || '').trim());
   function ownSettings(base, st) {
     st = st || {};
@@ -3231,10 +3236,12 @@
     out.promo = pr && pr.on && (pr.title || pr.text) ? { badge: pr.badge || '', title: pr.title || '', text: pr.text || '', newOnly: pr.newOnly !== false } : null;
     const ly = st.loyalty;
     out.loyalty = ly && ly.on && +ly.total >= 3 ? { total: +ly.total, filled: 0, reward: ly.reward || '', real: true } : null;
-    // no way to pay a deposit → no word about deposits anywhere
-    if (!takesDeposits(st.payments)) {
-      // a studio whose deposit is a booking fee: no word about the fee either
-      const re = st.depositMode === 'fee' ? /deposit|booking fee/i : /deposit/i;
+    // no way to pay a deposit → no word about deposits anywhere.
+    // A booking fee is her rule even before a payment link: its texts stay (Review hides its line until then)
+    if (st.depositMode === 'fee') {
+      out.policies = (out.policies || []).map(p => (p && /^deposits?$/i.test(String(p.title || '').trim()) ? Object.assign({}, p, { title: 'Booking fee' }) : p));
+    } else if (!takesDeposits(st.payments)) {
+      const re = /deposit/i;
       const noDep = t => (String(t || '').match(/[^.!?]+[.!?]*/g) || []).filter(x => !re.test(x)).join(' ').replace(/\s+/g, ' ').trim();
       out.policies = (out.policies || []).filter(p => p && !re.test(p.title || ''))
         .map(p => Object.assign({}, p, { text: noDep(p.text) })).filter(p => p.text);
@@ -3258,7 +3265,9 @@
     if (m.booking_engine === 'builtin') out.ownerDemo = null;
     out.rules = {
       autoConfirm: !!m.auto_confirm, minNotice: +m.min_notice_hours || 0, maxDays: +m.max_days_ahead || 60,
-      cancelWindow: +m.cancel_window_hours || 0, step: +m.slot_step_min || 30
+      cancelWindow: +m.cancel_window_hours || 0, step: +m.slot_step_min || 30,
+      // Hours & rules → Free cancellation: "Not set" — nothing is said about cancelling yet
+      cancelUnset: !!(m.settings && m.settings.cancelUnset)
     };
     if (m.booking_engine === 'builtin') {
       out.services = (prof.services || []).map(s => ({
@@ -3266,7 +3275,8 @@
         // priced individually: no number anywhere ("On request"); a "from $" price stays a text;
         // her own price label ("$15 off", "Save $175") is shown instead of either
         includes: s.includes || [], price: s.price_label ? String(s.price_label) : s.price_on_request ? 'On request' : s.price_from ? 'from ' + price(+s.price) : +s.price, deposit: +s.deposit || 0,
-        priceAsk: !!s.price_on_request, priceLabel: s.price_label ? String(s.price_label) : '', onlyDays: Array.isArray(s.only_days) && s.only_days.length ? s.only_days.map(Number) : null,
+        priceAsk: !!s.price_on_request, priceLabel: s.price_label ? String(s.price_label) : '',
+        basePrice: s.price_on_request ? 'On request' : s.price_from ? 'from ' + price(+s.price) : +s.price, onlyDays: Array.isArray(s.only_days) && s.only_days.length ? s.only_days.map(Number) : null,
         photo: s.photo || '', duration: fmtDuration(+s.duration_min), buffer: +s.buffer_min || 0,
         fillWeeks: +s.fill_weeks || 0
       }));
@@ -3484,10 +3494,15 @@
     const items = [];
     if (dep && feeMode()) items.push(`A <b>${price(dep)} booking fee</b> holds your spot — it isn’t part of the service price. You’ll see how to send it right after booking.`);
     else if (dep) items.push(`A <b>${price(dep)} deposit</b> holds your spot — you’ll see how to send it right after booking.`);
-    if (r.cancelWindow) items.push(`Free to cancel or move up to <b>${r.cancelWindow} h</b> before your visit.`);
-    else items.push('Free to cancel or move any time before your visit.');
-    if (r.cancelWindow) items.push(dep ? `Later changes and no-shows may lose the ${depWord()}.` : 'Later changes are marked as late — please give as much notice as you can.');
-    data.policies.filter(p => dep || !/deposit/i.test(p.title || '')).slice(0, 2).forEach(p => items.push(`<b>${esc(p.title)}.</b> ${esc(p.text)}`));
+    if (!r.cancelUnset) {
+      if (r.cancelWindow) items.push(`Free to cancel or move up to <b>${r.cancelWindow} h</b> before your visit.`);
+      else items.push('Free to cancel or move any time before your visit.');
+      if (r.cancelWindow) items.push(dep ? `Later changes and no-shows may lose the ${depWord()}.` : 'Later changes are marked as late — please give as much notice as you can.');
+    }
+    // her deposit / booking-fee rule shows once clients can actually pay it
+    const depTitle = feeMode() ? /deposit|booking fee/i : /deposit/i;
+    data.policies.filter(p => dep || !depTitle.test(p.title || '')).slice(0, 2).forEach(p => items.push(`${p.title ? `<b>${esc(p.title)}.</b> ` : ''}${esc(p.text)}`));
+    if (!items.length) return '';
     return `<div class="card bk-rules"><b class="bk-rules__title">Booking policy</b><ul>${items.map(x => `<li>${x}</li>`).join('')}</ul></div>`;
   }
 
@@ -3509,7 +3524,7 @@
         <div class="bk-row"><span>Time</span><b class="num">${fmtClock(bk.min)}</b></div>
         ${isTeam() ? `<div class="bk-row"><span>With</span><b>${esc(bk.staff ? (staffById(bk.staff) || {}).name || '' : 'The first master free')}</b></div>` : ''}
         ${svcDuration(s, bk.staff) ? `<div class="bk-row"><span>Duration</span><b>${esc(svcDuration(s, bk.staff))}</b></div>` : ''}
-        <div class="bk-row"><span>Price</span><b class="num">${esc(price(svcPrice(s, bk.staff)))}</b></div>
+        ${priceRowsHTML(s, bk.staff)}
         ${svcDeposit(s) ? `<div class="bk-row bk-row--accent"><span>${depWord(1)}</span><b class="num">${esc(price(svcDeposit(s)))} · after booking</b></div>` : ''}
         ${svcDeposit(s) && feeMode() && !s.priceLabel ? `<div class="bk-row"><span>At the appointment</span><b class="num">${esc(price(svcPrice(s, bk.staff)))}</b></div>` : ''}
         <div class="bk-row"><span>Name</span><b>${esc(d.name)}</b></div>
@@ -3518,6 +3533,13 @@
       ${rulesListHTML()}
       <label class="tick tick--agree"><input type="checkbox" data-bk-agree${bkx.agree ? ' checked' : ''}><i aria-hidden="true">${I.check}</i><span>I agree to the booking policy</span></label>
       ${data.prep.length ? `<div class="card prep"><b class="prep__title">Before your visit</b><ul>${data.prep.slice(0, 3).map(x => `<li><span class="sd-check">${I.check}</span>${esc(x)}</li>`).join('')}</ul></div>` : ''}`;
+  }
+
+  // her label is a deal, not an amount: "Deal: $15 off" + "Price: paid at the studio" (or the real price)
+  function priceRowsHTML(s, staffId) {
+    if (!s || !s.priceLabel) return `<div class="bk-row"><span>Price</span><b class="num">${esc(price(svcPrice(s, staffId)))}</b></div>`;
+    return `<div class="bk-row"><span>Deal</span><b>${esc(s.priceLabel)}</b></div>
+      <div class="bk-row"><span>Price</span><b class="num">${s.priceAsk ? 'Paid at the studio' : esc(price(s.basePrice))}</b></div>`;
   }
 
   function footBuiltin() {
@@ -3545,7 +3567,9 @@
       action: `<button class="btn btn--primary" data-bk-next${detailsOk() ? '' : ' disabled'}>Review ${I.arrowR}</button>`
     };
     return {
-      summary: `<b class="num">${s ? esc(price(svcPrice(s, bk.staff))) : ''}</b><span>${svcDeposit(s) ? esc(price(svcDeposit(s))) + ' ' + depWord() + ' after booking' : 'Pay at the studio'}</span>`,
+      summary: s && s.priceLabel
+        ? `<b>Pay at the studio</b><span>${esc(s.priceLabel)}${svcDeposit(s) ? ' · ' + esc(price(svcDeposit(s))) + ' ' + depWord() + ' after booking' : ''}</span>`
+        : `<b class="num">${s ? esc(price(svcPrice(s, bk.staff))) : ''}</b><span>${svcDeposit(s) ? esc(price(svcDeposit(s))) + ' ' + depWord() + ' after booking' : 'Pay at the studio'}</span>`,
       action: `<button class="btn btn--primary${bkx.agree ? '' : ' is-off'}" data-bk-confirm${bkx.busy ? ' disabled aria-busy="true"' : ''}${bkx.agree ? '' : ' aria-disabled="true"'}>${bkx.busy ? spinner() : 'Confirm'}</button>`,
       legal: `<p class="bk-legal">By booking you agree to the studio’s policy and Satinbook’s <a href="${esc(APP_BASE + 'terms')}" ${ext}>Terms</a> &amp; <a href="${esc(APP_BASE + 'privacy')}" ${ext}>Privacy</a></p>`
     };
@@ -4459,6 +4483,17 @@
     fallback: ['How much is a full set?', 'When are you free?', 'Aftercare tips']
   };
 
+  // the chips under the chat: her own questions (Assistant → Suggested questions), else the defaults
+  const SUG = k => {
+    const own = Array.isArray(data.askChips) ? data.askChips.map(x => String(x || '').trim()).filter(Boolean) : [];
+    return own.length ? (k === 'start' ? own.slice(0, 6) : own) : SUGGEST[k];
+  };
+  // words that alone say nothing about which service or which answer is meant
+  // ("aftercare tips" ≠ "French Tip", "my nails after" ≠ "Nail Art Manicure")
+  const GENERIC = new Set(['tip', 'after', 'care', 'nail', 'set', 'long', 'short', 'french', 'full', 'art', 'take', 'need',
+    'want', 'have', 'much', 'many', 'like', 'make', 'get', 'come', 'know', 'good', 'new', 'day', 'time', 'any', 'some', 'more',
+    'last', 'next', 'book', 'booking', 'appointment', 'open', 'today', 'tomorrow', 'week', 'price', 'cost', 'service', 'visit', 'free', 'available'].map(stem));
+
   const slotLabel = (off, min) => `${off === 0 ? 'Today' : off === 1 ? 'Tomorrow' : DAY_SHORT[studioDate(off).dow]} ${fmtClock(min)}`;
 
   /* Openings over the next week, as bookable chips */
@@ -4515,7 +4550,7 @@
     const candidates = [];
     const add = (score, make) => { if (score > 0) candidates.push({ score, make }); };
 
-    if (!qt.length) return { text: `Ask me anything about ${askAbout()} 💕`, suggest: SUGGEST.start };
+    if (!qt.length) return { text: `Ask me anything about ${askAbout()} 💕`, suggest: SUG('start') };
 
     // "Cancel my appointment" / "reschedule" / "change my time": her booking, not free times
     const wantsMove = has('reschedule', 'change my time', 'change the time', 'change time', 'change my appointment', 'change my booking',
@@ -4527,19 +4562,19 @@
         if (!isBuiltin()) {
           return {
             text: `To ${wantsMove ? 'move' : 'cancel'} your appointment, use the link in your booking confirmation${data.instagram ? ` or message ${name}` : ''} 💕`,
-            action: data.instagram ? 'instagram' : null, suggest: SUGGEST.policy
+            action: data.instagram ? 'instagram' : null, suggest: SUG('policy')
           };
         }
         const b = upcoming()[0];
         if (!b) {
           return {
             text: 'I don’t see a booking on this phone 🤔 Open the link from your confirmation email — it has Reschedule and Cancel — or check My bookings.',
-            card: { type: 'nobooking' }, suggest: SUGGEST.policy
+            card: { type: 'nobooking' }, suggest: SUG('policy')
           };
         }
         return {
           text: `Your ${b.service_name} is ${whenText(b.start_at).replace(' · ', ' at ')} ✨ ${wantsMove && !wantsCancel ? 'Tap Reschedule to pick a new time.' : 'You can move or cancel it here.'}`,
-          card: { type: 'mybooking', token: b.token }, suggest: SUGGEST.policy
+          card: { type: 'mybooking', token: b.token }, suggest: SUG('policy')
         };
       });
     }
@@ -4550,7 +4585,7 @@
       ['brows', ['brow', 'brows', 'eyebrow', 'eyebrows', 'lamination', 'microblading', 'brow tint']],
       ['nails', ['nail', 'nails', 'manicure', 'mani', 'pedicure', 'pedi', 'gel x', 'acrylic', 'acrylics', 'dip powder']],
       ['hair', ['hair', 'haircut', 'hair color', 'balayage', 'highlight', 'blowout', 'silk press', 'braid', 'braids', 'wig', 'perm', 'keratin', 'loc', 'locs']],
-      ['makeup', ['makeup', 'make up', 'glam', 'bridal makeup']],
+      ['makeup', ['makeup', 'make up', 'bridal makeup']], // ("glam" alone is a Glam Pedicure too)
       ['waxing', ['wax', 'waxing', 'brazilian', 'sugaring']],
       ['skin care', ['facial', 'facials', 'chemical peel', 'dermaplaning', 'microneedling', 'hydrafacial']],
       ['massage', ['massage']], ['spray tans', ['spray tan', 'tan', 'tanning']], ['tattoos', ['tattoo', 'tattoos']],
@@ -4566,14 +4601,17 @@
       const and = l => (l.length < 2 ? l.join('') : l.slice(0, -1).join(', ') + ' & ' + l[l.length - 1]);
       add(10, () => ({
         text: offered.length ? `We focus on ${and(offered.slice(0, 3))} — here’s what we offer 💕` : `We don’t do ${missing[0]} — here’s what we offer 💕`,
-        card: { type: 'cats' }, suggest: SUGGEST.service
+        card: { type: 'cats' }, suggest: SUG('service')
       }));
     }
 
-    // FAQ — curated keywords win most ties
+    // FAQ — her own answers come first: a keyword that means something (not "take", "nails", "tips")
+    // puts her answer above every built-in one; generic keywords alone only compete as before
     data.faq.forEach(f => {
-      const score = (f.keywords || []).filter(k => has(k)).reduce((s, k) => s + 3 + tokens(k).length, 0);
-      add(score, () => ({ text: shortText(f.a, 2), suggest: SUGGEST.faq }));
+      const hit = (f.keywords || []).filter(k => has(k));
+      const score = hit.reduce((s, k) => s + 3 + tokens(k).length, 0);
+      const strong = hit.some(k => tokens(k).some(w => !GENERIC.has(w) && !STOP.has(w)));
+      add(score && strong ? 50 + score : score, () => ({ text: shortText(f.a, 2), suggest: SUG('faq') }));
     });
 
     // Services & prices
@@ -4583,9 +4621,14 @@
       // "Lash" in "Lash Lift" is the category, not what makes the service unique
       const catWords = new Set(tokens(s.category));
       const words = tokens(s.title).filter(w => !STOP.has(w) && !catWords.has(w));
-      let score = words.filter(w => has(w)).length * 2;
+      const hit = words.filter(w => has(w));
+      // a common word alone ("tip", "nail", "short") isn't the service — unless it is the whole name
+      const real = hit.some(w => !GENERIC.has(w)) || (hit.length && hit.length === words.length);
+      let score = real ? hit.length * 2 : 0;
       if (/full set/i.test(s.title) && has('full set')) score += 3;
-      if (s.category && has(s.category)) score += 1;
+      // its category: the whole name, or a word of it that means something ("pedicures" → "Pedicures (wet)")
+      const catKey = tokens(String(s.category || '').replace(/\(.*?\)/g, '')).filter(w => !STOP.has(w) && !GENERIC.has(w));
+      if (s.category && (has(s.category) || catKey.some(w => has(w)))) score += 1;
       return { s, score };
     });
     const best = Math.max(0, ...scored.map(x => x.score));
@@ -4596,13 +4639,13 @@
       if (list.length === 1) {
         const s = list[0];
         const text = durIntent && !priceIntent ? `${s.title} takes about ${s.duration} ⏱`
-          : s.priceLabel ? `${s.title}: ${s.priceLabel} ✨`
+          : s.priceLabel ? `${s.title}: ${s.priceLabel}${s.priceAsk ? '' : ` (${price(s.basePrice)})`} ✨`
           : s.priceAsk ? `${s.title}: ${firstName()} prices it for you — ask when you book ✨` : `${s.title} is ${price(s.price)} ✨`;
-        return { text, card: { type: 'service', id: s.id }, suggest: SUGGEST.service };
+        return { text, card: { type: 'service', id: s.id }, suggest: SUG('service') };
       }
       const lead = matched.length && list.every(s => /full set/i.test(s.title)) ? 'Our full sets 💕'
-        : matched.length ? `Here are our ${list[0].category.toLowerCase()} ✨` : 'Here are the favorites ✨';
-      return { text: lead, card: { type: 'services', ids: list.slice(0, 4).map(s => s.id) }, action: 'book', suggest: SUGGEST.service };
+        : matched.length ? (list.slice(0, 4).every(s => s.category === list[0].category) ? `Here are our ${list[0].category.toLowerCase()} ✨` : 'Here’s what we have ✨') : 'Here are the favorites ✨';
+      return { text: lead, card: { type: 'services', ids: list.slice(0, 4).map(s => s.id) }, action: 'book', suggest: SUG('service') };
     });
 
     // A specific day: only that day's hours + its openings
@@ -4636,7 +4679,7 @@
           if (n.slots.length) { show = [n]; break; }
         }
       }
-      return { text, card: show.length ? { type: 'day', days: show.map(i => i.off) } : null, action: show.length ? null : 'book', suggest: SUGGEST.day };
+      return { text, card: show.length ? { type: 'day', days: show.map(i => i.off) } : null, action: show.length ? null : 'book', suggest: SUG('day') };
     });
 
     // Availability & booking (no specific day)
@@ -4648,7 +4691,7 @@
         text: slots.length ? `Next opening: ${slotLabel(slots[0].off, slots[0].min)} ✨ Tap a time to grab it.` : 'Booking takes less than a minute 💕',
         card: slots.length ? { type: 'slots' } : null,
         action: slots.length ? null : 'book',
-        suggest: SUGGEST.slots
+        suggest: SUG('slots')
       };
     });
 
@@ -4656,7 +4699,7 @@
     add(has('hour', 'open', 'close', 'closed', 'weekday') ? 6 : 0, () => ({
       text: `${openStatus().text} 🕐`,
       card: { type: 'week' },
-      suggest: SUGGEST.hours
+      suggest: SUG('hours')
     }));
 
     // Policies
@@ -4667,34 +4710,34 @@
       [/fill/i, ['fill policy', '40%', 'another artist']]
     ];
     data.policies.forEach(p => {
-      const words = tokens(p.title).filter(w => !STOP.has(w));
+      const words = tokens(p.title).filter(w => !STOP.has(w) && !GENERIC.has(w)); // "Nail Insurance" isn't about every nail
       let score = words.filter(w => has(w)).length * 4;
       POLICY_SYNONYMS.forEach(([re, syn]) => { if (re.test(p.title) && has(...syn)) score += 3; });
       add(score, () => ({
         text: shortText(p.text, 2, 150) + ' 💕',
         action: /deposit|cancel/i.test(p.title) ? 'book' : null,
-        suggest: SUGGEST.policy
+        suggest: SUG('policy')
       }));
     });
     add(has('policy', 'policies', 'rules') && data.policies.length ? 5 : 0, () => ({
-      text: data.policies.slice(0, 3).map(p => `• ${p.title}: ${shortText(p.text, 1, 70)}`).join('\n'),
-      suggest: SUGGEST.policy
+      text: data.policies.slice(0, 3).map(p => `• ${p.title ? p.title + ': ' : ''}${shortText(p.text, 1, 70)}`).join('\n'),
+      suggest: SUG('policy')
     }));
 
     // Aftercare
-    const careStrong = has('aftercare', 'after care', 'care tips', 'take care', 'tips');
+    const careStrong = has('aftercare', 'after care', 'care tips', 'take care', 'taking care', 'care for', 'look after', 'tips');
     const careWeak = has('care', 'wash', 'clean', 'cleanse', 'wet', 'water', 'sleep', 'brush', 'oil', 'rub', 'maintain', 'maintenance');
-    add(data.aftercare.length && (careStrong ? 8 : careWeak ? 4 : 0), () => ({
+    add(data.aftercare.length && (careStrong && !priceIntent ? 8 : careWeak ? 4 : 0), () => ({ // "how much are French tip toes" is a price
       text: 'Aftercare in a nutshell ✨',
       card: { type: 'steps' },
-      suggest: SUGGEST.aftercare
+      suggest: SUG('aftercare')
     }));
 
     // Reviews
     add(data.reviews.length && has('review', 'reviews', 'rating', 'recommend', 'worth it', 'feedback', 'clients say', 'people say', 'any good', 'legit', 'testimonial') ? 6 : 0, () => ({
       text: `Clients love ${name} 💕`,
       card: { type: 'review' },
-      suggest: SUGGEST.review
+      suggest: SUG('review')
     }));
 
     // Course
@@ -4702,27 +4745,37 @@
     add(x && x.courseTitle && has('course', 'class', 'training', 'learn', 'teach', 'student', 'certification', 'certified') ? 5 : 0, () => ({
       text: `${x.courseTitle} 🎓\n${shortText(x.courseText, 1, 120)}`.trim(),
       action: x.courseUrl ? 'course' : null,
-      suggest: SUGGEST.faq
+      suggest: SUG('faq')
     }));
 
     // Location & contact
     add(data.city && has('where', 'located', 'location', 'address', 'city', 'area') ? 3 : 0, () => ({
       text: data.address ? `Here's how to find us 📍` : `We're in ${data.city} 📍 The exact address comes with your booking confirmation.`,
       action: 'book',
-      suggest: SUGGEST.contact
+      suggest: SUG('contact')
     }));
     add(has('phone', 'call', 'text', 'number', 'contact', 'instagram', 'ig', 'dm', 'reach') ? 3 : 0, () => ({
       text: `You can reach ${name} ${data.phone ? `at ${data.phone}` : ''}${data.phone && data.instagram ? ' or ' : ''}${data.instagram ? `on Instagram @${data.instagram}` : ''} 💕`,
       action: data.instagram ? 'instagram' : null,
-      suggest: SUGGEST.contact
+      suggest: SUG('contact')
     }));
 
     // Small talk
     add(has('hi', 'hello', 'hey', 'hola', 'good morning', 'good afternoon', 'good evening') ? 1 : 0, () => ({
-      text: `Hi there! 👋 Ask me about ${askAbout()}.`, suggest: SUGGEST.start
+      text: `Hi there! 👋 Ask me about ${askAbout()}.`, suggest: SUG('start')
     }));
     // Deposits, from the real settings (studios in the database)
-    if (isBuiltin() && has('deposit', 'down payment', 'prepay', 'upfront', 'pay ahead')) {
+    // a booking fee: her rule whether or not the app collects it yet
+    const feeDeps = isBuiltin() && feeMode() ? data.services.filter(s => +s.deposit > 0) : [];
+    if (feeDeps.length && has('deposit', 'down payment', 'prepay', 'upfront', 'pay ahead', 'booking fee', 'fee', 'refundable', 'non refundable')) {
+      const ways = Object.keys(data.payments || {}).filter(k => String(data.payments[k] || '').trim())
+        .map(k => ({ cashapp: 'Cash App', zelle: 'Zelle', venmo: 'Venmo', paypal: 'PayPal', square: 'card' }[k] || k));
+      add(9, () => ({
+        text: `There’s a ${price(Math.min(...feeDeps.map(s => +s.deposit)))} non-refundable booking fee to secure your spot. It doesn’t go toward your service total.${ways.length ? ` You send it right after booking (${ways.join(', ')}).` : ''}`,
+        action: 'book',
+        suggest: SUG('policy')
+      }));
+    } else if (isBuiltin() && has('deposit', 'down payment', 'prepay', 'upfront', 'pay ahead')) {
       const deps = data.services.filter(s => svcDeposit(s) > 0);
       const ways = Object.keys(data.payments || {}).filter(k => String(data.payments[k] || '').trim())
         .map(k => ({ cashapp: 'Cash App', zelle: 'Zelle', venmo: 'Venmo', paypal: 'PayPal', square: 'card' }[k] || k));
@@ -4733,11 +4786,11 @@
             : `${deps.length === data.services.length ? 'Every service' : deps.slice(0, 3).map(s => s.title).join(', ')} needs a deposit — from ${price(Math.min(...deps.map(svcDeposit)))}. You send it right after booking${ways.length ? ` (${ways.join(', ')})` : ''} and it goes toward your service 💕`
           : 'No deposit needed — you pay at the studio 💕',
         action: 'book',
-        suggest: SUGGEST.policy
+        suggest: SUG('policy')
       }));
     }
     add(has('thank', 'thx', 'ty', 'appreciate', 'perfect', 'awesome', 'great') ? 1.5 : 0, () => ({
-      text: "You're so welcome! 💕 Anything else I can help with?", suggest: SUGGEST.fallback
+      text: "You're so welcome! 💕 Anything else I can help with?", suggest: SUG('fallback')
     }));
 
     candidates.sort((a, b) => b.score - a.score);
@@ -4745,7 +4798,7 @@
       return {
         text: `Great question! ${name} will reply personally 💕`,
         action: data.instagram ? 'instagram' : null,
-        suggest: SUGGEST.fallback
+        suggest: SUG('fallback')
       };
     }
     const answer = candidates[0].make();
@@ -4871,9 +4924,9 @@
           <span class="cc-row__text"><b>${esc(b.service_name)}</b><small>${esc(whenText(b.start_at))}${b.staff_name ? ` · with ${esc(firstWord(b.staff_name))}` : ''}</small>
             <span class="bstat bstat--${dep ? 'deposit' : b.status}">${dep ? awaitingText() : b.status === 'pending' ? 'Pending' : 'Confirmed'}</span></span>
         </button>
-        <p class="cc-rule${late ? ' is-late' : ''}">${late
+        ${r.cancelUnset && !late ? '' : `<p class="cc-rule${late ? ' is-late' : ''}">${late
           ? `${I.shield}<span>Less than ${r.cancelWindow} h to go — moving or cancelling now counts as late${+b.deposit > 0 && b.deposit_status === 'paid' ? ` and may lose the ${depWord()}` : ''}.</span>`
-          : `${I.clock}<span>${r.cancelWindow ? `Free to cancel or move up to ${r.cancelWindow} h before.` : 'Free to cancel or move any time before your visit.'}</span>`}</p>
+          : `${I.clock}<span>${r.cancelWindow ? `Free to cancel or move up to ${r.cancelWindow} h before.` : 'Free to cancel or move any time before your visit.'}</span>`}</p>`}
         <div class="cc-acts">
           <button class="btn btn--soft btn--sm" data-mybk-move="${esc(b.token)}">Reschedule</button>
           <button class="btn btn--soft btn--sm cc-acts__cancel" data-mybk-cancel="${esc(b.token)}">Cancel</button>
@@ -4935,7 +4988,7 @@
     const box = $('#suggest');
     if (!box) return;
     const used = String(asked || '').trim().toLowerCase();
-    const items = (list || SUGGEST.start).filter(t => t.toLowerCase() !== used).slice(0, 4);
+    const items = (list || SUG('start')).filter(t => t.toLowerCase() !== used).slice(0, 4);
     box.innerHTML = items.map(t => `<button class="chip" data-ask="${esc(t)}">${esc(t)}</button>`).join('');
     box.scrollLeft = 0;
     springIn($$('.chip', box), { y: 12, stagger: 0.05, duration: 0.55, scale: 0.9 });
@@ -7845,6 +7898,7 @@
     applyMotion();
     applySettings();
     document.title = data.name;
+    try { localStorage.setItem('studio-app:title:' + SLUG, data.name); } catch (e) { /* private mode */ } // the tab title on the next open
     // paused by the platform: clients get a short-break page (the master still gets her dashboard)
     if (isBuiltin() && data.status === 'paused' && !OWNER_START) { showPaused(); return; }
 

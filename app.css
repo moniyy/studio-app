@@ -6498,8 +6498,8 @@ html.is-admin .app::after, html.is-admin .statusbar, html.is-admin .desk, html.i
 .splash__mono {
   display: grid;
   place-items: center;
-  width: 128px;
-  height: 128px;
+  width: 150px;
+  height: 150px;
   border-radius: 50%;
   background:
     radial-gradient(120% 120% at 30% 16%, rgba(236, 236, 244, .30), rgba(236, 236, 244, 0) 55%),
@@ -6514,16 +6514,16 @@ html.is-admin .app::after, html.is-admin .statusbar, html.is-admin .desk, html.i
 .splash__mono-txt {
   padding-left: .06em; /* balances the tracking */
   font-family: 'Fraunces', Georgia, 'Times New Roman', serif;
-  font-size: 50px;
-  font-weight: 300;
+  font-size: 62px;
+  font-weight: 400;
   font-variation-settings: 'opsz' 144;
-  letter-spacing: .06em;
+  letter-spacing: .05em;
   line-height: 1;
-  background: linear-gradient(160deg, #FFFFFF 0%, #EDEDF3 26%, #A8A8B5 50%, #F8F8FB 68%, #C2C2CC 100%);
+  background: linear-gradient(160deg, #FFFFFF 0%, #FFFFFF 30%, #DCDCE4 52%, #FFFFFF 70%, #EDEDF2 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  filter: drop-shadow(0 0 10px rgba(255, 255, 255, .28));
+  filter: drop-shadow(0 0 12px rgba(255, 255, 255, .34));
 }
 
 /* Look & feel → services without a photo as rows: text only, no grey square */
@@ -6537,3 +6537,8 @@ html.is-admin .app::after, html.is-admin .statusbar, html.is-admin .desk, html.i
 /* a text price ("$15 off", "On request"): kept on one line, the chips move below if needed */
 .sd-meta.sd-meta--text { flex-wrap: wrap; row-gap: 8px; }
 .sd-meta--text .sd-price, .sd-meta--text .sd-chip { white-space: nowrap; }
+
+/* while the studio loads: a neutral background — no default accent glow, no brand of ours */
+.splash:not(.splash--clean):not(.splash--photo) { background: var(--splash-bg); }
+/* a sheet's buttons keep their height when the form above is long (they scroll with it) */
+.ob > .btn { flex-shrink: 0; }

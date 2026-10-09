@@ -25,6 +25,16 @@
   </script>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Satinbook</title>
+  <script>
+    // a studio link: its own name in the tab from the first moment (known after the first visit), never "Satinbook"
+    (function () {
+      var m = (new URLSearchParams(location.search).get('m') || location.pathname.replace(/^.*\//, '')).toLowerCase();
+      if (!/^[a-z0-9][a-z0-9_-]{0,60}$/.test(m) || m === 'demo' || m === 'app.html' || /[?&]admin=1/.test(location.search)) return;
+      var t = '';
+      try { t = localStorage.getItem('studio-app:title:' + m) || ''; } catch (e) { /* private mode */ }
+      document.title = t;
+    })();
+  </script>
 
   <meta name="theme-color" content="#F7F5F2">
   <meta name="mobile-web-app-capable" content="yes">

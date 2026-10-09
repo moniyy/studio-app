@@ -38,7 +38,7 @@ function toStudio(m: any): Studio {
   return {
     id: m.id, slug: m.slug, name: m.name, style: m.style || 'soft', accent: m.accent, tz: m.timezone || 'America/New_York',
     kind: m.kind || 'solo', address: st.address || '', phone: st.phone || '', masterName: st.masterName || '',
-    cancelWindow: m.cancel_window_hours ?? 24, payments: st.payments || {}, reviewUrl: review, depositMode: st.depositMode === 'fee' ? 'fee' : 'deposit',
+    cancelWindow: m.cancel_window_hours ?? 24, payments: st.payments || {}, reviewUrl: review, depositMode: st.depositMode === 'fee' ? 'fee' : 'deposit', cancelUnset: !!st.cancelUnset,
     reviewLabel: /instagram/i.test(review) ? 'Leave a review on Instagram' : /google|g\.page/i.test(review) ? 'Leave a review on Google' : 'Leave a review'
   };
 }
