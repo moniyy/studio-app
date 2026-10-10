@@ -409,7 +409,8 @@
         staffId: String(g.staffId || ''), // a salon: whose work it is
         before: g.before || '',
         isNew: !!g.isNew,
-        popular: !!g.popular
+        popular: !!g.popular,
+        price: String(g.price || '').trim() // its own price ("$257"), shown instead of the service's
       };
     }).filter(Boolean);
     d.beforeAfter = d.beforeAfter && d.beforeAfter.before && d.beforeAfter.after ? d.beforeAfter : null;
@@ -1390,6 +1391,14 @@
   const LOOK_AR = [3 / 4, 2 / 3, 4 / 5, 3 / 4, 5 / 6, 2 / 3, 4 / 5, 1]; // width / height, cycled
   const lookById = id => data.gallery.find(l => l.id === id) || null;
   const lookSvc = l => (l && data.services.find(s => s.id === l.serviceId)) || null;
+  // a look's price: its own ("$257"), else — unless the studio turned it off (Looks → Show service price
+  // on looks) — the price of the service it books
+  const lookPrice = l => {
+    if (l && l.price) return String(l.price);
+    if (data.lookServicePrice === false) return '';
+    const s = lookSvc(l);
+    return s ? price(s.price) : '';
+  };
   const lookAR = l => LOOK_AR[Math.max(0, data.gallery.indexOf(l)) % LOOK_AR.length];
   const savedLooks = () => favs().filter(k => k.startsWith('look:')).map(k => lookById(k.slice(5))).filter(Boolean);
 
@@ -1484,14 +1493,14 @@
     const s = lookSvc(l);
     const st = ownerMode ? lookStats(l) : null;
     return `
-      <div class="look" role="button" tabindex="0" data-stagger data-look="${esc(l.id)}" aria-label="${esc(l.title)}${s ? ', ' + esc(price(s.price)) : ''}">
+      <div class="look" role="button" tabindex="0" data-stagger data-look="${esc(l.id)}" aria-label="${esc(l.title)}${lookPrice(l) ? ', ' + esc(lookPrice(l)) : ''}">
         <div class="look__media" style="aspect-ratio:${lookAR(l).toFixed(4)}">
           <img class="look__lqip" src="${esc(sized(safeUrl(l.photo), 40))}" alt="" aria-hidden="true">
           <img class="look__img" src="${esc(sized(safeUrl(l.photo), 500))}" alt="" loading="lazy" decoding="async">
           ${l.isNew || l.popular ? `<span class="look__badges">${l.isNew ? '<b class="lbadge lbadge--new">New</b>' : ''}${l.popular ? `<b class="lbadge lbadge--hot">${STYLE === 'soft' ? '🔥 ' : ''}Most booked</b>` : ''}</span>` : ''}
           ${favButton('look:' + l.id, 'fav--photo fav--sm')}
           ${st ? `<span class="look__stats num">👁 ${st.views} · 📅 ${st.bookings} bookings</span>` : ''}
-          <span class="look__plaque"><b>${esc(l.title)}</b>${s ? `<span class="num">&nbsp;· ${esc(price(s.price))}</span>` : ''}</span>
+          <span class="look__plaque"><b>${esc(l.title)}</b>${lookPrice(l) ? `<span class="num">&nbsp;· ${esc(lookPrice(l))}</span>` : ''}</span>
         </div>
       </div>`;
   }
@@ -3217,7 +3226,7 @@
      never numbers, reviews or offers from a template. Empty field = no block. */
   const OWN_KEYS = ['tagline', 'city', 'address', 'parking', 'phone', 'instagram', 'reviewUrl', 'heroPhoto', 'heroVideo', 'avatar',
     'policies', 'prep', 'aftercare', 'faq', 'payments', 'defaultAccent', 'splashStyle', 'splashEmoji', 'iconDir', 'firstName', 'masterName', 'icons', 'depositMode', 'monogram',
-    'splashMark', 'shortName', 'eyebrow', 'plainRows', 'askChips'];
+    'splashMark', 'shortName', 'eyebrow', 'plainRows', 'askChips', 'lookServicePrice'];
   const takesDeposits = p => Object.values(p || {}).some(v => String(v || '').trim());
   function ownSettings(base, st) {
     st = st || {};
@@ -3286,7 +3295,7 @@
       // her portfolio from the dashboard (Looks) replaces any gallery in settings
       if ((prof.looks || []).length) {
         out.gallery = prof.looks.map(l => ({
-          id: l.id, title: l.title, tag: l.tag || '', serviceId: l.service_id || '', photo: l.photo, staffId: l.staff_id || '',
+          id: l.id, title: l.title, tag: l.tag || '', serviceId: l.service_id || '', photo: l.photo, staffId: l.staff_id || '', price: l.price_text || '',
           before: l.before_photo || '', isNew: !!l.is_new, popular: !!l.popular
         }));
       }
@@ -5101,7 +5110,7 @@
           ${s ? `<p class="lv__meta">${esc(s.title)}${s.duration ? ` · ${I.clock}<span class="num">${esc(s.duration)}</span>` : ''}</p>` : ''}
         </div>
         <div class="lv__side">
-          ${s ? `<span class="lv__price num">${esc(price(s.price))}</span>` : ''}
+          ${lookPrice(l) ? `<span class="lv__price num">${esc(lookPrice(l))}</span>` : ''}
           ${favButton('look:' + l.id, 'fav--panel')}
         </div>
       </header>
@@ -5536,7 +5545,7 @@
   async function shareLook(l) {
     if (!l) return;
     const s = lookSvc(l);
-    const text = `${l.title}${s ? ` · ${s.title} ${price(s.price)}` : ''} — ${data.name}`;
+    const text = `${l.title}${l.price ? ` · ${l.price}` : s ? ` · ${s.title}${lookPrice(l) ? ' ' + lookPrice(l) : ''}` : ''} — ${data.name}`;
     haptic();
     if (navigator.share) {
       try { await navigator.share({ title: l.title, text, url: lookLink(l) }); } catch (e) { /* cancelled */ }

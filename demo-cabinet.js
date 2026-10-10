@@ -571,7 +571,7 @@
       saveLook(mid, l) {
         let r = l.id && DB.looks.find(x => x.id === l.id);
         if (!r) { r = { id: 'lk-' + uuid().slice(0, 8), sort: 0, is_new: true, popular: false, created_at: iso(Date.now()), before_photo: null, staff_id: null, tag: '' }; DB.looks.forEach(x => { x.sort++; }); DB.looks.push(r); }
-        ['title', 'tag', 'service_id', 'photo', 'before_photo', 'is_new', 'popular', 'staff_id'].forEach(k => { if (k in l) r[k] = l[k]; });
+        ['title', 'tag', 'service_id', 'photo', 'before_photo', 'is_new', 'popular', 'staff_id', 'price_text'].forEach(k => { if (k in l) r[k] = l[k]; });
         return reply(r);
       },
       deleteLook(id) { DB.looks = DB.looks.filter(x => x.id !== id); return reply(null); },

@@ -191,7 +191,9 @@ SDK грузятся параллельно с профилем). Кабинет
   «Deal: $15 off» + «Price: Paid at the studio»; категории в редакторе — только свои (+ «Other name…»);
   **Available only on…** — дни недели, когда услугу можно записать (ничего не выбрано = все рабочие дни; «Fridays only»
   у услуги, проверяется на сервере — `services.only_days`, `private.staff_slots`).
-- **Looks** — работы для галереи: фото, «до», название, тег, услуга для записи, метка New.
+- **Looks** — работы для галереи: фото, «до», название, тег, услуга для записи, метка New, необязательная **Price**
+  (своя цена фото, «$257», `looks.price_text`). Переключатель **Show service price on looks** (по умолчанию вкл.):
+  выкл. — у фото только своя цена или никакой (`settings.lookServicePrice = false`).
 - **Payments & deposits** — Cash App, Zelle, Venmo, PayPal.me, ссылка Square; сколько часов на оплату депозита;
   депозит для клиенток с 2+ неявками; **What the deposit is**: «goes toward the service» (по умолчанию) или
   «It’s a booking fee — not applied to the total» (`settings.depositMode = 'fee'`): везде «Booking fee $10»

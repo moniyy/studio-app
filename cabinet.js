@@ -865,7 +865,7 @@
     promo: () => loadProfile(true),
     loyalty: () => loadProfile(true),
     services: () => Promise.all([loadServices(true), loadProfile(true), loadTeam().catch(() => null)]),
-    looks: () => Promise.all([loadLooks(true), loadServices(true)]),
+    looks: () => Promise.all([loadLooks(true), loadServices(true), loadProfile(true)]),
     payments: () => Promise.all([loadProfile(true), loadSched(), loadServices(true)]),
     hours: () => (S.hrsDirty ? null : Promise.all([loadHrs(), loadTeam().catch(() => null)]))
   };
@@ -2568,6 +2568,10 @@
     return `
       ${backHTML('looks')}
       <header class="cab-h cab-h--row"><h1>Looks</h1><button class="btn btn--primary btn--sm" data-look-new>${icon('<path d="M12 5v14M5 12h14"/>')}Add</button></header>
+      <div class="list">
+        <div class="row hrs-switch"><span class="row__label">Show service price on looks<span class="row__sub">Off: a photo shows only its own price — or none</span></span>
+          <button type="button" class="switch" role="switch" aria-checked="${((S2.profile && S2.profile.settings) || {}).lookServicePrice !== false}" data-look-svcprice aria-label="Show service price on looks"></button></div>
+      </div>
       ${list.length ? `<p class="cab-muted">Clients pick a look and book it in two taps. Drag ≡ to reorder.</p>
       <div class="list sortable" data-sort="looks">${list.map(l => `
         <div class="row svc-row" data-id="${esc(l.id)}">
@@ -2575,7 +2579,7 @@
           <img class="svc-row__img svc-row__img--look" src="${esc(l.photo)}" alt="">
           <button class="svc-row__main" data-look-edit="${esc(l.id)}">
             <b>${esc(l.title)}${l.is_new ? ' <em class="lk-new">NEW</em>' : ''}</b>
-            <small>${esc([l.tag, (svcs.find(s => s.id === l.service_id) || {}).name].filter(Boolean).join(' · ') || 'No tag yet')}${l.before_photo ? ' · before/after' : ''}</small>
+            <small>${esc([l.tag, (svcs.find(s => s.id === l.service_id) || {}).name, l.price_text].filter(Boolean).join(' · ') || 'No tag yet')}${l.before_photo ? ' · before/after' : ''}</small>
           </button>
           <span class="row__chev">${K.I.chevR}</span>
         </div>`).join('')}</div>` : `<div class="cab-empty">${K.art('sparkles')}<b>No looks yet</b><span>Upload your best work — clients book by the look they love.</span></div>`}`;
@@ -2595,6 +2599,7 @@
             <label class="field"><span>Tag</span><input name="tag" maxlength="30" value="${esc(l.tag)}" placeholder="Hybrid" list="look-tags"></label>
             <div class="chips-wrap">${tags.map(t => `<button type="button" class="chip" data-tag-pick="${esc(t)}">${esc(t)}</button>`).join('')}</div>
             <label class="field"><span>Service to book</span><select class="cab-sel cab-sel--wide" name="service_id"><option value="">—</option>${(S2.services || []).filter(s => s.active).map(s => `<option value="${esc(s.id)}"${s.id === l.service_id ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
+            <label class="field"><span>Price <em>optional — shown on the photo instead of the service’s</em></span><input name="price_text" maxlength="24" value="${esc(l.price_text || '')}" placeholder="$120"></label>
             ${photoSlot('before_photo', l.before_photo, 'Before photo (optional)', 'looks')}
             <div class="row hrs-switch"><span class="row__label">Mark as New</span><button type="button" class="switch" role="switch" aria-checked="${!!l.is_new}" data-look-flag="is_new"></button></div>
             <div class="row hrs-switch"><span class="row__label">Most booked</span><button type="button" class="switch" role="switch" aria-checked="${!!l.popular}" data-look-flag="popular"></button></div>
@@ -2604,13 +2609,25 @@
         </div>`;
     }, { detent: 'large' });
   }
+  // Looks → Show service price on looks (on by default): off = only a look's own price
+  async function saveLookSvcPrice(el) {
+    if (S.readonly) return;
+    const on = el.getAttribute('aria-checked') !== 'true';
+    el.setAttribute('aria-checked', String(on));
+    K.haptic();
+    try {
+      S2.profile = await K.Backend.owner.saveProfile(S.studio.id, { settings: { lookServicePrice: on ? null : false } });
+      K.toast(on ? 'Looks show the service price' : 'Looks show only their own price', 'ok');
+      published();
+    } catch (e) { el.setAttribute('aria-checked', String(!on)); K.toast(err(e), 'x'); }
+  }
   async function saveLook(btn) {
     const f = K.$('#look-form', K.Sheet.el());
     const flag = k => K.$(`[data-look-flag="${k}"]`, K.Sheet.el()).getAttribute('aria-checked') === 'true';
     const look = {
       id: S2.edit.id || undefined, title: f.elements.title.value.trim(), tag: f.elements.tag.value.trim(),
       service_id: f.elements.service_id.value, photo: S2.edit.photo, before_photo: S2.edit.before_photo || '',
-      is_new: flag('is_new'), popular: flag('popular')
+      is_new: flag('is_new'), popular: flag('popular'), price_text: f.elements.price_text.value.trim()
     };
     if (!look.photo) { K.toast('Upload a photo first', 'x'); return; }
     if (!look.title) { K.toast('Give the look a name', 'x'); return; }
@@ -3057,7 +3074,7 @@
   }
 
   /* ---------- Read-only (the platform admin looking at a studio) ---------- */
-  const RO_BLOCK = ['[data-cl-del]', '[data-cl-del-yes]', '[data-crew-kind]', '[data-crew-new]', '[data-crew-save]', '[data-crew-off]', '[data-crew-on]', '[data-crew-move]', '[data-crew-cx]',
+  const RO_BLOCK = ['[data-look-svcprice]', '[data-cl-del]', '[data-cl-del-yes]', '[data-crew-kind]', '[data-crew-new]', '[data-crew-save]', '[data-crew-off]', '[data-crew-on]', '[data-crew-move]', '[data-crew-cx]',
     '[data-pf-save]', '[data-sty-save]', '[data-sty]', '[data-sty-acc]', '[data-sty-mark]', '[data-svc-new]', '[data-svc-save]', '[data-svc-del]',
     '[data-look-new]', '[data-look-save]', '[data-look-del]', '[data-tx-save]', '[data-faq-save]', '[data-faq-add]', '[data-pay-save]', '[data-dep-mode]',
     '[data-pr-save]', '[data-ly-save]', '[data-hrs-save]', '[data-hrs-toggle]', '[data-hrs-add]', '[data-hrs-del]', '[data-toff-add]',
@@ -3996,6 +4013,7 @@
       return;
     }
     if ((el = t.closest('[data-cl-save]'))) { saveNotes(el.dataset.clSave); return; }
+    if ((el = t.closest('[data-look-svcprice]'))) { saveLookSvcPrice(el); return; }
     if ((el = t.closest('[data-cl-del]'))) { askDeleteClient(el.dataset.clDel); return; }
     if ((el = t.closest('[data-cl-del-no]'))) { const box = K.$('#cl-del-box', K.Sheet.el()); if (box) box.innerHTML = ''; return; }
     if ((el = t.closest('[data-cl-del-yes]'))) { deleteClient(el.dataset.clDelYes, el); return; }
